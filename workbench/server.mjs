@@ -278,9 +278,27 @@ export function startWorkbenchServer(port = DEFAULT_PORT) {
 
 const isEntry = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 if (isEntry) {
-  const portArg = process.argv.find((a) => a.startsWith('--port='));
-  const port = portArg ? Number(portArg.slice('--port='.length)) : DEFAULT_PORT;
-  startWorkbenchServer(port).then(() => {
-    console.log(`[agy-session-guard] Offline Workbench v0.2 listening at http://127.0.0.1:${port}`);
-  });
+  if (process.argv.includes('--smoke')) {
+    startWorkbenchServer(0)
+      .then(async (srv) => {
+        const { port } = srv.address();
+        const res = await fetch(`http://127.0.0.1:${port}/`);
+        const html = await res.text();
+        srv.close();
+        if (res.status !== 200 || !html.includes('mountSessionGuard') || !html.includes('ag-sg-radar-bar')) {
+          throw new Error(`Unexpected smoke response: status=${res.status}`);
+        }
+        console.log(`[agy-session-guard] Workbench smoke OK (HTTP ${res.status}, ${Buffer.byteLength(html, 'utf8')} B)`);
+      })
+      .catch((err) => {
+        console.error('[agy-session-guard] Workbench smoke failed:', err?.message || err);
+        process.exitCode = 1;
+      });
+  } else {
+    const portArg = process.argv.find((a) => a.startsWith('--port='));
+    const port = portArg ? Number(portArg.slice('--port='.length)) : DEFAULT_PORT;
+    startWorkbenchServer(port).then(() => {
+      console.log(`[agy-session-guard] Offline Workbench v0.2 listening at http://127.0.0.1:${port}`);
+    });
+  }
 }

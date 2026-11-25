@@ -11,8 +11,8 @@
 [**简体中文**](./README.md) · [**English**](./README.en.md) · [**更新日志**](./CHANGELOG.md) · [**架构与共存契约**](./docs/ARCHITECTURE.md) · [**问题反馈**](https://github.com/tone-leh/agy-session-guard/issues)
 
 <p>
-  <img src="https://img.shields.io/badge/Version-0.2.0-0f172a?style=flat-square" alt="Version 0.2.0" />
-  <img src="https://img.shields.io/badge/Antigravity-2.34%20%7C%202.35+-3186ff?style=flat-square" alt="Antigravity 2.34 | 2.35+" />
+  <a href="https://github.com/tone-leh/agy-session-guard/releases"><img src="https://img.shields.io/github/v/release/tone-leh/agy-session-guard?style=flat-square&color=3186ff&label=Release" alt="Latest Release" /></a>
+  <img src="https://img.shields.io/badge/Antigravity-2.34%20%7C%202.35+-0f172a?style=flat-square" alt="Antigravity 2.34 | 2.35+" />
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-1e293b?style=flat-square" alt="Platform" />
   <img src="https://img.shields.io/badge/Zero--ASAR-0_Runtime_Deps-059669?style=flat-square" alt="Zero-ASAR & Zero Runtime Deps" />
   <img src="https://img.shields.io/badge/i18n-5_Languages-d97706?style=flat-square" alt="5 Languages" />
