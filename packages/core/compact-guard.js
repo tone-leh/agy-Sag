@@ -193,7 +193,7 @@
       return { ok: true, submitted: false };
     };
 
-    const handleExportMd = async () => {
+    const handleExportMd = async ({ onlyBookmarked = false } = {}) => {
       const strings = S();
       const turns = exporter.extractConversationTurns(doc);
       const cid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win);
@@ -201,7 +201,7 @@
       const built = exporter.buildRecapMarkdown({
         turns,
         bookmarks: bm,
-        onlyBookmarked: false,
+        onlyBookmarked,
         cascadeId: cid,
         usedPct: lastSnapshot?.usedPct ?? null,
         usedLabel: lastSnapshot ? ctxSrc.formatTokens(lastSnapshot.usedTokens) : '',
@@ -301,6 +301,66 @@
       r2.appendChild(seg2);
       popEl.appendChild(r2);
 
+      // Row 3: Modules (Turn Bookmarks & Session Radar)
+      const r3 = doc.createElement('div');
+      r3.className = 'ag-sg-pop-row';
+      const l3 = doc.createElement('span');
+      l3.className = 'ag-sg-pop-lbl';
+      l3.textContent = strings.cfgModules;
+      const seg3 = doc.createElement('div');
+      seg3.className = 'ag-sg-seg';
+      const modDefs = [
+        ['outlineBookmarks', strings.cfgModBookmarks],
+        ['sessionRadar', strings.cfgModRadar],
+      ];
+      for (const [mKey, mLabel] of modDefs) {
+        const b = doc.createElement('button');
+        b.type = 'button';
+        b.textContent = mLabel;
+        b.setAttribute('data-ag-sg-mod', mKey);
+        b.setAttribute('aria-pressed', String(Boolean(config.modules[mKey])));
+        b.addEventListener('click', (ev) => {
+          ev?.preventDefault?.();
+          ev?.stopPropagation?.();
+          updateConfig({ modules: { ...config.modules, [mKey]: !config.modules[mKey] } });
+        });
+        seg3.appendChild(b);
+      }
+      r3.appendChild(l3);
+      r3.appendChild(seg3);
+      popEl.appendChild(r3);
+
+      // Row 4: Blurred OS Notification mode (when Session Radar is active)
+      if (config.modules.sessionRadar) {
+        const r4 = doc.createElement('div');
+        r4.className = 'ag-sg-pop-row';
+        const l4 = doc.createElement('span');
+        l4.className = 'ag-sg-pop-lbl';
+        l4.textContent = strings.cfgRadarNotify;
+        const seg4 = doc.createElement('div');
+        seg4.className = 'ag-sg-seg';
+        for (const [nKey, nLabel] of [
+          ['off', strings.cfgNotifyOff],
+          ['awaiting', strings.cfgNotifyAwaiting],
+          ['all', strings.cfgNotifyAll],
+        ]) {
+          const b = doc.createElement('button');
+          b.type = 'button';
+          b.textContent = nLabel;
+          b.setAttribute('data-ag-sg-notify', nKey);
+          b.setAttribute('aria-pressed', String(config.radarNotifyMode === nKey));
+          b.addEventListener('click', (ev) => {
+            ev?.preventDefault?.();
+            ev?.stopPropagation?.();
+            updateConfig({ radarNotifyMode: nKey });
+          });
+          seg4.appendChild(b);
+        }
+        r4.appendChild(l4);
+        r4.appendChild(seg4);
+        popEl.appendChild(r4);
+      }
+
       const hint = doc.createElement('p');
       hint.className = 'ag-sg-pop-hint';
       hint.textContent = strings.cfgHint;
@@ -344,7 +404,9 @@
         render();
       });
       exportBtn = mkBtn('ag-sg-btn', '', 'export-md', () => {
-        void handleExportMd();
+        const cid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win);
+        const bmCount = exporter.loadBookmarks(storage, cid).size;
+        void handleExportMd({ onlyBookmarked: bmCount > 0 });
       });
       cancelCdBtn = mkBtn('ag-sg-btn', '', 'cancel-countdown', () => {
         stopCountdown();
@@ -497,7 +559,12 @@
       fillBtn.textContent = strings.btnFillOnly;
       fillBtn.hidden = config.compactTriggerMode === 'fill-only';
       fillBtn.disabled = Boolean(snap?.streaming);
-      exportBtn.textContent = strings.btnExportMd;
+      const curCid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win);
+      const bmCount = exporter.loadBookmarks(storage, curCid).size;
+      exportBtn.textContent =
+        bmCount > 0 && strings.btnExportBmMd
+          ? i18n.formatTemplate(strings.btnExportBmMd, { n: bmCount })
+          : strings.btnExportMd;
       exportBtn.hidden = !config.modules.precompactExport;
       cancelCdBtn.textContent = strings.btnCancelCountdown;
       cancelCdBtn.hidden = !isCounting;

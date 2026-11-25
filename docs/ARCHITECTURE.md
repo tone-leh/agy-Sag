@@ -18,9 +18,10 @@ packages/core/
 ├── coexist.js            # Config validation, owner auto-yield, hibernation helpers
 ├── context-source.js     # Telemetry adapter (__agPrismMetricsBridge -> agPulseHost -> Pulse DOM -> DOM fallback)
 ├── precompact-export.js  # Structured Markdown exporter + secret redaction + per-session bookmarks
+├── outline-bookmarks.js  # Module D: per-turn & Prism outline ☆/★ bookmarks + bookmarked-only filter
 ├── styles.js             # Theme-adaptive zero-:has() CSS
 ├── compact-guard.js      # Module G: threshold banner, countdown, quick settings popover
-├── session-radar.js      # Module B (v0.2 skeleton): attention transition detector (default off)
+├── session-radar.js      # Module B: sidebar All/Running/Awaiting filter pill + opt-in blurred OS alerts
 └── index.js              # mountSessionGuard(opts) unified registry & lossless destroy()
 ```
 

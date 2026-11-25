@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Node 22 · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run test suite
+        run: npm test
+      - name: Smoke test offline workbench
+        run: >
+          node -e 'import("./workbench/server.mjs").then(async ({ startWorkbenchServer }) => {
+            const srv = await startWorkbenchServer(0);
+            const { port } = srv.address();
+            const res = await fetch(`http://127.0.0.1:${port}/`);
+            const html = await res.text();
+            srv.close();
+            if (res.status !== 200 || !html.includes("mountSessionGuard")) process.exit(1);
+          })'

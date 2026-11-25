@@ -18,10 +18,12 @@
     countdownSeconds: 5, // 3..15
     rearmDeltaPct: 10, // re-notify after dismiss if usage climbs another +10%
     resetDropPct: 10, // auto-reset dismiss state if usage drops by >=10% below threshold
+    radarNotifyMode: 'off', // 'off' | 'awaiting' | 'all' (opt-in blurred OS notifications)
     modules: Object.freeze({
       compactGuard: true,
       precompactExport: true,
-      sessionRadar: false, // reserved for v0.2
+      outlineBookmarks: true,
+      sessionRadar: false, // opt-in sidebar attention filter + alerts
     }),
   });
 
@@ -47,14 +49,18 @@
     const dropRaw = Number(src.resetDropPct);
     const resetDropPct = Number.isFinite(dropRaw) ? Math.max(5, Math.min(30, Math.round(dropRaw))) : fallback.resetDropPct;
 
+    const allowedNotify = ['off', 'awaiting', 'all'];
+    const radarNotifyMode = allowedNotify.includes(src.radarNotifyMode) ? src.radarNotifyMode : fallback.radarNotifyMode;
+
     const mSrc = src.modules && typeof src.modules === 'object' ? src.modules : {};
     const modules = {
       compactGuard: mSrc.compactGuard !== undefined ? Boolean(mSrc.compactGuard) : fallback.modules.compactGuard,
       precompactExport: mSrc.precompactExport !== undefined ? Boolean(mSrc.precompactExport) : fallback.modules.precompactExport,
+      outlineBookmarks: mSrc.outlineBookmarks !== undefined ? Boolean(mSrc.outlineBookmarks) : fallback.modules.outlineBookmarks,
       sessionRadar: mSrc.sessionRadar !== undefined ? Boolean(mSrc.sessionRadar) : fallback.modules.sessionRadar,
     };
 
-    return { compactThreshold: threshold, compactTriggerMode: mode, countdownSeconds, rearmDeltaPct, resetDropPct, modules };
+    return { compactThreshold: threshold, compactTriggerMode: mode, countdownSeconds, rearmDeltaPct, resetDropPct, radarNotifyMode, modules };
   }
 
   function shouldYieldToHostIntegrator(win, source = 'standalone') {

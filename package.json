@@ -1,6 +1,6 @@
 {
   "name": "agy-session-guard",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Antigravity Session Guard (领航哨) — Configurable context compaction threshold guard, pre-compact Markdown export, and modular session copilot for Antigravity. Zero runtime dependencies, Zero-ASAR CDP, MIT licensed.",
   "license": "MIT",
   "type": "module",

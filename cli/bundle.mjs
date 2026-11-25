@@ -13,6 +13,7 @@ export const CORE_FILES = [
   'context-source.js',
   'precompact-export.js',
   'styles.js',
+  'outline-bookmarks.js',
   'compact-guard.js',
   'session-radar.js',
   'index.js',
@@ -22,7 +23,7 @@ export const REMOVE_EXPRESSION = `(() => {
   try { window.__agSessionGuard?.destroy?.(); } catch {}
   try { document.getElementById('ag-sg-core-css')?.remove(); } catch {}
   try { document.querySelectorAll('[data-ag-sg-owned="1"]').forEach((n) => n.remove()); } catch {}
-  for (const k of ['__agSessionGuard', '__agSgCore', '__agSgI18n', '__agSgCoexist', '__agSgContextSource', '__agSgPrecompactExport', '__agSgStyles', '__agSgCompactGuard', '__agSgSessionRadar']) {
+  for (const k of ['__agSessionGuard', '__agSgCore', '__agSgI18n', '__agSgCoexist', '__agSgContextSource', '__agSgPrecompactExport', '__agSgOutlineBookmarks', '__agSgStyles', '__agSgCompactGuard', '__agSgSessionRadar']) {
     try { delete window[k]; } catch {}
     try { delete globalThis[k]; } catch {}
   }

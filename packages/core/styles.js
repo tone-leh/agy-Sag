@@ -171,6 +171,76 @@
   line-height:1.45;
   color:var(--muted-foreground,#94a3b8);
 }
+.ag-sg-bm-star{
+  appearance:none;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin-left:8px;
+  padding:1px 5px;
+  border-radius:6px;
+  border:1px solid transparent;
+  background:transparent;
+  color:var(--muted-foreground,#94a3b8);
+  font-size:12px;
+  line-height:1.2;
+  cursor:pointer;
+  opacity:.72;
+  transition:opacity 120ms ease,color 120ms ease,background 120ms ease;
+}
+.ag-sg-bm-star:hover,.ag-sg-bm-star[data-starred="1"]{
+  opacity:1;
+  color:var(--warning,#f59e0b);
+  background:color-mix(in srgb,var(--warning,#f59e0b) 12%,transparent);
+}
+.ag-sg-outline-bm-filter{
+  margin-left:auto;
+  font-size:10.5px;
+  padding:2px 6px;
+}
+.ag-sg-outline-bm-filter[aria-pressed="true"]{
+  border-color:color-mix(in srgb,var(--warning,#f59e0b) 55%,transparent);
+  color:var(--warning,#f59e0b);
+}
+.ag-sg-outline-star{
+  margin-left:auto;
+  padding:0 4px;
+  color:var(--muted-foreground,#94a3b8);
+  cursor:pointer;
+}
+.ag-sg-outline-star[data-starred="1"]{color:var(--warning,#f59e0b);}
+.ag-sg-radar-bar{
+  display:flex;
+  align-items:center;
+  gap:4px;
+  padding:6px 8px;
+  margin:0 0 6px 0;
+  border-bottom:1px solid var(--border,rgba(148,163,184,.2));
+}
+.ag-sg-radar-pill{
+  appearance:none;
+  flex:1 1 auto;
+  border:1px solid var(--border,rgba(148,163,184,.22));
+  background:transparent;
+  color:var(--muted-foreground,#94a3b8);
+  border-radius:999px;
+  padding:3px 7px;
+  font:500 11px/1.25 Inter,system-ui,-apple-system,sans-serif;
+  font-variant-numeric:tabular-nums;
+  cursor:pointer;
+  white-space:nowrap;
+  transition:background 130ms ease,border-color 130ms ease,color 130ms ease;
+}
+.ag-sg-radar-pill[aria-pressed="true"]{
+  background:color-mix(in srgb,var(--primary,#3186ff) 16%,transparent);
+  border-color:color-mix(in srgb,var(--primary,#3186ff) 52%,transparent);
+  color:var(--foreground,#eef1f7);
+  font-weight:600;
+}
+.ag-sg-radar-pill[data-has-alert="1"]{
+  border-color:color-mix(in srgb,var(--warning,#f59e0b) 58%,transparent);
+  color:var(--warning,#f59e0b);
+}
 `.trim();
 
   return { STYLE_ID, CORE_CSS };
