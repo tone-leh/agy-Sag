@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
- * Antigravity Session Guard — Offline Interactive Preview Workbench (v0.3)
+ * Antigravity Session Guard — Offline Interactive Preview Workbench
  *
  * Previews all modules offline without touching any live Antigravity instance:
- *   - Module G: Compact Guard (10% -> 115% slider, 102% overflow alert, 5s countdown, draft & streaming guards, ↓ .md download)
- *   - Module D: Turn Bookmarks + Native Floating ★ N Jump Drawer (star turns -> jump with pulse -> Copy / Download ★ .md)
- *   - Module B: Session Radar (sidebar All/Running/Awaiting filter pill + simulated blurred-window notification)
+ *   - Module G: Compact Guard + Smart /compact <focus> Presets + Post-Compact Recovery Strip + ↓ .md Download
+ *   - Module D: Turn Bookmarks + Native Floating ★ N Jump Drawer + Cross-Session Bookmark Vault (Ctrl+Shift+B)
+ *   - Module B: Session Radar (sidebar All/Running/Awaiting filter pill + blurred-window OS notifications)
+ *   - Watchdog: Context Burn-Rate Estimator (turns remaining & token spike) + Streaming Stall Detector
  */
 import http from 'node:http';
 import path from 'node:path';
@@ -24,7 +25,7 @@ function buildHtmlPage() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Antigravity Session Guard · Offline Workbench v0.3</title>
+  <title>Antigravity Session Guard · Offline Workbench</title>
   <style>
     :root{
       --background:#0b0d13; --card:#131722; --foreground:#eef1f7; --muted-foreground:#94a3b8;
@@ -47,20 +48,21 @@ function buildHtmlPage() {
       --border:rgba(242,237,228,.16); --warning:#f59e0b; --error:#f87171; --success:#34d399;
     }
     *{box-sizing:border-box}
-    body{margin:0;background:var(--background);color:var(--foreground);font:13px/1.55 Inter,system-ui,-apple-system,sans-serif;display:grid;grid-template-columns:250px 270px 1fr;min-height:100vh;}
+    body{margin:0;background:var(--background);color:var(--foreground);font:13px/1.55 Inter,system-ui,-apple-system,sans-serif;display:grid;grid-template-columns:250px 286px 1fr;min-height:100vh;}
     .sidebar-sim{border-right:1px solid var(--border);padding:12px;background:color-mix(in srgb,var(--card) 94%,var(--background));display:flex;flex-direction:column;gap:8px;}
     .conv-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 9px;border-radius:8px;border:1px solid var(--border);background:var(--card);font-size:12px;cursor:pointer;}
     .conv-row[hidden]{display:none!important;}
     .badge{font-size:10px;padding:1px 6px;border-radius:999px;border:1px solid var(--border);color:var(--muted-foreground);}
     .badge.run{color:var(--primary);border-color:color-mix(in srgb,var(--primary) 50%,transparent);}
     .badge.await{color:var(--warning);border-color:color-mix(in srgb,var(--warning) 55%,transparent);}
-    aside.controls{border-right:1px solid var(--border);padding:16px;background:var(--card);display:flex;flex-direction:column;gap:12px;}
+    aside.controls{border-right:1px solid var(--border);padding:16px;background:var(--card);display:flex;flex-direction:column;gap:11px;}
     main{padding:20px 24px;display:flex;flex-direction:column;max-width:860px;width:100%;margin:0 auto;gap:14px;}
     h1{font-size:15px;margin:0}
-    h2{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted-foreground);margin:6px 0 4px}
+    h2{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted-foreground);margin:4px 0 2px}
     label{display:flex;flex-direction:column;gap:4px;font-size:12px;}
     input[type="range"]{width:100%}
     select,button.ctl{padding:6px 9px;border-radius:8px;border:1px solid var(--border);background:var(--secondary);color:var(--foreground);font:inherit;cursor:pointer;}
+    .hud-box{padding:8px 10px;border-radius:9px;border:1px solid var(--border);background:var(--background);font-size:11.5px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;}
     .chat{flex:1;display:flex;flex-direction:column;gap:12px;border:1px solid var(--border);border-radius:14px;padding:16px;background:var(--card);}
     .bubble-u{align-self:flex-end;display:flex;align-items:center;gap:6px;background:color-mix(in srgb,var(--primary) 16%,transparent);border:1px solid color-mix(in srgb,var(--primary) 34%,transparent);padding:10px 13px;border-radius:12px;max-width:84%;}
     .bubble-a{align-self:flex-start;background:var(--secondary);border:1px solid var(--border);padding:10px 13px;border-radius:12px;max-width:88%;}
@@ -68,7 +70,7 @@ function buildHtmlPage() {
     [data-testid="agent-input-box"]{border:1px solid var(--border);border-radius:14px;padding:10px 12px;background:var(--card);display:flex;flex-direction:column;gap:8px;}
     textarea{width:100%;min-height:60px;background:transparent;border:0;outline:none;color:var(--foreground);font:inherit;resize:vertical;}
     .composer-foot{display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:var(--muted-foreground);}
-    pre.md-out{margin:0;padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--background);color:var(--foreground);font:11px/1.45 ui-monospace,SFMono-Regular,monospace;max-height:220px;overflow:auto;white-space:pre-wrap;}
+    pre.md-out{margin:0;padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--background);color:var(--foreground);font:11px/1.45 ui-monospace,SFMono-Regular,monospace;max-height:210px;overflow:auto;white-space:pre-wrap;}
   </style>
 </head>
 <body>
@@ -79,7 +81,7 @@ function buildHtmlPage() {
         <span data-testid="conversation-title">发布 PR 审批确认</span>
         <span class="badge await">待确认</span>
       </div>
-      <div class="conv-row" data-testid="conversation-row-sidebar" data-cascade-id="s-2" data-status="running" id="sim-row-running">
+      <div class="conv-row" data-testid="conversation-row-sidebar" data-cascade-id="11111111-2222-4333-8444-555555555555" data-status="running" id="sim-row-running">
         <span data-testid="conversation-title">重构遥测聚合引擎</span>
         <span class="badge run">运行中</span>
       </div>
@@ -93,16 +95,22 @@ function buildHtmlPage() {
       </div>
     </div>
     <button class="ctl" id="btn-sim-transition">模拟「运行中 → 待确认」跃迁（触发失焦通知）</button>
+    <button class="ctl" id="btn-open-vault">打开跨会话书签档案库 (Ctrl+Shift+B)</button>
   </section>
 
   <aside class="controls">
     <div>
       <h1>Antigravity Session Guard</h1>
-      <div style="font-size:11.5px;color:var(--muted-foreground)">v0.3 离线交互工作台 · 零碰实机</div>
+      <div style="font-size:11.5px;color:var(--muted-foreground)">全功能离线交互工作台 · 零碰实机</div>
     </div>
     <label>上下文占比：<strong id="pct-val">82%</strong> (可拖至 102%+)
       <input id="pct-slider" type="range" min="10" max="115" value="82" />
     </label>
+    <div class="hud-box" id="burn-hud">燃尽监测：就绪（点下方按钮模拟增量或卡死）</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <button class="ctl" id="btn-sim-step">模拟一轮 +9%</button>
+      <button class="ctl" id="btn-sim-stall">模拟 3 分钟卡死</button>
+    </div>
     <label>主题预览（四套皮肤 CSS 变量）
       <select id="theme-sel">
         <option value="obsidian">Obsidian Dark</option>
@@ -127,20 +135,20 @@ function buildHtmlPage() {
       <input id="radar-chk" type="checkbox" checked /> 开启左侧「侧栏聚光 (B)」
     </label>
     <div style="display:flex;gap:6px;flex-wrap:wrap">
-      <button class="ctl" id="btn-compact-sim">模拟压缩回落至 18%</button>
+      <button class="ctl" id="btn-compact-sim">模拟压缩完成 (回落 18% 触发续接卡)</button>
       <button class="ctl" id="btn-open-cfg">打开 ⚙ 设置浮窗</button>
       <button class="ctl" id="btn-remount">卸载重挂 (0 残留)</button>
     </div>
     <h2>实时事件 / 脱敏导出预览</h2>
-    <pre class="md-out" id="log-out">就绪！可点右上角 ☆ 标星轮次，再点「仅导出 ★」或拖滑块到 102%。</pre>
+    <pre class="md-out" id="log-out">就绪！试试：点 ⚙ 切换压缩焦点 → 点确认压缩 → 点「模拟压缩完成」触发无损续接卡；或按 Ctrl+Shift+B 打开跨会话档案库。</pre>
   </aside>
 
   <main>
     <div class="chat" data-testid="conversation-view" data-cascade-id="11111111-2222-4333-8444-555555555555">
       <div class="bubble-u" data-testid="user-message-bubble"><span>帮我排查为什么上下文经常到 102% 还没触发压缩，注意凭据 sk-testSecretKey1234567890 不能外泄。</span></div>
-      <div class="bubble-a" data-testid="agent-response">宿主协议未暴露压缩阈值字段，且 usedFraction 不封顶。建议在自定义阈值时浮条提前确认并一键 /compact。</div>
-      <div class="bubble-u" data-testid="user-message-bubble"><span>请把标星的关键架构结论先导出脱敏 Markdown，再安心执行压缩。</span></div>
-      <div class="bubble-a" data-testid="agent-response">点击每轮提问右侧 ☆ 即可按会话持久化书签，顶部会浮现原生「★ N」快捷跳转抽屉，压缩条也提供一键复制与 ↓ .md 本地下载。</div>
+      <div class="bubble-a" data-testid="agent-response">宿主协议未暴露压缩阈值字段，且 usedFraction 不封顶。建议在自定义阈值时浮条提前确认，并附带焦点指令一键 /compact。</div>
+      <div class="bubble-u" data-testid="user-message-bubble"><span>请把标星的关键架构结论先导出脱敏 Markdown，压缩完成后给我无损续接锚点。</span></div>
+      <div class="bubble-a" data-testid="agent-response">点击每轮提问右侧 ☆ 即可按会话持久化书签，压缩前静默留存锚点，压缩完成后自动弹出「填入续接提示」绿条。</div>
       <div class="bubble-u" data-testid="user-message-bubble"><span>如果重启或新开了 Antigravity 窗口，怎么做到无感自动重挂？</span></div>
       <div class="bubble-a" data-testid="agent-response">执行 <code>npm run watch</code> 即可启动零依赖 Watch Daemon：自适应退避探测 CDP 端口，窗口新建或重载后自动挂载，绝不触碰 app.asar。</div>
     </div>
@@ -164,12 +172,29 @@ ${coreScript}
     const slider = document.getElementById('pct-slider');
     const pctVal = document.getElementById('pct-val');
     const ctxStatus = document.getElementById('ctx-status');
+    const burnHud = document.getElementById('burn-hud');
     const streamChk = document.getElementById('stream-chk');
     const radarChk = document.getElementById('radar-chk');
     const stopBtn = document.getElementById('stop-btn');
     const logOut = document.getElementById('log-out');
     const composer = document.getElementById('composer');
     let compactedCount = 0;
+    let clockOffsetMs = 0;
+
+    // Seed one historical conversation in localStorage so Cross-Session Vault has rich sample data out of the box
+    (function seedDemoVault() {
+      const demoCid = '99999999-8888-4777-8666-555555555555';
+      if (window.__agSgBookmarkVault && !window.__agSgBookmarkVault.loadSessionMeta(localStorage, demoCid)) {
+        window.__agSgPrecompactExport.saveBookmarks(localStorage, demoCid, [2]);
+        window.__agSgBookmarkVault.syncSessionMeta({
+          storage: localStorage,
+          cascadeId: demoCid,
+          bookmarks: [2],
+          title: 'v2.35 兼容性核验与无损迁移',
+          turns: [{ turnNum: 2, user: '确认 Channel 1 字节预算上限与共存礼让协议', assistant: '严格保持 0 :has() 与 __agSessionGuardOwner 自动礼让契约。' }],
+        });
+      }
+    })();
 
     function getSimSnap() {
       const pct = Number(slider.value);
@@ -187,28 +212,48 @@ ${coreScript}
       };
     }
 
+    function updateBurnHud() {
+      const wd = guard.getDebugState().compactGuard.watchdog;
+      if (!wd) return;
+      if (wd.stalled) {
+        burnHud.textContent = '⚠ 疑似卡死：已停滞 ' + wd.stalledForSec + 's 无新输出';
+      } else if (wd.avgDeltaPct > 0) {
+        const eta = wd.estimatedTurnsLeft > 0 ? ' · 约剩 ' + wd.estimatedTurnsLeft + ' 轮达阈值' : ' · 已达阈值';
+        const spike = wd.spikeDetected ? ' · 突增 +' + wd.lastDeltaPct + '%' : '';
+        burnHud.textContent = '燃速均增 +' + wd.avgDeltaPct + '%/轮' + eta + spike;
+      } else {
+        burnHud.textContent = '燃尽监测：等待多轮增量样本（点击“模拟一轮 +9%”）';
+      }
+    }
+
     function mountGuard() {
       return window.__agSgCore.mountSessionGuard({
         win: window,
         doc: document,
         autoPoll: false,
         autoObserve: false,
+        now: () => Date.now() + clockOffsetMs,
         config: {
           compactThreshold: 80,
           compactTriggerMode: 'confirm',
+          compactFocusPreset: 'code-errors',
+          stallThresholdSeconds: 180,
           radarNotifyMode: 'all',
-          modules: { compactGuard: true, precompactExport: true, outlineBookmarks: true, sessionRadar: radarChk.checked },
+          modules: { compactGuard: true, precompactExport: true, outlineBookmarks: true, sessionRadar: radarChk.checked, sessionWatchdog: true },
         },
         getContextSnapshot: () => getSimSnap(),
-        onSubmitCompact: ({ command }) => {
-          logOut.textContent = '[SUBMIT] ' + command + ' at ' + slider.value + '%';
+        onSubmitCompact: ({ command, preset }) => {
+          logOut.textContent = '[SUBMIT /compact] preset=' + preset + ' at ' + slider.value + '%\\n' + command;
           composer.value = '';
         },
         onExportMarkdown: ({ markdown, filename, downloaded }) => {
           logOut.textContent = (downloaded && filename ? '[DOWNLOAD .MD] ' + filename + '\\n\\n' : '') + markdown;
         },
-        onDownloadMarkdown: ({ filename, count }) => {
-          console.log('[workbench] downloaded', filename, count);
+        onRecoveryFill: (snap) => {
+          logOut.textContent = '[POST-COMPACT RECOVERY FILLED]\\n' + snap.prompt;
+        },
+        onStallDetected: (ev) => {
+          logOut.textContent = '[STALL WATCHDOG] Session ' + ev.cascadeId.slice(0, 8) + ' stalled for ' + ev.stalledForSec + 's';
         },
         onRadarNotify: (ev) => {
           logOut.textContent = '[BLURRED OS ALERT] ' + ev.notifTitle + '\\n→ ' + ev.notifBody;
@@ -217,32 +262,50 @@ ${coreScript}
     }
 
     let guard = mountGuard();
-    guard.evaluateNow();
+    guard.evaluateNow().then(updateBurnHud);
 
-    slider.addEventListener('input', () => guard.evaluateNow());
+    slider.addEventListener('input', () => guard.evaluateNow().then(updateBurnHud));
     streamChk.addEventListener('change', () => {
       stopBtn.hidden = !streamChk.checked;
-      guard.evaluateNow();
+      guard.evaluateNow().then(updateBurnHud);
     });
     radarChk.addEventListener('change', () => {
       const cur = guard.getConfig();
       guard.updateConfig({ modules: { ...cur.modules, sessionRadar: radarChk.checked } });
-      guard.evaluateNow();
+      guard.evaluateNow().then(updateBurnHud);
     });
     document.getElementById('theme-sel').addEventListener('change', (e) => {
       document.documentElement.setAttribute('data-theme', e.target.value);
     });
     document.getElementById('lang-sel').addEventListener('change', (e) => {
       document.documentElement.setAttribute('data-ag-cs-lang', e.target.value);
-      guard.evaluateNow();
+      guard.evaluateNow().then(updateBurnHud);
+    });
+    document.getElementById('btn-sim-step').addEventListener('click', () => {
+      const next = Math.min(115, Number(slider.value) + 9);
+      slider.value = String(next);
+      guard.evaluateNow().then(updateBurnHud);
+    });
+    document.getElementById('btn-sim-stall').addEventListener('click', async () => {
+      streamChk.checked = true;
+      stopBtn.hidden = false;
+      slider.value = '55';
+      await guard.evaluateNow();
+      clockOffsetMs += 195_000;
+      await guard.evaluateNow();
+      updateBurnHud();
     });
     document.getElementById('btn-compact-sim').addEventListener('click', () => {
+      guard.compactGuard.captureRecoverySnapshot();
       compactedCount += 1;
+      streamChk.checked = false;
+      stopBtn.hidden = true;
       slider.value = '18';
-      guard.evaluateNow();
-      logOut.textContent = '[COMPACTED #' + compactedCount + '] Context reset to 18%. Dismiss state cleared.';
+      guard.evaluateNow().then(updateBurnHud);
+      logOut.textContent = '[COMPACTED #' + compactedCount + '] Context reset to 18%. Post-Compact Recovery strip ready!';
     });
     document.getElementById('btn-open-cfg').addEventListener('click', () => guard.openSettingsPopover());
+    document.getElementById('btn-open-vault').addEventListener('click', () => guard.openBookmarkVault());
     document.getElementById('btn-sim-transition').addEventListener('click', () => {
       const row = document.getElementById('sim-row-running');
       const next = row.getAttribute('data-status') === 'running' ? 'awaiting_decision' : 'running';
@@ -258,7 +321,7 @@ ${coreScript}
       guard.destroy();
       const leftover = document.querySelectorAll('[data-ag-sg-owned="1"]').length;
       guard = mountGuard();
-      guard.evaluateNow();
+      guard.evaluateNow().then(updateBurnHud);
       logOut.textContent = '[TEARDOWN TEST] Leftover owned nodes after destroy(): ' + leftover + ' -> Re-mounted cleanly.';
     });
   </script>
@@ -290,7 +353,14 @@ if (isEntry) {
         const res = await fetch(`http://127.0.0.1:${port}/`);
         const html = await res.text();
         srv.close();
-        if (res.status !== 200 || !html.includes('mountSessionGuard') || !html.includes('ag-sg-radar-bar') || !html.includes('ag-sg-bm-dock')) {
+        if (
+          res.status !== 200 ||
+          !html.includes('mountSessionGuard') ||
+          !html.includes('ag-sg-radar-bar') ||
+          !html.includes('ag-sg-bm-dock') ||
+          !html.includes('ag-sg-recovery-bar') ||
+          !html.includes('ag-sg-vault-modal')
+        ) {
           throw new Error(`Unexpected smoke response: status=${res.status}`);
         }
         console.log(`[agy-session-guard] Workbench smoke OK (HTTP ${res.status}, ${Buffer.byteLength(html, 'utf8')} B)`);
@@ -303,7 +373,7 @@ if (isEntry) {
     const portArg = process.argv.find((a) => a.startsWith('--port='));
     const port = portArg ? Number(portArg.slice('--port='.length)) : DEFAULT_PORT;
     startWorkbenchServer(port).then(() => {
-      console.log(`[agy-session-guard] Offline Workbench v0.3 listening at http://127.0.0.1:${port}`);
+      console.log(`[agy-session-guard] Offline Workbench listening at http://127.0.0.1:${port}`);
     });
   }
 }

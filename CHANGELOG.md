@@ -2,6 +2,14 @@
 
 All notable changes to **Antigravity Session Guard (领航哨)** are documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Smart `/compact <focus>` Presets (`packages/core/compact-guard.js`, `packages/core/coexist.js`)**: Switchable compaction focus presets in the `⚙` quick settings popover (`Default`, `Code & Errors`, `★ Bookmarks`, and `Custom` focus instructions) with automatic secret redaction and banner focus badge.
+- **Post-Compact Lossless Recovery Card (`packages/core/recovery-handoff.js`)**: Silently captures redacted starred-turn anchors before `/compact` triggers, then surfaces an emerald 1-line post-compaction strip (`Insert Recovery Prompt` with strict zero-draft-overwrite guard, `Copy Anchors`, `Dismiss`).
+- **Cross-Session Bookmark & Recap Vault (`packages/core/bookmark-vault.js`)**: Searchable cross-conversation bookmark vault (`Ctrl/Cmd + Shift + B`, jump drawer button, or `⚙` popover) with redacted turn + reply snippets, per-item/per-session cleanup, and combined Markdown copy / `.md` download.
+- **Turn Stall Watchdog & Context Burn-Rate Estimator (`packages/core/session-watchdog.js`)**: Tracks rolling per-turn burn rate (`estimatedTurnsLeft`), flags `>= 18%` single-turn spikes, and detects silent streaming stalls (`off / 2m / 3m / 5m`) with banner alerts and blurred-only OS desktop notifications via Session Radar.
+
 ## [0.3.0] - 2026-11-25
 
 ### Added

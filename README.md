@@ -60,15 +60,18 @@
 </p>
 
 - **阈值你说了算**：通过浮条右上角的 `⚙` 快捷浮窗随时切换 `关闭 / 70% / 75% / 80% / 85% / 90%`（API 支持任意 `50%–98%` 整数），无需翻找宿主设置页。
+- **智能压缩焦点预设（`/compact <focus>`）**：不再只能发裸 `/compact`；可在 `⚙` 浮窗里切换 **默认 / 代码与报错 / ★ 书签决策 / 自定义提示**，自动拼接脱敏后的精准保留指令并在浮条上高亮展示当前焦点标签。
 - **三种触发姿势**：
   - **浮条确认（默认）**：超过阈值时弹出克制的玻璃态浮条，点「确认压缩 `/compact`」或「仅填入」由你拍板；飙到 `>= 100%` 时切换猩红超限高亮。
-  - **仅填入（最保守）**：只把 `/compact` 放进输入框，绝不替你按回车。
+  - **仅填入（最保守）**：只把 `/compact` 指令放进输入框，绝不替你按回车。
   - **空闲 5s 倒计时（可选进阶）**：只有当 **超过阈值 + 本轮非生成中 + 输入框完全为空 + 窗口处于激活态** 四个条件同时成立时才开始 5 秒倒计时；期间敲任意一个字或点「取消自动」，倒计时**瞬间熔断中止**。
-- **压缩后自动复位**：监听宿主 `compactedAtStepIndices` 增长或占比回落 `>= 10%` 后自动清零忽略记录，下一轮照常护航。
+- **压缩后无损续接卡 + 自动复位**：执行 `/compact` 前自动静默留存一份本会话「★ 书签关键结论」脱敏锚点；监听宿主 `compactedAtStepIndices` 增长或占比回落 `>= 10%` 后不仅自动清零忽略记录，还会浮现 1 行翠绿 **「填入续接提示 / 复制锚点」** 小条（严格遵循草稿零覆盖原则），防止压缩后 AI 遗忘硬约束。
+- **回合卡死检测 & 上下文燃尽预测（Session Watchdog）**：追踪每轮 Token 增量估算「约剩 N 轮达阈值」并标记单轮 `>= 18%` 突增；若生成中连续 `2 / 3 / 5 分钟` 毫无新输出，即使未达上下文阈值也主动弹出停滞告警，并可联动失焦桌面通知。
 
 ### 2. 轮次书签 & 原生快捷跳转抽屉 & 压缩前脱敏导出（Outline Bookmarks + Pre-Compact Export）
 
 - **单轮随手标星 + 原生 `★ N` 跳转抽屉（无需依赖皮肤也能用）**：在每轮用户消息气泡上挂载轻量 `☆ / ★` 按钮，按 `cascadeId` 本地持久化；一旦本会话有标星轮次，会话顶部右上角自动浮现紧凑的 **`★ N` 跳转胶囊**（0 书签时完全隐藏不占位），展开即可看到脱敏后的轮次摘要，点击平滑滚动定位并高亮闪烁目标气泡；若安装了 Obsidian Prism，还会自动联动其左侧提问大纲浮窗的 `★ N` 仅看书签筛选。
+- **跨会话书签档案库（`Ctrl/Cmd + Shift + B`）**：点抽屉或 `⚙` 浮窗里的「全部档案库」即可跨全部历史会话实时检索标星提问与回复片段、单条/按会话清理，或一键复制/下载跨会话脱敏 Markdown 合集（100% 本地存储，零后端）。
 - **复制与 `↓ .md` 一键双出口**：一旦当前会话有标星轮次，压缩浮条上的导出按钮会自动切换为 **`仅导出 ★ (N)`**（一键复制到剪贴板），旁边紧邻 **`↓ .md`** 按钮（以及书签抽屉底部「下载 ★ .md」），直接把跨平台安全命名的 `.md` 复盘文件保存到本地，再点 `/compact` 一气呵成。
 - **默认全量脱敏**：导出与抽屉摘要均自动清洗 `sk-` / `rk-` / `pk-` / `ak-` / `AIza` / `ghp_` / `Bearer Token` / `JWT` 及 `PEM PRIVATE KEY` 块，避免复盘笔记误带敏感凭据。
 
@@ -83,10 +86,11 @@
 
 | 模块 | 默认态 | 核心职责 | 独立源码（可单独引入） |
 | :--- | :---: | :--- | :--- |
-| **Compact Guard** | 开启（80% 浮条确认） | 上下文阈值预警、确认压缩、5s 空闲倒计时、一键 `↓ .md` 下载、快捷设置浮窗 | [`packages/core/compact-guard.js`](./packages/core/compact-guard.js) |
-| **Outline Bookmarks** | 开启 | 单轮 `☆/★` 书签、原生 `★ N` 浮动跳转抽屉（无皮肤可用）、Prism 大纲筛选 | [`packages/core/outline-bookmarks.js`](./packages/core/outline-bookmarks.js) |
-| **Pre-Compact Export** | 开启 | 压缩前一键复制或下载 `.md` 复盘文件、自动脱敏敏感凭据 | [`packages/core/precompact-export.js`](./packages/core/precompact-export.js) |
-| **Session Radar** | 关闭（按需开启） | 侧栏 `全部/运行中/待确认` 聚光过滤条、失焦系统桌面通知 | [`packages/core/session-radar.js`](./packages/core/session-radar.js) |
+| **Compact Guard** | 开启（80% 浮条确认） | 上下文阈值预警、智能 `/compact <focus>` 预设、压缩后无损续接卡、5s 倒计时、`↓ .md` 下载 | [`packages/core/compact-guard.js`](./packages/core/compact-guard.js) |
+| **Outline Bookmarks & Vault** | 开启 | 单轮 `☆/★` 书签、原生 `★ N` 浮动跳转抽屉、跨会话书签档案库（`Ctrl+Shift+B`）、Prism 大纲筛选 | [`packages/core/outline-bookmarks.js`](./packages/core/outline-bookmarks.js) · [`bookmark-vault.js`](./packages/core/bookmark-vault.js) |
+| **Pre-Compact Export & Recovery** | 开启 | 压缩前一键复制/下载 `.md` 脱敏复盘、压缩后关键锚点自动留存与回填 | [`packages/core/precompact-export.js`](./packages/core/precompact-export.js) · [`recovery-handoff.js`](./packages/core/recovery-handoff.js) |
+| **Session Watchdog** | 开启（3m 卡死阈值） | 上下文燃尽速率估算（约剩 N 轮）、单轮 `>=18%` 突增标记、流式静默卡死监测 | [`packages/core/session-watchdog.js`](./packages/core/session-watchdog.js) |
+| **Session Radar** | 关闭（按需开启） | 侧栏 `全部/运行中/待确认` 聚光过滤条、失焦系统桌面通知（含卡死提醒） | [`packages/core/session-radar.js`](./packages/core/session-radar.js) |
 | **Watch Daemon** | CLI 按需常驻 | Zero-ASAR 自适应退避守护进程，新窗口与 `Cmd+R` 重载自动补挂 | [`cli/watch-daemon.mjs`](./cli/watch-daemon.mjs) |
 
 **五条硬红线（写进单测，每次提交必检）：**
@@ -108,7 +112,7 @@
 git clone https://github.com/tone-leh/agy-session-guard.git
 cd agy-session-guard
 
-# 运行全套单元测试（17 项测试约 0.15s 完成）
+# 运行全套单元测试（22 项测试约 0.16s 完成）
 npm test
 
 # 启动离线交互工作台
@@ -213,7 +217,7 @@ const guard = window.__agSgCore.mountSessionGuard({
 
 | 项目 | 验证方式 | 当前状态 |
 | :--- | :--- | :--- |
-| 核心状态机、三重防误触、Watch Daemon、原生书签跳转与 `.md` 下载 | Node.js 22 `node --test`（17 项单测） | 全部通过 |
+| 核心状态机、智能压缩焦点、无损续接、跨会话档案库、卡死与燃尽监测、Watch Daemon | Node.js 22 `node --test`（22 项单测） | 全部通过 |
 | 四套主题变量适配、5 语种切换、无损 `destroy()` | 离线交互工作台（`workbench/server.mjs`）+ 单元冒烟 | 已验证 |
 | Zero-ASAR CDP 附着与目标白名单 | 参数校验与目标过滤单测 + `--dry-run` 路径 | 已验证（跨平台真机实测持续补充中） |
 

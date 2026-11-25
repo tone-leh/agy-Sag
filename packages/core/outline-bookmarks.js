@@ -21,6 +21,7 @@
     const coexist = options.coexist || resolveDep('__agSgCoexist', './coexist.js');
     const ctxSrc = options.contextSource || resolveDep('__agSgContextSource', './context-source.js');
     const exporter = options.exporter || resolveDep('__agSgPrecompactExport', './precompact-export.js');
+    const vault = options.vault || resolveDep('__agSgBookmarkVault', './bookmark-vault.js');
     const i18n = options.i18n || resolveDep('__agSgI18n', './i18n.js');
 
     let enabled = options.enabled !== undefined ? Boolean(options.enabled) : true;
@@ -75,6 +76,11 @@
       }
       if (bookmarks.size === 0) drawerOpen = false;
       exporter.saveBookmarks(storage, currentCid, bookmarks);
+      if (vault) {
+        const turns = exporter.extractConversationTurns(doc);
+        const title = vault.detectConversationTitle(doc, currentCid);
+        vault.syncSessionMeta({ storage, cascadeId: currentCid, bookmarks, turns, title });
+      }
       sync();
       if (typeof options.onBookmarksChange === 'function') {
         try { options.onBookmarksChange({ cascadeId: currentCid, bookmarks: [...bookmarks] }); } catch {}
@@ -223,7 +229,24 @@
 
       const head = doc.createElement('div');
       head.className = 'ag-sg-bm-drawer-head';
-      head.textContent = i18n.formatTemplate(strings.bmDrawerTitle, { n: sorted.length });
+      const headTitle = doc.createElement('span');
+      headTitle.textContent = i18n.formatTemplate(strings.bmDrawerTitle, { n: sorted.length });
+      head.appendChild(headTitle);
+      if (typeof options.onOpenVault === 'function') {
+        const vaultBtn = doc.createElement('button');
+        vaultBtn.type = 'button';
+        vaultBtn.className = 'ag-sg-btn';
+        vaultBtn.setAttribute('data-ag-sg-act', 'bm-open-vault');
+        vaultBtn.textContent = strings.bmOpenVaultBtn;
+        vaultBtn.addEventListener('click', (ev) => {
+          ev?.preventDefault?.();
+          ev?.stopPropagation?.();
+          drawerOpen = false;
+          renderNativeJumpDock(getUserBubbles());
+          options.onOpenVault();
+        });
+        head.appendChild(vaultBtn);
+      }
       drawerEl.appendChild(head);
 
       const list = doc.createElement('div');
@@ -402,8 +425,15 @@
         return;
       }
       refreshCascade();
+      bookmarks = exporter.loadBookmarks(storage, currentCid);
+      if (bookmarks.size === 0) drawerOpen = false;
       decorateUserTurns();
       decoratePrismOutlinePopover();
+      if (vault && bookmarks.size > 0) {
+        const turns = exporter.extractConversationTurns(doc);
+        const title = vault.detectConversationTitle(doc, currentCid);
+        vault.syncSessionMeta({ storage, cascadeId: currentCid, bookmarks, turns, title });
+      }
     }
 
     function startObserver() {

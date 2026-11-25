@@ -18,10 +18,13 @@ packages/core/
 ├── coexist.js            # Config validation, owner auto-yield, hibernation helpers
 ├── context-source.js     # Telemetry adapter (__agPrismMetricsBridge -> agPulseHost -> Pulse DOM -> DOM fallback)
 ├── precompact-export.js  # Structured Markdown exporter + .md file download + secret redaction + per-session bookmarks
+├── recovery-handoff.js   # Post-compact lossless snapshot & recovery prompt builder
+├── bookmark-vault.js     # Cross-session searchable bookmark vault modal, Ctrl+Shift+B & combined MD export
+├── session-watchdog.js   # Burn-rate estimator (turns left, >=18% spike) & streaming stall detector
 ├── outline-bookmarks.js  # Module D: per-turn ☆/★ bookmarks, standalone floating ★ N jump drawer & Prism outline filter
 ├── styles.js             # Theme-adaptive zero-:has() CSS
-├── compact-guard.js      # Module G: threshold banner, countdown, ↓ .md download, quick settings popover
-├── session-radar.js      # Module B: sidebar All/Running/Awaiting filter pill + opt-in blurred OS alerts
+├── compact-guard.js      # Module G: threshold banner, smart /compact focus presets, recovery strip, countdown, ↓ .md download
+├── session-radar.js      # Module B: sidebar All/Running/Awaiting filter pill + opt-in blurred OS alerts (incl. stall alerts)
 └── index.js              # mountSessionGuard(opts) unified registry & lossless destroy()
 
 cli/

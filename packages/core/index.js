@@ -23,6 +23,7 @@
     const coexist = options.coexist || resolveDep('__agSgCoexist', './coexist.js');
     const compactMod = options.compactGuardMod || resolveDep('__agSgCompactGuard', './compact-guard.js');
     const bookmarkMod = options.outlineBookmarksMod || resolveDep('__agSgOutlineBookmarks', './outline-bookmarks.js');
+    const vaultMod = options.bookmarkVaultMod || resolveDep('__agSgBookmarkVault', './bookmark-vault.js');
     const radarMod = options.sessionRadarMod || resolveDep('__agSgSessionRadar', './session-radar.js');
 
     // Coexistence auto-yield: if a host integrator (e.g. Obsidian Prism) already owns Session Guard, standalone yields cleanly
@@ -40,13 +41,21 @@
     try { win?.[coexist.INSTANCE_GLOBAL]?.destroy?.(); } catch {}
 
     let outlineBookmarks = null;
+    let bookmarkVault = null;
     let sessionRadar = null;
+
+    const openVault = () => bookmarkVault?.open?.();
 
     const compactGuard = compactMod.createCompactGuardController({
       ...options,
       win,
       doc,
       coexist,
+      onOpenVault: openVault,
+      onStallDetected: (ev) => {
+        sessionRadar?.notifyStall?.(ev);
+        if (typeof options.onStallDetected === 'function') options.onStallDetected(ev);
+      },
       onConfigChange: (nextCfg) => {
         outlineBookmarks?.setEnabled?.(Boolean(nextCfg.modules?.outlineBookmarks));
         sessionRadar?.setEnabled?.(Boolean(nextCfg.modules?.sessionRadar));
@@ -64,6 +73,7 @@
       enabled: Boolean(cfg.modules?.outlineBookmarks),
       autoObserve: options.autoObserve,
       getLang: options.getLang,
+      onOpenVault: openVault,
       onBookmarksChange: (ev) => {
         void compactGuard.evaluateNow();
         if (typeof options.onBookmarksChange === 'function') options.onBookmarksChange(ev);
@@ -71,6 +81,23 @@
       onExportMarkdown: options.onExportMarkdown,
       onDownloadMarkdown: options.onDownloadMarkdown,
     });
+
+    bookmarkVault = vaultMod?.createBookmarkVaultController
+      ? vaultMod.createBookmarkVaultController({
+          win,
+          doc,
+          storage: options.storage,
+          coexist,
+          getLang: options.getLang,
+          bindShortcut: options.bindVaultShortcut,
+          onVaultMutated: () => {
+            outlineBookmarks?.sync?.();
+            void compactGuard.evaluateNow();
+          },
+          onExportMarkdown: options.onExportMarkdown,
+          onDownloadMarkdown: options.onDownloadMarkdown,
+        })
+      : null;
 
     sessionRadar = radarMod.createSessionRadarController({
       win,
@@ -91,6 +118,7 @@
       yielded: false,
       compactGuard,
       outlineBookmarks,
+      bookmarkVault,
       sessionRadar,
       evaluateNow: async () => {
         outlineBookmarks.sync();
@@ -106,6 +134,7 @@
       },
       getConfig: () => compactGuard.getConfig(),
       openSettingsPopover: () => compactGuard.openSettingsPopover(),
+      openBookmarkVault: (q) => bookmarkVault?.open?.(q),
       getDebugState: () => ({
         version: VERSION,
         source,
@@ -113,6 +142,7 @@
         destroyed,
         compactGuard: compactGuard.getDebugState(),
         outlineBookmarks: outlineBookmarks.getDebugState(),
+        bookmarkVault: bookmarkVault?.getDebugState?.() || null,
         sessionRadar: sessionRadar.getDebugState(),
       }),
       destroy() {
@@ -120,6 +150,7 @@
         destroyed = true;
         compactGuard.destroy();
         outlineBookmarks.destroy();
+        bookmarkVault?.destroy?.();
         sessionRadar.destroy();
         try {
           if (win && win[coexist.INSTANCE_GLOBAL] === api) delete win[coexist.INSTANCE_GLOBAL];

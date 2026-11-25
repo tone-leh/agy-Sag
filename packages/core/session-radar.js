@@ -170,7 +170,9 @@
       const title =
         ev.type === 'awaiting_decision'
           ? strings.radarNotifyAwaitingTitle
-          : strings.radarNotifyDoneTitle;
+          : ev.type === 'stalled'
+            ? strings.radarNotifyStallTitle
+            : strings.radarNotifyDoneTitle;
       const body = ev.title || ev.id;
 
       if (typeof options.onNotify === 'function') {
@@ -275,9 +277,18 @@
 
     if (enabled) syncFromDom();
 
+    function notifyStall({ cascadeId = '', stalledForSec = 0 } = {}) {
+      if (destroyed) return false;
+      const min = Math.floor(Math.max(1, Number(stalledForSec) || 0) / 60);
+      const sec = Math.max(0, Number(stalledForSec) || 0) % 60;
+      const body = i18n.formatTemplate(S().pillStallAlert, { min, sec });
+      return maybeNotify({ type: 'stalled', id: cascadeId || 'active-session', title: body, el: null });
+    }
+
     return {
       sync,
       syncFromDom,
+      notifyStall,
       setEnabled,
       setNotifyMode,
       setFilterMode: (m) => {

@@ -55,10 +55,11 @@ Configurable Compaction Guard · Turn Bookmarks & Redacted Pre-Compact Markdown 
 
 | Module | Default | What It Does | Standalone UMD Core |
 | :--- | :---: | :--- | :--- |
-| **Compact Guard** | On (`80%` confirm) | Threshold alert bar (`off/70/75/80/85/90%`), confirm / insert-only / 5s idle countdown, `↓ .md` download, quick `⚙` settings popover | [`packages/core/compact-guard.js`](./packages/core/compact-guard.js) |
-| **Outline Bookmarks** | On | Per-`cascadeId` persisted `☆/★` stars, standalone native floating `★ N` jump drawer (works without Prism), plus Prism outline filter | [`packages/core/outline-bookmarks.js`](./packages/core/outline-bookmarks.js) |
+| **Compact Guard** | On (`80%` confirm) | Threshold alert bar (`off/70–90%`), Smart `/compact <focus>` presets (`Default / Code & Errors / ★ Bookmarks / Custom`), Post-Compact Recovery strip, 5s idle countdown, `↓ .md` download | [`packages/core/compact-guard.js`](./packages/core/compact-guard.js) · [`recovery-handoff.js`](./packages/core/recovery-handoff.js) |
+| **Outline Bookmarks & Vault** | On | Per-`cascadeId` `☆/★` stars, native floating `★ N` jump drawer, Cross-Session Searchable Bookmark Vault (`Ctrl+Shift+B`), plus Prism outline filter | [`packages/core/outline-bookmarks.js`](./packages/core/outline-bookmarks.js) · [`bookmark-vault.js`](./packages/core/bookmark-vault.js) |
 | **Pre-Compact Export** | On | One-click clipboard copy (`Export MD` / `Export ★ (N)`) & local `.md` file download with automatic secret redaction (`sk-`, `AIza`, `ghp_`, `Bearer`, JWT, PEM) | [`packages/core/precompact-export.js`](./packages/core/precompact-export.js) |
-| **Session Radar** | Off (opt-in) | Sidebar `All / Running / Awaiting` attention filter pill + blurred-only desktop alerts (`Off / Awaiting / All`) | [`packages/core/session-radar.js`](./packages/core/session-radar.js) |
+| **Session Watchdog** | On (`3m` stall) | Rolling context burn-rate (`~N turns left`), `>= 18%` single-turn spike flag, and silent streaming stall detector | [`packages/core/session-watchdog.js`](./packages/core/session-watchdog.js) |
+| **Session Radar** | Off (opt-in) | Sidebar `All / Running / Awaiting` attention filter pill + blurred-only desktop alerts (including stall alerts) | [`packages/core/session-radar.js`](./packages/core/session-radar.js) |
 | **Watch Daemon** | CLI daemon | Zero-ASAR adaptive-backoff watcher (`npm run watch`) that auto-attaches to new or `Cmd+R`-reloaded Antigravity windows | [`cli/watch-daemon.mjs`](./cli/watch-daemon.mjs) |
 
 ### Engineering Guardrails (Tested on Every Commit)
@@ -77,7 +78,7 @@ Configurable Compaction Guard · Turn Bookmarks & Redacted Pre-Compact Markdown 
 git clone https://github.com/tone-leh/agy-session-guard.git
 cd agy-session-guard
 
-npm test         # 17 unit & hygiene tests (~150ms)
+npm test         # 22 unit & hygiene tests (~160ms)
 npm run workbench
 # Open http://127.0.0.1:4179
 ```

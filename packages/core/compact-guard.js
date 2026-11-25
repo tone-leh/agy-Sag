@@ -1,4 +1,4 @@
-// Antigravity Session Guard — Compact Guard Controller (Module G, UMD, zero runtime deps)
+// Antigravity Session Guard — Compact Guard Controller (Module G + Smart Focus + Post-Compact Recovery + Watchdog, UMD)
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory(root);
@@ -9,6 +9,7 @@
   'use strict';
 
   const THRESHOLD_PRESETS = ['off', 70, 75, 80, 85, 90];
+  const STALL_PRESETS = ['off', 120, 180, 300];
   const COMPACT_CMD = '/compact';
 
   function resolveDep(globalKey, relPath) {
@@ -25,9 +26,19 @@
     const coexist = options.coexist || resolveDep('__agSgCoexist', './coexist.js');
     const ctxSrc = options.contextSource || resolveDep('__agSgContextSource', './context-source.js');
     const exporter = options.exporter || resolveDep('__agSgPrecompactExport', './precompact-export.js');
+    const handoff = options.handoff || resolveDep('__agSgRecoveryHandoff', './recovery-handoff.js');
+    const watchdogMod = options.watchdogMod || resolveDep('__agSgSessionWatchdog', './session-watchdog.js');
     const styles = options.styles || resolveDep('__agSgStyles', './styles.js');
 
     let config = coexist.sanitizeConfig(options.config || coexist.readStoredConfig(storage) || coexist.DEFAULT_CONFIG);
+    const watchdog = watchdogMod?.createSessionWatchdog
+      ? watchdogMod.createSessionWatchdog({
+          enabled: Boolean(config.modules.sessionWatchdog),
+          stallThresholdSeconds: config.stallThresholdSeconds,
+          now: options.now,
+        })
+      : null;
+
     let destroyed = false;
     let blurred = false;
     let pollTimer = null;
@@ -36,9 +47,17 @@
     let countdownRemaining = 0;
     let countdownCanceledForSession = new Set();
     let lastSnapshot = null;
+    let lastWatchdog = null;
+    let activeRecovery = null;
     let popoverOpen = false;
     let bannerEl = null;
+    let recoveryEl = null;
+    let recoveryMsgEl = null;
+    let recoveryFillBtn = null;
+    let recoveryCopyBtn = null;
+    let recoveryDismissBtn = null;
     let msgEl = null;
+    let focusTagEl = null;
     let actionsEl = null;
     let primaryBtn = null;
     let fillBtn = null;
@@ -79,7 +98,7 @@
         toastTimer = setTimeout(() => {
           toastTimer = null;
           if (!destroyed && toastEl) toastEl.hidden = true;
-        }, 3200);
+        }, 3400);
         toastTimer?.unref?.();
       }
     };
@@ -136,40 +155,108 @@
       composerListenerOff = () => ed.removeEventListener?.('input', onInput);
     };
 
+    const getFocusLabel = (strings) => {
+      if (config.compactFocusPreset === 'code-errors') return strings.cfgFocusCode;
+      if (config.compactFocusPreset === 'bookmarks') return strings.cfgFocusBookmarks;
+      if (config.compactFocusPreset === 'custom') return strings.cfgFocusCustom;
+      return strings.cfgFocusDefault;
+    };
+
+    function buildCompactCommand() {
+      const strings = S();
+      const preset = config.compactFocusPreset || 'default';
+      if (preset === 'default') return COMPACT_CMD;
+      if (preset === 'code-errors') {
+        return `${COMPACT_CMD} ${strings.compactFocusCodePrompt}`;
+      }
+      if (preset === 'custom') {
+        const custom = exporter
+          ? exporter.redactSecrets(config.customCompactFocus || '').replace(/\s+/g, ' ').trim()
+          : String(config.customCompactFocus || '').trim();
+        return custom ? `${COMPACT_CMD} ${custom}` : COMPACT_CMD;
+      }
+      if (preset === 'bookmarks') {
+        const cid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win);
+        const bm = exporter?.loadBookmarks?.(storage, cid) || new Set();
+        const turns = exporter?.extractConversationTurns?.(doc) || [];
+        const starred = turns.filter((t) => bm.has(t.turnNum)).slice(-3);
+        if (starred.length === 0) {
+          return `${COMPACT_CMD} ${strings.compactFocusBookmarksFallback}`;
+        }
+        const summary = starred
+          .map((t) => {
+            const snippet = exporter
+              .redactSecrets(t.user || t.assistant || '')
+              .replace(/\s+/g, ' ')
+              .trim()
+              .slice(0, 72);
+            return `#${t.turnNum} ${snippet}`;
+          })
+          .join('; ');
+        return `${COMPACT_CMD} ${strings.compactFocusBookmarksPrefix}${summary}`.slice(0, 320);
+      }
+      return COMPACT_CMD;
+    }
+
+    function captureRecoverySnapshot() {
+      if (!handoff) return null;
+      const cid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win);
+      return handoff.capturePreCompactSnapshot({
+        doc,
+        storage,
+        cascadeId: cid,
+        usedPct: lastSnapshot?.usedPct ?? null,
+        strings: S(),
+      });
+    }
+
+    const writeTextIntoComposer = (text, { allowSameAs = [] } = {}) => {
+      const strings = S();
+      const existingDraft = ctxSrc.readComposerDraft(doc);
+      if (existingDraft && !allowSameAs.includes(existingDraft)) {
+        setToast(strings.toastDraftProtected, 'warn');
+        return { ok: false, reason: 'draft-present' };
+      }
+      const ed = ctxSrc.findComposerEditor(doc);
+      if (!ed) return { ok: false, reason: 'no-editor' };
+      try {
+        ed.focus?.();
+        const tag = String(ed.tagName || '').toUpperCase();
+        if (tag === 'TEXTAREA' || tag === 'INPUT') {
+          ed.value = text;
+          ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
+        } else if (typeof doc.execCommand === 'function' && doc.execCommand('insertText', false, text)) {
+          // inserted via execCommand
+        } else {
+          ed.textContent = text;
+          ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
+        }
+        return { ok: true, editor: ed };
+      } catch {
+        return { ok: false, reason: 'insert-failed' };
+      }
+    };
+
     const insertCompactIntoComposer = ({ submit = false } = {}) => {
       const strings = S();
       if (ctxSrc.isTurnStreaming(doc) || lastSnapshot?.streaming) {
         setToast(strings.toastStreamingBlocked, 'warn');
         return { ok: false, reason: 'streaming' };
       }
-      const existingDraft = ctxSrc.readComposerDraft(doc);
-      if (existingDraft && existingDraft !== COMPACT_CMD) {
-        setToast(strings.toastDraftProtected, 'warn');
-        return { ok: false, reason: 'draft-present' };
-      }
+      const cmd = buildCompactCommand();
+      const written = writeTextIntoComposer(cmd, { allowSameAs: [COMPACT_CMD, cmd] });
+      if (!written.ok) return written;
 
-      const ed = ctxSrc.findComposerEditor(doc);
-      if (!ed) return { ok: false, reason: 'no-editor' };
-
-      try {
-        ed.focus?.();
-        const tag = String(ed.tagName || '').toUpperCase();
-        if (tag === 'TEXTAREA' || tag === 'INPUT') {
-          ed.value = COMPACT_CMD;
-          ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
-        } else if (typeof doc.execCommand === 'function' && doc.execCommand('insertText', false, COMPACT_CMD)) {
-          // inserted via execCommand
-        } else {
-          ed.textContent = COMPACT_CMD;
-          ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
-        }
-      } catch {
-        return { ok: false, reason: 'insert-failed' };
-      }
+      // Silently preserve pre-compact recovery snapshot for seamless post-compact handoff
+      captureRecoverySnapshot();
 
       if (submit) {
         if (typeof options.onSubmitCompact === 'function') {
-          options.onSubmitCompact({ command: COMPACT_CMD, cascadeId: lastSnapshot?.cascadeId || '' });
+          options.onSubmitCompact({
+            command: cmd,
+            preset: config.compactFocusPreset,
+            cascadeId: lastSnapshot?.cascadeId || '',
+          });
         } else {
           const sendBtn =
             doc.querySelector?.('[data-testid="send-button"], [data-testid="input-send-button"], button[type="submit"]');
@@ -178,7 +265,7 @@
           } else {
             const KEv = win.KeyboardEvent || globalThis.KeyboardEvent;
             if (typeof KEv === 'function') {
-              ed.dispatchEvent?.(new KEv('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+              written.editor.dispatchEvent?.(new KEv('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
             }
           }
         }
@@ -186,12 +273,14 @@
         sess.dismissedAtPct = lastSnapshot?.usedPct ?? config.compactThreshold;
         sess.autoSentAtPct = lastSnapshot?.usedPct ?? config.compactThreshold;
         stopCountdown();
-        setToast(strings.toastSent, 'ok');
-        return { ok: true, submitted: true };
+        const shortCmd = cmd.length > 36 ? `${cmd.slice(0, 36)}…` : cmd;
+        setToast(i18n.formatTemplate(strings.toastSent, { cmd: shortCmd }), 'ok');
+        return { ok: true, submitted: true, command: cmd };
       }
 
-      setToast(strings.toastFilled, 'ok');
-      return { ok: true, submitted: false };
+      const shortCmd = cmd.length > 36 ? `${cmd.slice(0, 36)}…` : cmd;
+      setToast(i18n.formatTemplate(strings.toastFilled, { cmd: shortCmd }), 'ok');
+      return { ok: true, submitted: false, command: cmd };
     };
 
     const handleExportMd = async ({ onlyBookmarked = false, download = false } = {}) => {
@@ -248,6 +337,84 @@
       return b;
     };
 
+    const ensureRecoveryBar = () => {
+      if (!doc) return null;
+      const anchor = findBannerAnchor();
+      if (!anchor || !anchor.parentElement) return null;
+      ensureStyle();
+      if (recoveryEl && recoveryEl.isConnected !== false) return recoveryEl;
+
+      const bar = coexist.markOwnedNoTranslate(doc.createElement('div'));
+      bar.className = 'ag-sg-recovery-bar';
+      bar.setAttribute('role', 'status');
+      bar.setAttribute('data-testid', 'ag-sg-recovery-bar');
+      bar.hidden = true;
+
+      const left = doc.createElement('div');
+      left.className = 'ag-sg-left';
+      const dot = doc.createElement('span');
+      dot.className = 'ag-sg-recovery-dot';
+      dot.setAttribute('aria-hidden', 'true');
+      recoveryMsgEl = doc.createElement('span');
+      recoveryMsgEl.className = 'ag-sg-msg';
+      left.appendChild(dot);
+      left.appendChild(recoveryMsgEl);
+
+      const acts = doc.createElement('div');
+      acts.className = 'ag-sg-actions';
+
+      recoveryFillBtn = mkBtn('ag-sg-btn ag-sg-btn-primary', '', 'recovery-fill', () => {
+        if (!activeRecovery?.prompt) return;
+        const written = writeTextIntoComposer(activeRecovery.prompt, { allowSameAs: [activeRecovery.prompt] });
+        if (written.ok) {
+          if (typeof options.onRecoveryFill === 'function') options.onRecoveryFill(activeRecovery);
+          handoff?.clearSnapshot?.(storage, activeRecovery.cascadeId);
+          activeRecovery = null;
+          renderRecoveryBar();
+          setToast(S().recoveryFilledToast, 'ok');
+        }
+      });
+
+      recoveryCopyBtn = mkBtn('ag-sg-btn', '', 'recovery-copy', async () => {
+        if (!activeRecovery?.prompt) return;
+        await exporter?.copyRecapToClipboard?.(activeRecovery.prompt, win);
+        if (typeof options.onRecoveryCopy === 'function') options.onRecoveryCopy(activeRecovery);
+        setToast(S().recoveryCopiedToast, 'ok');
+      });
+
+      recoveryDismissBtn = mkBtn('ag-sg-btn', '', 'recovery-dismiss', () => {
+        if (activeRecovery?.cascadeId) handoff?.clearSnapshot?.(storage, activeRecovery.cascadeId);
+        activeRecovery = null;
+        renderRecoveryBar();
+      });
+
+      acts.appendChild(recoveryFillBtn);
+      acts.appendChild(recoveryCopyBtn);
+      acts.appendChild(recoveryDismissBtn);
+
+      bar.appendChild(left);
+      bar.appendChild(acts);
+      anchor.parentElement.insertBefore(bar, anchor);
+      recoveryEl = bar;
+      return recoveryEl;
+    };
+
+    const renderRecoveryBar = () => {
+      if (destroyed) return;
+      if (!activeRecovery || !activeRecovery.prompt) {
+        if (recoveryEl) recoveryEl.hidden = true;
+        return;
+      }
+      const el = ensureRecoveryBar();
+      if (!el) return;
+      const strings = S();
+      el.hidden = false;
+      recoveryMsgEl.textContent = i18n.formatTemplate(strings.recoveryMsg, { n: activeRecovery.anchorCount || 1 });
+      recoveryFillBtn.textContent = strings.recoveryFillBtn;
+      recoveryCopyBtn.textContent = strings.recoveryCopyBtn;
+      recoveryDismissBtn.textContent = strings.recoveryDismissBtn;
+    };
+
     const renderPopover = () => {
       if (!popEl) return;
       popEl.hidden = !popoverOpen;
@@ -257,7 +424,25 @@
 
       const title = doc.createElement('div');
       title.className = 'ag-sg-pop-title';
-      title.textContent = strings.cfgTitle;
+      const titleTxt = doc.createElement('span');
+      titleTxt.textContent = strings.cfgTitle;
+      title.appendChild(titleTxt);
+
+      if (typeof options.onOpenVault === 'function') {
+        const vaultBtn = doc.createElement('button');
+        vaultBtn.type = 'button';
+        vaultBtn.className = 'ag-sg-btn';
+        vaultBtn.setAttribute('data-ag-sg-act', 'open-vault');
+        vaultBtn.textContent = strings.bmOpenVaultBtn;
+        vaultBtn.addEventListener('click', (ev) => {
+          ev?.preventDefault?.();
+          ev?.stopPropagation?.();
+          popoverOpen = false;
+          renderPopover();
+          options.onOpenVault();
+        });
+        title.appendChild(vaultBtn);
+      }
       popEl.appendChild(title);
 
       // Row 1: Threshold presets
@@ -293,12 +478,11 @@
       l2.textContent = strings.cfgMode;
       const seg2 = doc.createElement('div');
       seg2.className = 'ag-sg-seg';
-      const modes = [
+      for (const [mKey, mLabel] of [
         ['confirm', strings.cfgModeConfirm],
         ['fill-only', strings.cfgModeFill],
         ['auto-countdown', strings.cfgModeCountdown],
-      ];
-      for (const [mKey, mLabel] of modes) {
+      ]) {
         const b = doc.createElement('button');
         b.type = 'button';
         b.textContent = mLabel;
@@ -315,7 +499,75 @@
       r2.appendChild(seg2);
       popEl.appendChild(r2);
 
-      // Row 3: Modules (Turn Bookmarks & Session Radar)
+      // Row 3: Smart /compact Focus Presets
+      const rFocus = doc.createElement('div');
+      rFocus.className = 'ag-sg-pop-row';
+      const lFocus = doc.createElement('span');
+      lFocus.className = 'ag-sg-pop-lbl';
+      lFocus.textContent = strings.cfgFocus;
+      const segFocus = doc.createElement('div');
+      segFocus.className = 'ag-sg-seg';
+      for (const [fKey, fLabel] of [
+        ['default', strings.cfgFocusDefault],
+        ['code-errors', strings.cfgFocusCode],
+        ['bookmarks', strings.cfgFocusBookmarks],
+        ['custom', strings.cfgFocusCustom],
+      ]) {
+        const b = doc.createElement('button');
+        b.type = 'button';
+        b.textContent = fLabel;
+        b.setAttribute('data-ag-sg-focus', fKey);
+        b.setAttribute('aria-pressed', String(config.compactFocusPreset === fKey));
+        b.addEventListener('click', (ev) => {
+          ev?.preventDefault?.();
+          ev?.stopPropagation?.();
+          updateConfig({ compactFocusPreset: fKey });
+        });
+        segFocus.appendChild(b);
+      }
+      rFocus.appendChild(lFocus);
+      rFocus.appendChild(segFocus);
+      if (config.compactFocusPreset === 'custom') {
+        const inp = doc.createElement('input');
+        inp.type = 'text';
+        inp.className = 'ag-sg-pop-input';
+        inp.setAttribute('data-ag-sg-custom-focus', '1');
+        inp.placeholder = strings.cfgFocusCustomPlaceholder;
+        inp.value = config.customCompactFocus || '';
+        inp.addEventListener('input', () => {
+          config = coexist.sanitizeConfig({ ...config, customCompactFocus: inp.value }, config);
+          if (options.persistConfig !== false) coexist.writeStoredConfig(storage, config);
+        });
+        rFocus.appendChild(inp);
+      }
+      popEl.appendChild(rFocus);
+
+      // Row 4: Stall Watchdog timeout presets
+      const rStall = doc.createElement('div');
+      rStall.className = 'ag-sg-pop-row';
+      const lStall = doc.createElement('span');
+      lStall.className = 'ag-sg-pop-lbl';
+      lStall.textContent = strings.cfgStall;
+      const segStall = doc.createElement('div');
+      segStall.className = 'ag-sg-seg';
+      for (const sec of STALL_PRESETS) {
+        const b = doc.createElement('button');
+        b.type = 'button';
+        b.textContent = sec === 'off' ? strings.cfgStallOff : `${Math.round(sec / 60)}m`;
+        b.setAttribute('data-ag-sg-stall', String(sec));
+        b.setAttribute('aria-pressed', String(config.stallThresholdSeconds === sec));
+        b.addEventListener('click', (ev) => {
+          ev?.preventDefault?.();
+          ev?.stopPropagation?.();
+          updateConfig({ stallThresholdSeconds: sec });
+        });
+        segStall.appendChild(b);
+      }
+      rStall.appendChild(lStall);
+      rStall.appendChild(segStall);
+      popEl.appendChild(rStall);
+
+      // Row 5: Modules
       const r3 = doc.createElement('div');
       r3.className = 'ag-sg-pop-row';
       const l3 = doc.createElement('span');
@@ -323,11 +575,11 @@
       l3.textContent = strings.cfgModules;
       const seg3 = doc.createElement('div');
       seg3.className = 'ag-sg-seg';
-      const modDefs = [
+      for (const [mKey, mLabel] of [
         ['outlineBookmarks', strings.cfgModBookmarks],
         ['sessionRadar', strings.cfgModRadar],
-      ];
-      for (const [mKey, mLabel] of modDefs) {
+        ['sessionWatchdog', strings.cfgModWatchdog],
+      ]) {
         const b = doc.createElement('button');
         b.type = 'button';
         b.textContent = mLabel;
@@ -344,7 +596,7 @@
       r3.appendChild(seg3);
       popEl.appendChild(r3);
 
-      // Row 4: Blurred OS Notification mode (when Session Radar is active)
+      // Row 6: Blurred OS Notification mode (when Session Radar is active)
       if (config.modules.sessionRadar) {
         const r4 = doc.createElement('div');
         r4.className = 'ag-sg-pop-row';
@@ -401,8 +653,13 @@
       dot.setAttribute('aria-hidden', 'true');
       msgEl = doc.createElement('span');
       msgEl.className = 'ag-sg-msg';
+      focusTagEl = doc.createElement('span');
+      focusTagEl.className = 'ag-sg-focus-tag';
+      focusTagEl.setAttribute('data-testid', 'ag-sg-focus-tag');
+      focusTagEl.hidden = true;
       left.appendChild(dot);
       left.appendChild(msgEl);
+      left.appendChild(focusTagEl);
 
       actionsEl = doc.createElement('div');
       actionsEl.className = 'ag-sg-actions';
@@ -438,7 +695,10 @@
       });
       dismissBtn = mkBtn('ag-sg-btn', '', 'dismiss', () => {
         stopCountdown();
-        if (lastSnapshot) {
+        if (lastWatchdog?.stalled && !lastWatchdog?.stallDismissed && lastSnapshot) {
+          watchdog?.dismissStall?.(lastSnapshot.cascadeId);
+          lastWatchdog = { ...lastWatchdog, stallDismissed: true };
+        } else if (lastSnapshot) {
           getSess(lastSnapshot.cascadeId).dismissedAtPct = lastSnapshot.usedPct;
         }
         popoverOpen = false;
@@ -474,22 +734,29 @@
     };
 
     const shouldShowForSnapshot = (snap) => {
-      if (!snap || config.compactThreshold === 'off' || !config.modules.compactGuard) return false;
-      const th = Number(config.compactThreshold);
-      if (!Number.isFinite(th)) return false;
-
+      if (!snap || !config.modules.compactGuard) return false;
       const sess = getSess(snap.cascadeId);
+      const th = config.compactThreshold === 'off' ? null : Number(config.compactThreshold);
 
-      // Reset dismiss state if compaction happened or context dropped cleanly below threshold - resetDropPct
-      if (snap.compactedCount > sess.lastCompactedCount || snap.usedPct <= th - config.resetDropPct) {
+      // Detect compaction completed -> reset dismiss state AND surface post-compact recovery strip if snapshot exists
+      const compactedByCount = snap.compactedCount > sess.lastCompactedCount;
+      const compactedByDrop = th !== null && Number.isFinite(th) && snap.usedPct <= th - config.resetDropPct;
+      if (compactedByCount || compactedByDrop) {
+        const hadPriorCompactCycle = compactedByCount || sess.dismissedAtPct !== null || sess.autoSentAtPct !== null;
         sess.lastCompactedCount = Math.max(sess.lastCompactedCount, snap.compactedCount);
         sess.dismissedAtPct = null;
         sess.autoSentAtPct = null;
         countdownCanceledForSession.delete(snap.cascadeId);
-      } else if (snap.compactedCount > sess.lastCompactedCount) {
-        sess.lastCompactedCount = snap.compactedCount;
+        if (hadPriorCompactCycle || compactedByCount) {
+          const saved = handoff?.loadSnapshot?.(storage, snap.cascadeId) || null;
+          if (saved && saved.pendingRecovery) {
+            activeRecovery = saved;
+          }
+        }
       }
 
+      if (lastWatchdog?.stalled && !lastWatchdog?.stallDismissed) return true;
+      if (th === null || !Number.isFinite(th)) return false;
       if (snap.usedPct < th) return false;
 
       if (sess.dismissedAtPct !== null && snap.usedPct < sess.dismissedAtPct + config.rearmDeltaPct) {
@@ -498,9 +765,10 @@
       return true;
     };
 
-    const maybeManageCountdown = (snap, visible) => {
+    const maybeManageCountdown = (snap, visible, isStallAlert) => {
       const canCountdown =
         visible &&
+        !isStallAlert &&
         config.compactTriggerMode === 'auto-countdown' &&
         !snap.streaming &&
         !snap.draft &&
@@ -544,6 +812,8 @@
       if (destroyed) return;
       const snap = lastSnapshot;
       const visible = shouldShowForSnapshot(snap);
+      renderRecoveryBar();
+
       if (!visible && !popoverOpen) {
         stopCountdown();
         if (bannerEl) bannerEl.hidden = true;
@@ -552,7 +822,8 @@
       const el = ensureBanner();
       if (!el) return;
 
-      maybeManageCountdown(snap, visible);
+      const isStallAlert = Boolean(lastWatchdog?.stalled && !lastWatchdog?.stallDismissed);
+      maybeManageCountdown(snap, visible, isStallAlert);
 
       const strings = S();
       const pct = snap ? snap.usedPct : 0;
@@ -562,22 +833,45 @@
       const isCounting = Boolean(countdownTimer && countdownRemaining > 0);
 
       el.hidden = !visible && !popoverOpen;
-      el.setAttribute('data-severity', isCounting ? 'countdown' : isOverflow ? 'overflow' : 'warn');
+      el.setAttribute('data-severity', isStallAlert ? 'stall' : isCounting ? 'countdown' : isOverflow ? 'overflow' : 'warn');
 
-      if (isCounting) {
+      if (isStallAlert) {
+        const totalSec = Math.max(1, Number(lastWatchdog.stalledForSec) || 0);
+        const min = Math.floor(totalSec / 60);
+        const sec = totalSec % 60;
+        msgEl.textContent = i18n.formatTemplate(strings.pillStallAlert, { min, sec });
+      } else if (isCounting) {
         msgEl.textContent = i18n.formatTemplate(strings.pillCountdown, { pct, sec: countdownRemaining });
       } else if (snap?.streaming) {
         msgEl.textContent = i18n.formatTemplate(strings.pillStreaming, { pct });
       } else if (isOverflow) {
         msgEl.textContent = i18n.formatTemplate(strings.pillOverflow, { pct, used, max });
       } else {
-        msgEl.textContent = i18n.formatTemplate(strings.pillReached, { pct, used, max });
+        let baseMsg = i18n.formatTemplate(strings.pillReached, { pct, used, max });
+        if (lastWatchdog?.estimatedTurnsLeft > 0) {
+          baseMsg += ` ${i18n.formatTemplate(strings.pillBurnEta, { turns: lastWatchdog.estimatedTurnsLeft })}`;
+        }
+        if (lastWatchdog?.spikeDetected && lastWatchdog.lastDeltaPct > 0) {
+          baseMsg += ` ${i18n.formatTemplate(strings.pillSpikeHint, { delta: lastWatchdog.lastDeltaPct })}`;
+        }
+        msgEl.textContent = baseMsg;
+      }
+
+      if (focusTagEl) {
+        const showFocus = !isStallAlert && config.compactFocusPreset !== 'default';
+        focusTagEl.hidden = !showFocus;
+        if (showFocus) {
+          focusTagEl.textContent = getFocusLabel(strings);
+          focusTagEl.title = buildCompactCommand();
+        }
       }
 
       primaryBtn.textContent = config.compactTriggerMode === 'fill-only' ? strings.btnFillOnly : strings.btnCompactNow;
+      primaryBtn.title = buildCompactCommand();
       primaryBtn.disabled = Boolean(snap?.streaming);
+      primaryBtn.hidden = isStallAlert;
       fillBtn.textContent = strings.btnFillOnly;
-      fillBtn.hidden = config.compactTriggerMode === 'fill-only';
+      fillBtn.hidden = isStallAlert || config.compactTriggerMode === 'fill-only';
       fillBtn.disabled = Boolean(snap?.streaming);
       const curCid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win);
       const bmCount = exporter.loadBookmarks(storage, curCid).size;
@@ -601,9 +895,10 @@
 
     async function evaluateNow() {
       if (destroyed || coexist.isWindowHibernated(doc, win, blurred)) return lastSnapshot;
-      if (config.compactThreshold === 'off' || !config.modules.compactGuard) {
+      if (!config.modules.compactGuard) {
         stopCountdown();
         if (bannerEl && !popoverOpen) bannerEl.hidden = true;
+        if (recoveryEl) recoveryEl.hidden = true;
         return lastSnapshot;
       }
       const snap = await ctxSrc.sampleContextState({
@@ -612,6 +907,21 @@
         getContextSnapshot: options.getContextSnapshot,
       });
       lastSnapshot = snap;
+      if (watchdog && snap) {
+        lastWatchdog = watchdog.observe({
+          snap,
+          doc,
+          threshold: config.compactThreshold,
+        });
+        if (lastWatchdog.newlyStalled && typeof options.onStallDetected === 'function') {
+          try {
+            options.onStallDetected({
+              cascadeId: snap.cascadeId,
+              stalledForSec: lastWatchdog.stalledForSec,
+            });
+          } catch {}
+        }
+      }
       render();
       return snap;
     }
@@ -642,6 +952,10 @@
       if (destroyed) return config;
       config = coexist.sanitizeConfig({ ...config, ...(patch || {}) }, config);
       if (options.persistConfig !== false) coexist.writeStoredConfig(storage, config);
+      watchdog?.setConfig?.({
+        enabled: Boolean(config.modules.sessionWatchdog),
+        stallThresholdSeconds: config.stallThresholdSeconds,
+      });
       if (config.compactTriggerMode !== 'auto-countdown' || config.compactThreshold === 'off') {
         stopCountdown();
       }
@@ -690,12 +1004,14 @@
         destroyed,
         config: { ...config, modules: { ...config.modules } },
         visible: Boolean(bannerEl && !bannerEl.hidden),
+        recoveryVisible: Boolean(recoveryEl && !recoveryEl.hidden),
         popoverOpen,
         countdownActive: Boolean(countdownTimer),
         countdownRemaining,
         pollActive: Boolean(pollTimer),
         hibernated: coexist.isWindowHibernated(doc, win, blurred),
         lastSnapshot: lastSnapshot ? { ...lastSnapshot } : null,
+        watchdog: lastWatchdog ? { ...lastWatchdog } : null,
       };
     }
 
@@ -710,8 +1026,13 @@
         try { listeners.pop()(); } catch {}
       }
       try { bannerEl?.remove?.(); } catch {}
+      try { recoveryEl?.remove?.(); } catch {}
       try { styleEl?.remove?.(); } catch {}
-      bannerEl = msgEl = actionsEl = primaryBtn = fillBtn = exportBtn = downloadBtn = cancelCdBtn = dismissBtn = gearBtn = toastEl = popEl = styleEl = null;
+      bannerEl = recoveryEl = recoveryMsgEl = recoveryFillBtn = recoveryCopyBtn = recoveryDismissBtn = null;
+      msgEl = focusTagEl = actionsEl = primaryBtn = fillBtn = exportBtn = downloadBtn = cancelCdBtn = dismissBtn = gearBtn = toastEl = popEl = styleEl = null;
+      activeRecovery = null;
+      lastWatchdog = null;
+      watchdog?.resetAll?.();
       sessionState.clear();
       countdownCanceledForSession.clear();
     }
@@ -723,6 +1044,8 @@
       evaluateNow,
       updateConfig,
       getConfig: () => ({ ...config, modules: { ...config.modules } }),
+      buildCompactCommand,
+      captureRecoverySnapshot,
       insertCompact: insertCompactIntoComposer,
       exportMarkdown: handleExportMd,
       downloadMarkdown: (opts) => handleExportMd({ ...(opts || {}), download: true }),
@@ -732,5 +1055,5 @@
     };
   }
 
-  return { THRESHOLD_PRESETS, COMPACT_CMD, createCompactGuardController };
+  return { THRESHOLD_PRESETS, STALL_PRESETS, COMPACT_CMD, createCompactGuardController };
 });

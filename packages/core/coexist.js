@@ -15,15 +15,19 @@
   const DEFAULT_CONFIG = Object.freeze({
     compactThreshold: 80, // 'off' | 50..98 (recommended default when standalone: 80%)
     compactTriggerMode: 'confirm', // 'confirm' | 'fill-only' | 'auto-countdown'
+    compactFocusPreset: 'default', // 'default' | 'code-errors' | 'bookmarks' | 'custom'
+    customCompactFocus: '', // custom focus instructions appended after /compact (<= 240 chars)
     countdownSeconds: 5, // 3..15
     rearmDeltaPct: 10, // re-notify after dismiss if usage climbs another +10%
     resetDropPct: 10, // auto-reset dismiss state if usage drops by >=10% below threshold
+    stallThresholdSeconds: 180, // 'off' | 60..900 (3 min default)
     radarNotifyMode: 'off', // 'off' | 'awaiting' | 'all' (opt-in blurred OS notifications)
     modules: Object.freeze({
       compactGuard: true,
       precompactExport: true,
       outlineBookmarks: true,
       sessionRadar: false, // opt-in sidebar attention filter + alerts
+      sessionWatchdog: true, // burn-rate estimate + streaming stall detector
     }),
   });
 
@@ -40,6 +44,16 @@
     const allowedModes = ['confirm', 'fill-only', 'auto-countdown'];
     const mode = allowedModes.includes(src.compactTriggerMode) ? src.compactTriggerMode : fallback.compactTriggerMode;
 
+    const allowedPresets = ['default', 'code-errors', 'bookmarks', 'custom'];
+    const compactFocusPreset = allowedPresets.includes(src.compactFocusPreset)
+      ? src.compactFocusPreset
+      : fallback.compactFocusPreset || 'default';
+
+    const customCompactFocus =
+      typeof src.customCompactFocus === 'string'
+        ? src.customCompactFocus.replace(/[\r\n]+/g, ' ').trim().slice(0, 240)
+        : fallback.customCompactFocus || '';
+
     const cdRaw = Number(src.countdownSeconds);
     const countdownSeconds = Number.isFinite(cdRaw) ? Math.max(3, Math.min(15, Math.round(cdRaw))) : fallback.countdownSeconds;
 
@@ -49,18 +63,39 @@
     const dropRaw = Number(src.resetDropPct);
     const resetDropPct = Number.isFinite(dropRaw) ? Math.max(5, Math.min(30, Math.round(dropRaw))) : fallback.resetDropPct;
 
+    let stallThresholdSeconds = fallback.stallThresholdSeconds !== undefined ? fallback.stallThresholdSeconds : 180;
+    if (src.stallThresholdSeconds === 'off' || src.stallThresholdSeconds === false || src.stallThresholdSeconds === 0) {
+      stallThresholdSeconds = 'off';
+    } else if (src.stallThresholdSeconds !== undefined && src.stallThresholdSeconds !== null && src.stallThresholdSeconds !== '') {
+      const s = Number(src.stallThresholdSeconds);
+      if (Number.isFinite(s) && s >= 30 && s <= 900) stallThresholdSeconds = Math.round(s);
+    }
+
     const allowedNotify = ['off', 'awaiting', 'all'];
     const radarNotifyMode = allowedNotify.includes(src.radarNotifyMode) ? src.radarNotifyMode : fallback.radarNotifyMode;
 
     const mSrc = src.modules && typeof src.modules === 'object' ? src.modules : {};
+    const fbMods = fallback.modules || DEFAULT_CONFIG.modules;
     const modules = {
-      compactGuard: mSrc.compactGuard !== undefined ? Boolean(mSrc.compactGuard) : fallback.modules.compactGuard,
-      precompactExport: mSrc.precompactExport !== undefined ? Boolean(mSrc.precompactExport) : fallback.modules.precompactExport,
-      outlineBookmarks: mSrc.outlineBookmarks !== undefined ? Boolean(mSrc.outlineBookmarks) : fallback.modules.outlineBookmarks,
-      sessionRadar: mSrc.sessionRadar !== undefined ? Boolean(mSrc.sessionRadar) : fallback.modules.sessionRadar,
+      compactGuard: mSrc.compactGuard !== undefined ? Boolean(mSrc.compactGuard) : fbMods.compactGuard,
+      precompactExport: mSrc.precompactExport !== undefined ? Boolean(mSrc.precompactExport) : fbMods.precompactExport,
+      outlineBookmarks: mSrc.outlineBookmarks !== undefined ? Boolean(mSrc.outlineBookmarks) : fbMods.outlineBookmarks,
+      sessionRadar: mSrc.sessionRadar !== undefined ? Boolean(mSrc.sessionRadar) : fbMods.sessionRadar,
+      sessionWatchdog: mSrc.sessionWatchdog !== undefined ? Boolean(mSrc.sessionWatchdog) : fbMods.sessionWatchdog !== false,
     };
 
-    return { compactThreshold: threshold, compactTriggerMode: mode, countdownSeconds, rearmDeltaPct, resetDropPct, radarNotifyMode, modules };
+    return {
+      compactThreshold: threshold,
+      compactTriggerMode: mode,
+      compactFocusPreset,
+      customCompactFocus,
+      countdownSeconds,
+      rearmDeltaPct,
+      resetDropPct,
+      stallThresholdSeconds,
+      radarNotifyMode,
+      modules,
+    };
   }
 
   function shouldYieldToHostIntegrator(win, source = 'standalone') {
