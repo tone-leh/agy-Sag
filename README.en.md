@@ -55,10 +55,11 @@ Configurable Compaction Guard · Turn Bookmarks & Redacted Pre-Compact Markdown 
 
 | Module | Default | What It Does | Standalone UMD Core |
 | :--- | :---: | :--- | :--- |
-| **Compact Guard** | On (`80%` confirm) | Threshold alert bar (`off/70/75/80/85/90%`), confirm / insert-only / 5s idle countdown, quick `⚙` settings popover | [`packages/core/compact-guard.js`](./packages/core/compact-guard.js) |
-| **Outline Bookmarks** | On | Per-`cascadeId` persisted `☆/★` turn stars + bookmarked-only filter inside Obsidian Prism's outline popover | [`packages/core/outline-bookmarks.js`](./packages/core/outline-bookmarks.js) |
-| **Pre-Compact Export** | On | One-click `Export MD` / `Export ★ (N)` right on the compact bar with automatic redaction (`sk-`, `AIza`, `ghp_`, `Bearer`, JWT, PEM keys) | [`packages/core/precompact-export.js`](./packages/core/precompact-export.js) |
+| **Compact Guard** | On (`80%` confirm) | Threshold alert bar (`off/70/75/80/85/90%`), confirm / insert-only / 5s idle countdown, `↓ .md` download, quick `⚙` settings popover | [`packages/core/compact-guard.js`](./packages/core/compact-guard.js) |
+| **Outline Bookmarks** | On | Per-`cascadeId` persisted `☆/★` stars, standalone native floating `★ N` jump drawer (works without Prism), plus Prism outline filter | [`packages/core/outline-bookmarks.js`](./packages/core/outline-bookmarks.js) |
+| **Pre-Compact Export** | On | One-click clipboard copy (`Export MD` / `Export ★ (N)`) & local `.md` file download with automatic secret redaction (`sk-`, `AIza`, `ghp_`, `Bearer`, JWT, PEM) | [`packages/core/precompact-export.js`](./packages/core/precompact-export.js) |
 | **Session Radar** | Off (opt-in) | Sidebar `All / Running / Awaiting` attention filter pill + blurred-only desktop alerts (`Off / Awaiting / All`) | [`packages/core/session-radar.js`](./packages/core/session-radar.js) |
+| **Watch Daemon** | CLI daemon | Zero-ASAR adaptive-backoff watcher (`npm run watch`) that auto-attaches to new or `Cmd+R`-reloaded Antigravity windows | [`cli/watch-daemon.mjs`](./cli/watch-daemon.mjs) |
 
 ### Engineering Guardrails (Tested on Every Commit)
 
@@ -76,19 +77,22 @@ Configurable Compaction Guard · Turn Bookmarks & Redacted Pre-Compact Markdown 
 git clone https://github.com/tone-leh/agy-session-guard.git
 cd agy-session-guard
 
-npm test         # 13 unit & hygiene tests (~130ms)
+npm test         # 17 unit & hygiene tests (~150ms)
 npm run workbench
 # Open http://127.0.0.1:4179
 ```
 
-### 2. Attach via Zero-ASAR CDP
+### 2. Attach or Watch via Zero-ASAR CDP
 
 ```bash
 # Preview matching host windows without injecting
 node cli/cdp-attach.mjs --attach --dry-run
 
-# Attach to an existing CDP-enabled Antigravity session
+# One-shot attach to an existing CDP-enabled Antigravity session
 npm run attach
+
+# Or keep Watch Daemon running (adaptive backoff, auto-attaches new/reloaded windows, never restarts host)
+npm run watch
 
 # Inspect live state or tear down 100% losslessly
 npm run status

@@ -2,6 +2,14 @@
 
 All notable changes to **Antigravity Session Guard (领航哨)** are documented in this file.
 
+## [0.3.0] - 2026-11-25
+
+### Added
+- **Standalone Zero-ASAR Watch Daemon (`cli/watch-daemon.mjs`, `npm run watch`)**: Continuously discovers the local Antigravity CDP port with adaptive backoff (`3s` active → up to `30s` steady-state), automatically attaches to newly opened or `Cmd+R`-reloaded host windows using a lightweight hash probe, honors `window.__agSessionGuardOwner` yield, supports `--once` and `--json` NDJSON mode, and never restarts Antigravity.
+- **Standalone Native Bookmark Jump Drawer (`packages/core/outline-bookmarks.js`)**: Works natively with or without Obsidian Prism installed — surfaces a zero-clutter sticky `★ N` chip once turns are bookmarked, opens a jump popover listing redacted turn snippets, scrolls smoothly to the selected bubble with a temporary pulse highlight (`data-ag-sg-pulse`), and includes one-click `Copy ★ MD` & `Download ★ .md` footer actions.
+- **One-Click Local `.md` File Download (`packages/core/precompact-export.js`, `packages/core/compact-guard.js`)**: Added `buildRecapFilename()`, `downloadRecapMarkdown()`, and a compact `↓ .md` download button on the Compact Guard banner with localized toasts across all 5 locales (`zh-CN`, `zh-TW`, `yue`, `en`, `ja`).
+- **Offline Workbench v0.3 & Expanded Test Suite**: Added multi-turn conversation preview, `.md` download log feedback, `--smoke` CI flag, and `test/watch-daemon.test.mjs` + native jump drawer + `.md` download + 5-locale key parity tests.
+
 ## [0.2.0] - 2026-11-25
 
 ### Added

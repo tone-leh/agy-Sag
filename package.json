@@ -1,7 +1,7 @@
 {
   "name": "agy-session-guard",
-  "version": "0.2.0",
-  "description": "Antigravity Session Guard (领航哨) — Configurable context compaction threshold guard, pre-compact Markdown export, and modular session copilot for Antigravity. Zero runtime dependencies, Zero-ASAR CDP, MIT licensed.",
+  "version": "0.3.0",
+  "description": "Antigravity Session Guard (领航哨) — Configurable context compaction threshold guard, native turn bookmarks, pre-compact Markdown export & Zero-ASAR watch daemon for Antigravity. Zero runtime dependencies, MIT licensed.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -13,6 +13,7 @@
     "compact-guard",
     "markdown-export",
     "session-copilot",
+    "watch-daemon",
     "zero-asar",
     "obsidian-prism-compatible"
   ],
@@ -20,6 +21,7 @@
     "test": "node --test test/*.test.mjs",
     "workbench": "node workbench/server.mjs",
     "attach": "node cli/cdp-attach.mjs --attach",
+    "watch": "node cli/watch-daemon.mjs",
     "remove": "node cli/cdp-attach.mjs --remove",
     "status": "node cli/cdp-attach.mjs --status"
   }

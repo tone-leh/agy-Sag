@@ -66,11 +66,11 @@
   - **空闲 5s 倒计时（可选进阶）**：只有当 **超过阈值 + 本轮非生成中 + 输入框完全为空 + 窗口处于激活态** 四个条件同时成立时才开始 5 秒倒计时；期间敲任意一个字或点「取消自动」，倒计时**瞬间熔断中止**。
 - **压缩后自动复位**：监听宿主 `compactedAtStepIndices` 增长或占比回落 `>= 10%` 后自动清零忽略记录，下一轮照常护航。
 
-### 2. 轮次书签 & 压缩前脱敏导出（Outline Bookmarks + Pre-Compact Export）
+### 2. 轮次书签 & 原生快捷跳转抽屉 & 压缩前脱敏导出（Outline Bookmarks + Pre-Compact Export）
 
-- **单轮随手标星**：在每轮用户消息气泡上挂载轻量 `☆ / ★` 按钮（同时自动兼容 Obsidian Prism 的左侧提问大纲浮窗，提供顶部 `★ N` 仅看书签筛选）。书签按 `cascadeId` 持久化在本地。
-- **与压缩浮条无缝联动**：一旦当前会话有标星轮次，压缩浮条上的导出按钮会自动变成 **`仅导出 ★ (N)`**——先点它把关键结论复制走，再点旁边的 `/compact`，一气呵成。
-- **默认全量脱敏**：导出前自动清洗 `sk-` / `rk-` / `pk-` / `ak-` / `AIza` / `ghp_` / `Bearer Token` / `JWT` 及 `PEM PRIVATE KEY` 块，避免复盘笔记误带敏感凭据。
+- **单轮随手标星 + 原生 `★ N` 跳转抽屉（无需依赖皮肤也能用）**：在每轮用户消息气泡上挂载轻量 `☆ / ★` 按钮，按 `cascadeId` 本地持久化；一旦本会话有标星轮次，会话顶部右上角自动浮现紧凑的 **`★ N` 跳转胶囊**（0 书签时完全隐藏不占位），展开即可看到脱敏后的轮次摘要，点击平滑滚动定位并高亮闪烁目标气泡；若安装了 Obsidian Prism，还会自动联动其左侧提问大纲浮窗的 `★ N` 仅看书签筛选。
+- **复制与 `↓ .md` 一键双出口**：一旦当前会话有标星轮次，压缩浮条上的导出按钮会自动切换为 **`仅导出 ★ (N)`**（一键复制到剪贴板），旁边紧邻 **`↓ .md`** 按钮（以及书签抽屉底部「下载 ★ .md」），直接把跨平台安全命名的 `.md` 复盘文件保存到本地，再点 `/compact` 一气呵成。
+- **默认全量脱敏**：导出与抽屉摘要均自动清洗 `sk-` / `rk-` / `pk-` / `ak-` / `AIza` / `ghp_` / `Bearer Token` / `JWT` 及 `PEM PRIVATE KEY` 块，避免复盘笔记误带敏感凭据。
 
 ### 3. 多会话聚光雷达（Session Radar · 默认关闭，按需开启）
 
@@ -83,10 +83,11 @@
 
 | 模块 | 默认态 | 核心职责 | 独立源码（可单独引入） |
 | :--- | :---: | :--- | :--- |
-| **Compact Guard** | 开启（80% 浮条确认） | 上下文阈值预警、确认压缩、5s 空闲倒计时、快捷设置浮窗 | [`packages/core/compact-guard.js`](./packages/core/compact-guard.js) |
-| **Outline Bookmarks** | 开启 | 单轮 `☆/★` 书签、按 `cascadeId` 持久化、左侧大纲书签筛选 | [`packages/core/outline-bookmarks.js`](./packages/core/outline-bookmarks.js) |
-| **Pre-Compact Export** | 开启 | 压缩前一键导出结构化 Markdown、自动脱敏敏感凭据 | [`packages/core/precompact-export.js`](./packages/core/precompact-export.js) |
+| **Compact Guard** | 开启（80% 浮条确认） | 上下文阈值预警、确认压缩、5s 空闲倒计时、一键 `↓ .md` 下载、快捷设置浮窗 | [`packages/core/compact-guard.js`](./packages/core/compact-guard.js) |
+| **Outline Bookmarks** | 开启 | 单轮 `☆/★` 书签、原生 `★ N` 浮动跳转抽屉（无皮肤可用）、Prism 大纲筛选 | [`packages/core/outline-bookmarks.js`](./packages/core/outline-bookmarks.js) |
+| **Pre-Compact Export** | 开启 | 压缩前一键复制或下载 `.md` 复盘文件、自动脱敏敏感凭据 | [`packages/core/precompact-export.js`](./packages/core/precompact-export.js) |
 | **Session Radar** | 关闭（按需开启） | 侧栏 `全部/运行中/待确认` 聚光过滤条、失焦系统桌面通知 | [`packages/core/session-radar.js`](./packages/core/session-radar.js) |
+| **Watch Daemon** | CLI 按需常驻 | Zero-ASAR 自适应退避守护进程，新窗口与 `Cmd+R` 重载自动补挂 | [`cli/watch-daemon.mjs`](./cli/watch-daemon.mjs) |
 
 **五条硬红线（写进单测，每次提交必检）：**
 1. **Zero-ASAR & 不重启宿主**：纯 CDP 动态附着已有本地调试端口，绝不改 `app.asar`、不强杀或重启客户端。
@@ -107,7 +108,7 @@
 git clone https://github.com/tone-leh/agy-session-guard.git
 cd agy-session-guard
 
-# 运行全套单元测试（13 项测试约 0.13s 完成）
+# 运行全套单元测试（17 项测试约 0.15s 完成）
 npm test
 
 # 启动离线交互工作台
@@ -118,10 +119,10 @@ npm run workbench
 在离线工作台里你可以直接：
 - 拖动上下文滑块从 `10%` 拉到 `102%`，看琥珀预警如何切为猩红超限；
 - 在输入框里随便敲几个字，验证草稿保护如何拦住自动填入并秒停 5s 倒计时；
-- 点亮右侧气泡的 `☆ → ★` 书签，再点「仅导出 ★ (1)」观察密钥自动脱敏结果；
+- 点亮右侧气泡的 `☆ → ★` 书签，展开顶部原生 `★ N` 跳转抽屉定位轮次，并一键复制或下载 `.md` 脱敏复盘；
 - 切换 4 套皮肤配色（Obsidian Dark / Daylight Crystal / Warm Alabaster / Warm Dark）与 5 种界面语言。
 
-### 方式二：Zero-ASAR 附着到正在运行的 Antigravity
+### 方式二：Zero-ASAR 附着或后台守护运行中的 Antigravity
 
 > 前提：Antigravity 已携带 `--remote-debugging-port=0` 启动（如果你已安装 Obsidian Prism，调试端口已经就绪；原生 macOS 用户也可通过 `open -a "/Applications/Antigravity.app" --args --remote-debugging-port=0` 启动）。
 
@@ -129,13 +130,15 @@ npm run workbench
 # 1. 先预演检查将命中的宿主窗口（只读，不注入）
 node cli/cdp-attach.mjs --attach --dry-run
 
-# 2. 附着挂载（可带初始参数 --threshold=75 --mode=confirm）
+# 2. 单次附着挂载（可带初始参数 --threshold=75 --mode=confirm）
 npm run attach
 
-# 3. 查看实时运行状态与模块 debug 信息
-npm run status
+# 3. 或者启动轻量 Watch Daemon：自动发现端口、新开/重载窗口自动补挂（绝不重启宿主）
+npm run watch
+# 支持参数：node cli/watch-daemon.mjs --threshold=75 --mode=confirm --interval=3000 --max-backoff=30000
 
-# 4. 随时 100% 无损卸载还原
+# 4. 查看实时运行状态与模块 debug 信息 / 100% 无损卸载还原
+npm run status
 npm run remove
 ```
 
@@ -159,6 +162,8 @@ npm run remove
 node cli/cdp-attach.mjs --attach --threshold=75 --mode=confirm         # 自定义 75% 浮条确认
 node cli/cdp-attach.mjs --attach --threshold=80 --mode=auto-countdown  # 80% 空闲 5s 倒计时
 node cli/cdp-attach.mjs --attach --port=9222                           # 手动指定 CDP 端口
+node cli/watch-daemon.mjs --threshold=75 --interval=3000               # 常驻守护：新开/重载窗口自动附着
+node cli/watch-daemon.mjs --once --json                                # 单次核对并输出 JSON（便于脚本/计划任务）
 node cli/cdp-attach.mjs --remove                                       # 100% 无损卸载
 ```
 
@@ -208,7 +213,7 @@ const guard = window.__agSgCore.mountSessionGuard({
 
 | 项目 | 验证方式 | 当前状态 |
 | :--- | :--- | :--- |
-| 核心状态机、三重防误触、5s 倒计时与脱敏导出 | Node.js 22 `node --test`（13 项单测） | 全部通过 |
+| 核心状态机、三重防误触、Watch Daemon、原生书签跳转与 `.md` 下载 | Node.js 22 `node --test`（17 项单测） | 全部通过 |
 | 四套主题变量适配、5 语种切换、无损 `destroy()` | 离线交互工作台（`workbench/server.mjs`）+ 单元冒烟 | 已验证 |
 | Zero-ASAR CDP 附着与目标白名单 | 参数校验与目标过滤单测 + `--dry-run` 路径 | 已验证（跨平台真机实测持续补充中） |
 

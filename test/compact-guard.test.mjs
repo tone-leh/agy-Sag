@@ -186,6 +186,11 @@ function createMockDom({ lang = 'zh-CN', draft = '', streaming = false } = {}) {
     document: doc,
     localStorage: storage,
     location: { pathname: '/c/11111111-2222-4333-8444-555555555555' },
+    Blob: class MockBlob { constructor(parts, opts) { this.parts = parts; this.opts = opts; } },
+    URL: {
+      createObjectURL: () => 'blob:mock-cg-md',
+      revokeObjectURL: () => {},
+    },
     navigator: {
       language: lang,
       clipboard: { writeText: async (t) => { copiedText = t; } },
@@ -334,9 +339,10 @@ test('CompactGuard: auto-countdown mode aborts immediately if user types draft o
   guard.destroy();
 });
 
-test('CompactGuard: built-in quick settings popover updates threshold/mode & persists, and Export MD copies redacted recap', async () => {
+test('CompactGuard: built-in quick settings popover updates threshold/mode & persists, and Export / Download .md emit redacted recap', async () => {
   const env = createMockDom({ lang: 'zh-CN' });
   let exported = null;
+  let downloaded = null;
 
   const guard = core.mountSessionGuard({
     win: env.win,
@@ -346,6 +352,7 @@ test('CompactGuard: built-in quick settings popover updates threshold/mode & per
     config: { compactThreshold: 80, compactTriggerMode: 'confirm' },
     getContextSnapshot: () => ({ usedFraction: 0.85, usedTokens: 435000, maxTokens: 512000 }),
     onExportMarkdown: (res) => { exported = res; },
+    onDownloadMarkdown: (res) => { downloaded = res; },
   });
 
   await guard.evaluateNow();
@@ -356,6 +363,13 @@ test('CompactGuard: built-in quick settings popover updates threshold/mode & per
   assert.ok(exported && exported.ok && exported.count === 1);
   assert.equal(exported.markdown.includes('sk-superSecret'), false, 'Exported MD must redact API keys');
   assert.ok(env.getCopied().includes('[REDACTED_KEY]'));
+
+  // One-click ↓ .md download button
+  banner.querySelector('[data-ag-sg-act="download-md"]').click();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(downloaded && downloaded.ok && downloaded.downloaded);
+  assert.ok(downloaded.filename.endsWith('.md'));
+  assert.equal(downloaded.markdown.includes('sk-superSecret'), false);
 
   // Open settings popover and switch threshold to 70% & mode to fill-only
   banner.querySelector('[data-ag-sg-act="settings"]').click();

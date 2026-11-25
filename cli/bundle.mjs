@@ -37,6 +37,11 @@ export function readCoreSources() {
   }));
 }
 
+export function computeCoreHash(parts = readCoreSources()) {
+  const combined = parts.map((p) => `/* ${p.file} */\n${p.code}`).join('\n;\n');
+  return crypto.createHash('sha256').update(combined).digest('hex').slice(0, 16);
+}
+
 export function buildInjectExpression(config = null, opts = {}) {
   const parts = readCoreSources();
   const combined = parts.map((p) => `/* ${p.file} */\n${p.code}`).join('\n;\n');

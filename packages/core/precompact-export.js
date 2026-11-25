@@ -50,6 +50,27 @@
     }
   }
 
+  function extractNodeTextWithoutOwned(el) {
+    if (!el) return '';
+    if (Array.isArray(el.children) && el.children.length > 0 && el.children.some((c) => c?.getAttribute?.('data-ag-sg-owned') === '1')) {
+      const parts = [];
+      if (typeof el._text === 'string' && el._text) parts.push(el._text);
+      for (const c of el.children) {
+        if (c?.getAttribute?.('data-ag-sg-owned') === '1') continue;
+        parts.push(c.textContent || '');
+      }
+      return parts.join('');
+    }
+    if (typeof el.cloneNode === 'function') {
+      try {
+        const clone = el.cloneNode(true);
+        clone.querySelectorAll?.('[data-ag-sg-owned="1"]')?.forEach?.((n) => n.remove?.());
+        return clone.textContent || '';
+      } catch {}
+    }
+    return String(el.textContent || '').replace(/[☆★]\s*$/, '');
+  }
+
   function extractConversationTurns(doc) {
     if (!doc || typeof doc.querySelector !== 'function') return [];
     const conv = doc.querySelector('[data-testid="conversation-view"]') || doc.body;
@@ -71,7 +92,7 @@
       if (tid === 'planner-response-text' && el.closest?.('[data-testid="agent-response"]')) continue;
       seenEl.add(el);
 
-      const text = normalizeBlockText(el.textContent || '');
+      const text = normalizeBlockText(extractNodeTextWithoutOwned(el));
       if (!text) continue;
 
       if (tid === 'user-message-bubble' || tid === 'user-message-content') {
@@ -150,6 +171,53 @@
     return { ok: true, count: selected.length, markdown: lines.join('\n').trim() + '\n' };
   }
 
+  function buildRecapFilename(cascadeId = '', now = new Date(), { onlyBookmarked = false } = {}) {
+    const dt = now instanceof Date ? now : new Date(now);
+    const iso = Number.isNaN(dt.getTime()) ? '1970-01-01T00:00:00.000Z' : dt.toISOString();
+    const stamp = `${iso.slice(0, 10).replace(/-/g, '')}-${iso.slice(11, 16).replace(':', '')}`;
+    const shortCid = String(cascadeId || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 8);
+    const parts = ['antigravity-recap'];
+    if (onlyBookmarked) parts.push('stars');
+    if (shortCid) parts.push(shortCid);
+    parts.push(stamp);
+    return `${parts.join('-')}.md`;
+  }
+
+  function downloadRecapMarkdown(markdown, filename = 'antigravity-recap.md', win, doc) {
+    const w = win || globalRoot;
+    const d = doc || w?.document || null;
+    const BlobCtor = w?.Blob || globalThis.Blob;
+    const UrlApi = w?.URL || globalThis.URL;
+    if (!markdown || !d || typeof d.createElement !== 'function' || typeof BlobCtor !== 'function' || typeof UrlApi?.createObjectURL !== 'function') {
+      return { ok: false, filename, reason: 'unavailable' };
+    }
+    let objectUrl = '';
+    try {
+      const blob = new BlobCtor([String(markdown)], { type: 'text/markdown;charset=utf-8' });
+      objectUrl = UrlApi.createObjectURL(blob);
+      const a = d.createElement('a');
+      a.href = objectUrl;
+      a.download = filename;
+      a.setAttribute?.('download', filename);
+      a.setAttribute?.('data-ag-sg-owned', '1');
+      if (a.style) a.style.display = 'none';
+      (d.body || d.documentElement)?.appendChild?.(a);
+      a.click?.();
+      a.remove?.();
+      const revoke = () => {
+        try { UrlApi.revokeObjectURL?.(objectUrl); } catch {}
+      };
+      const t = setTimeout(revoke, 1000);
+      t?.unref?.();
+      return { ok: true, filename, bytes: String(markdown).length };
+    } catch {
+      if (objectUrl) {
+        try { UrlApi.revokeObjectURL?.(objectUrl); } catch {}
+      }
+      return { ok: false, filename, reason: 'download-failed' };
+    }
+  }
+
   async function copyRecapToClipboard(markdown, win) {
     const w = win || globalRoot;
     try {
@@ -164,10 +232,13 @@
   return {
     BOOKMARK_STORAGE_PREFIX,
     redactSecrets,
+    extractNodeTextWithoutOwned,
     loadBookmarks,
     saveBookmarks,
     extractConversationTurns,
     buildRecapMarkdown,
+    buildRecapFilename,
+    downloadRecapMarkdown,
     copyRecapToClipboard,
   };
 });

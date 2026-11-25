@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Antigravity Session Guard — Offline Interactive Preview Workbench (v0.2)
+ * Antigravity Session Guard — Offline Interactive Preview Workbench (v0.3)
  *
- * Previews all 3 modules offline without touching any live Antigravity instance:
- *   - Module G: Compact Guard (10% -> 115% slider, 102% overflow alert, 5s countdown, draft & streaming guards)
- *   - Module D: Turn Bookmarks (click ☆ on user turns -> Export ★ MD with secret redaction)
+ * Previews all modules offline without touching any live Antigravity instance:
+ *   - Module G: Compact Guard (10% -> 115% slider, 102% overflow alert, 5s countdown, draft & streaming guards, ↓ .md download)
+ *   - Module D: Turn Bookmarks + Native Floating ★ N Jump Drawer (star turns -> jump with pulse -> Copy / Download ★ .md)
  *   - Module B: Session Radar (sidebar All/Running/Awaiting filter pill + simulated blurred-window notification)
  */
 import http from 'node:http';
@@ -24,7 +24,7 @@ function buildHtmlPage() {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Antigravity Session Guard · Offline Workbench v0.2</title>
+  <title>Antigravity Session Guard · Offline Workbench v0.3</title>
   <style>
     :root{
       --background:#0b0d13; --card:#131722; --foreground:#eef1f7; --muted-foreground:#94a3b8;
@@ -98,7 +98,7 @@ function buildHtmlPage() {
   <aside class="controls">
     <div>
       <h1>Antigravity Session Guard</h1>
-      <div style="font-size:11.5px;color:var(--muted-foreground)">v0.2 离线交互工作台 · 零碰实机</div>
+      <div style="font-size:11.5px;color:var(--muted-foreground)">v0.3 离线交互工作台 · 零碰实机</div>
     </div>
     <label>上下文占比：<strong id="pct-val">82%</strong> (可拖至 102%+)
       <input id="pct-slider" type="range" min="10" max="115" value="82" />
@@ -140,7 +140,9 @@ function buildHtmlPage() {
       <div class="bubble-u" data-testid="user-message-bubble"><span>帮我排查为什么上下文经常到 102% 还没触发压缩，注意凭据 sk-testSecretKey1234567890 不能外泄。</span></div>
       <div class="bubble-a" data-testid="agent-response">宿主协议未暴露压缩阈值字段，且 usedFraction 不封顶。建议在自定义阈值时浮条提前确认并一键 /compact。</div>
       <div class="bubble-u" data-testid="user-message-bubble"><span>请把标星的关键架构结论先导出脱敏 Markdown，再安心执行压缩。</span></div>
-      <div class="bubble-a" data-testid="agent-response">点击每轮提问右侧 ☆ 即可按会话持久化书签，压缩条将自动切换为「仅导出 ★ (N)」。</div>
+      <div class="bubble-a" data-testid="agent-response">点击每轮提问右侧 ☆ 即可按会话持久化书签，顶部会浮现原生「★ N」快捷跳转抽屉，压缩条也提供一键复制与 ↓ .md 本地下载。</div>
+      <div class="bubble-u" data-testid="user-message-bubble"><span>如果重启或新开了 Antigravity 窗口，怎么做到无感自动重挂？</span></div>
+      <div class="bubble-a" data-testid="agent-response">执行 <code>npm run watch</code> 即可启动零依赖 Watch Daemon：自适应退避探测 CDP 端口，窗口新建或重载后自动挂载，绝不触碰 app.asar。</div>
     </div>
     <div class="composer-wrap">
       <div data-testid="agent-input-box">
@@ -202,8 +204,11 @@ ${coreScript}
           logOut.textContent = '[SUBMIT] ' + command + ' at ' + slider.value + '%';
           composer.value = '';
         },
-        onExportMarkdown: ({ markdown }) => {
-          logOut.textContent = markdown;
+        onExportMarkdown: ({ markdown, filename, downloaded }) => {
+          logOut.textContent = (downloaded && filename ? '[DOWNLOAD .MD] ' + filename + '\\n\\n' : '') + markdown;
+        },
+        onDownloadMarkdown: ({ filename, count }) => {
+          console.log('[workbench] downloaded', filename, count);
         },
         onRadarNotify: (ev) => {
           logOut.textContent = '[BLURRED OS ALERT] ' + ev.notifTitle + '\\n→ ' + ev.notifBody;
@@ -285,7 +290,7 @@ if (isEntry) {
         const res = await fetch(`http://127.0.0.1:${port}/`);
         const html = await res.text();
         srv.close();
-        if (res.status !== 200 || !html.includes('mountSessionGuard') || !html.includes('ag-sg-radar-bar')) {
+        if (res.status !== 200 || !html.includes('mountSessionGuard') || !html.includes('ag-sg-radar-bar') || !html.includes('ag-sg-bm-dock')) {
           throw new Error(`Unexpected smoke response: status=${res.status}`);
         }
         console.log(`[agy-session-guard] Workbench smoke OK (HTTP ${res.status}, ${Buffer.byteLength(html, 'utf8')} B)`);
@@ -298,7 +303,7 @@ if (isEntry) {
     const portArg = process.argv.find((a) => a.startsWith('--port='));
     const port = portArg ? Number(portArg.slice('--port='.length)) : DEFAULT_PORT;
     startWorkbenchServer(port).then(() => {
-      console.log(`[agy-session-guard] Offline Workbench v0.2 listening at http://127.0.0.1:${port}`);
+      console.log(`[agy-session-guard] Offline Workbench v0.3 listening at http://127.0.0.1:${port}`);
     });
   }
 }

@@ -76,7 +76,7 @@ export function discoverCdpPort(explicitPort = null, platform = process.platform
   return null;
 }
 
-function httpGetJson(url, timeoutMs = 2500) {
+export function httpGetJson(url, timeoutMs = 2500) {
   return new Promise((resolve, reject) => {
     const req = http.get(url, { timeout: timeoutMs }, (res) => {
       let data = '';
@@ -104,7 +104,7 @@ export function isAntigravityHostTarget(target) {
   return false;
 }
 
-function evalViaCdp(wsUrl, expression, timeoutMs = 4000) {
+export function evalViaCdp(wsUrl, expression, timeoutMs = 4000) {
   return new Promise((resolve, reject) => {
     if (typeof WebSocket !== 'function') {
       return reject(new Error('Node.js >= 22 global WebSocket is required'));

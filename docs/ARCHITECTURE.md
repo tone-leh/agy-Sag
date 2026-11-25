@@ -17,12 +17,17 @@ packages/core/
 ├── i18n.js               # 5-locale table (zh-CN, zh-TW, yue, en, ja)
 ├── coexist.js            # Config validation, owner auto-yield, hibernation helpers
 ├── context-source.js     # Telemetry adapter (__agPrismMetricsBridge -> agPulseHost -> Pulse DOM -> DOM fallback)
-├── precompact-export.js  # Structured Markdown exporter + secret redaction + per-session bookmarks
-├── outline-bookmarks.js  # Module D: per-turn & Prism outline ☆/★ bookmarks + bookmarked-only filter
+├── precompact-export.js  # Structured Markdown exporter + .md file download + secret redaction + per-session bookmarks
+├── outline-bookmarks.js  # Module D: per-turn ☆/★ bookmarks, standalone floating ★ N jump drawer & Prism outline filter
 ├── styles.js             # Theme-adaptive zero-:has() CSS
-├── compact-guard.js      # Module G: threshold banner, countdown, quick settings popover
+├── compact-guard.js      # Module G: threshold banner, countdown, ↓ .md download, quick settings popover
 ├── session-radar.js      # Module B: sidebar All/Running/Awaiting filter pill + opt-in blurred OS alerts
 └── index.js              # mountSessionGuard(opts) unified registry & lossless destroy()
+
+cli/
+├── bundle.mjs            # Zero-eval idempotent hash-guarded bundle builder & REMOVE_EXPRESSION
+├── cdp-attach.mjs        # One-shot Zero-ASAR CDP attacher, status inspector & lossless remover
+└── watch-daemon.mjs      # Adaptive-backoff Watch Daemon for new/reloaded Antigravity host windows
 ```
 
 ## 3. Coexistence & Downstream Absorption Contract (e.g. Obsidian Prism)

@@ -43,6 +43,7 @@
     let primaryBtn = null;
     let fillBtn = null;
     let exportBtn = null;
+    let downloadBtn = null;
     let cancelCdBtn = null;
     let dismissBtn = null;
     let gearBtn = null;
@@ -193,7 +194,7 @@
       return { ok: true, submitted: false };
     };
 
-    const handleExportMd = async ({ onlyBookmarked = false } = {}) => {
+    const handleExportMd = async ({ onlyBookmarked = false, download = false } = {}) => {
       const strings = S();
       const turns = exporter.extractConversationTurns(doc);
       const cid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win);
@@ -211,6 +212,19 @@
       if (!built.ok) {
         setToast(strings.toastExportEmpty, 'warn');
         return built;
+      }
+      if (download) {
+        const filename = exporter.buildRecapFilename(cid, new Date(), { onlyBookmarked: onlyBookmarked && bm.size > 0 });
+        const dl = exporter.downloadRecapMarkdown(built.markdown, filename, win, doc);
+        const payload = { ...built, filename, downloaded: dl.ok };
+        if (typeof options.onDownloadMarkdown === 'function') {
+          options.onDownloadMarkdown(payload);
+        }
+        if (typeof options.onExportMarkdown === 'function') {
+          options.onExportMarkdown(payload);
+        }
+        setToast(i18n.formatTemplate(strings.toastDownloaded, { file: filename, turns: built.count }), 'ok');
+        return payload;
       }
       await exporter.copyRecapToClipboard(built.markdown, win);
       if (typeof options.onExportMarkdown === 'function') {
@@ -406,7 +420,12 @@
       exportBtn = mkBtn('ag-sg-btn', '', 'export-md', () => {
         const cid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win);
         const bmCount = exporter.loadBookmarks(storage, cid).size;
-        void handleExportMd({ onlyBookmarked: bmCount > 0 });
+        void handleExportMd({ onlyBookmarked: bmCount > 0, download: false });
+      });
+      downloadBtn = mkBtn('ag-sg-btn', '', 'download-md', () => {
+        const cid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win);
+        const bmCount = exporter.loadBookmarks(storage, cid).size;
+        void handleExportMd({ onlyBookmarked: bmCount > 0, download: true });
       });
       cancelCdBtn = mkBtn('ag-sg-btn', '', 'cancel-countdown', () => {
         stopCountdown();
@@ -429,6 +448,7 @@
       actionsEl.appendChild(primaryBtn);
       actionsEl.appendChild(fillBtn);
       actionsEl.appendChild(exportBtn);
+      actionsEl.appendChild(downloadBtn);
       actionsEl.appendChild(cancelCdBtn);
       actionsEl.appendChild(gearBtn);
       actionsEl.appendChild(dismissBtn);
@@ -566,6 +586,10 @@
           ? i18n.formatTemplate(strings.btnExportBmMd, { n: bmCount })
           : strings.btnExportMd;
       exportBtn.hidden = !config.modules.precompactExport;
+      downloadBtn.textContent = strings.btnDownloadMd;
+      downloadBtn.title = strings.btnDownloadMdTitle;
+      downloadBtn.setAttribute('aria-label', strings.btnDownloadMdTitle);
+      downloadBtn.hidden = !config.modules.precompactExport;
       cancelCdBtn.textContent = strings.btnCancelCountdown;
       cancelCdBtn.hidden = !isCounting;
       gearBtn.title = strings.btnSettings;
@@ -687,7 +711,7 @@
       }
       try { bannerEl?.remove?.(); } catch {}
       try { styleEl?.remove?.(); } catch {}
-      bannerEl = msgEl = actionsEl = primaryBtn = fillBtn = exportBtn = cancelCdBtn = dismissBtn = gearBtn = toastEl = popEl = styleEl = null;
+      bannerEl = msgEl = actionsEl = primaryBtn = fillBtn = exportBtn = downloadBtn = cancelCdBtn = dismissBtn = gearBtn = toastEl = popEl = styleEl = null;
       sessionState.clear();
       countdownCanceledForSession.clear();
     }
@@ -701,6 +725,7 @@
       getConfig: () => ({ ...config, modules: { ...config.modules } }),
       insertCompact: insertCompactIntoComposer,
       exportMarkdown: handleExportMd,
+      downloadMarkdown: (opts) => handleExportMd({ ...(opts || {}), download: true }),
       openSettingsPopover,
       getDebugState,
       destroy,

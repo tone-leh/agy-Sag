@@ -8,7 +8,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this, function (globalRoot) {
   'use strict';
 
-  const VERSION = '0.2.0';
+  const VERSION = '0.3.0';
 
   function resolveDep(globalKey, relPath) {
     if (globalRoot && globalRoot[globalKey]) return globalRoot[globalKey];
@@ -68,6 +68,8 @@
         void compactGuard.evaluateNow();
         if (typeof options.onBookmarksChange === 'function') options.onBookmarksChange(ev);
       },
+      onExportMarkdown: options.onExportMarkdown,
+      onDownloadMarkdown: options.onDownloadMarkdown,
     });
 
     sessionRadar = radarMod.createSessionRadarController({
