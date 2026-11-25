@@ -5,7 +5,7 @@
  * Previews all modules offline without touching any live Antigravity instance:
  *   - Module G: Compact Guard + Smart /compact <focus> Presets + Post-Compact Recovery Strip + ↓ .md Download
  *   - Module D: Turn Bookmarks + Native Floating ★ N Jump Drawer + Cross-Session Bookmark Vault (Ctrl+Shift+B)
- *   - Module B: Session Radar (sidebar All/Running/Awaiting filter pill + blurred-window OS notifications)
+ *   - Module B: Session Radar (sidebar All/Running/Awaiting filter pill + clickable multi-session switcher + blurred OS alerts)
  *   - Watchdog: Context Burn-Rate Estimator (turns remaining & token spike) + Streaming Stall Detector
  */
 import http from 'node:http';
@@ -48,20 +48,26 @@ function buildHtmlPage() {
       --border:rgba(242,237,228,.16); --warning:#f59e0b; --error:#f87171; --success:#34d399;
     }
     *{box-sizing:border-box}
-    body{margin:0;background:var(--background);color:var(--foreground);font:13px/1.55 Inter,system-ui,-apple-system,sans-serif;display:grid;grid-template-columns:250px 286px 1fr;min-height:100vh;}
+    body{margin:0;background:var(--background);color:var(--foreground);font:13px/1.55 Inter,system-ui,-apple-system,sans-serif;display:grid;grid-template-columns:260px 286px 1fr;min-height:100vh;}
     .sidebar-sim{border-right:1px solid var(--border);padding:12px;background:color-mix(in srgb,var(--card) 94%,var(--background));display:flex;flex-direction:column;gap:8px;}
-    .conv-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 9px;border-radius:8px;border:1px solid var(--border);background:var(--card);font-size:12px;cursor:pointer;}
+    .sim-hint{font-size:11px;line-height:1.45;color:var(--muted-foreground);margin:0 0 2px 0;}
+    .conv-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 9px;border-radius:8px;border:1px solid var(--border);background:var(--card);font-size:12px;cursor:pointer;transition:border-color 120ms ease,background 120ms ease;}
+    .conv-row:hover{border-color:color-mix(in srgb,var(--primary) 45%,var(--border));}
+    .conv-row[data-active="1"]{border-color:color-mix(in srgb,var(--primary) 75%,transparent);background:color-mix(in srgb,var(--primary) 12%,var(--card));font-weight:600;}
     .conv-row[hidden]{display:none!important;}
-    .badge{font-size:10px;padding:1px 6px;border-radius:999px;border:1px solid var(--border);color:var(--muted-foreground);}
+    .badge{font-size:10px;padding:1px 6px;border-radius:999px;border:1px solid var(--border);color:var(--muted-foreground);flex:0 0 auto;}
     .badge.run{color:var(--primary);border-color:color-mix(in srgb,var(--primary) 50%,transparent);}
     .badge.await{color:var(--warning);border-color:color-mix(in srgb,var(--warning) 55%,transparent);}
     aside.controls{border-right:1px solid var(--border);padding:16px;background:var(--card);display:flex;flex-direction:column;gap:11px;}
     main{padding:20px 24px;display:flex;flex-direction:column;max-width:860px;width:100%;margin:0 auto;gap:14px;}
+    .chat-header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-bottom:8px;border-bottom:1px solid var(--border);font-size:12.5px;font-weight:600;}
+    .approval-card{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid color-mix(in srgb,var(--warning) 55%,var(--border));background:color-mix(in srgb,var(--warning) 10%,var(--card));font-size:12px;}
     h1{font-size:15px;margin:0}
     h2{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted-foreground);margin:4px 0 2px}
     label{display:flex;flex-direction:column;gap:4px;font-size:12px;}
     input[type="range"]{width:100%}
     select,button.ctl{padding:6px 9px;border-radius:8px;border:1px solid var(--border);background:var(--secondary);color:var(--foreground);font:inherit;cursor:pointer;}
+    button.ctl.approve{background:var(--primary);border-color:var(--primary);color:var(--primary-foreground);font-weight:600;font-size:11.5px;padding:4px 10px;}
     .hud-box{padding:8px 10px;border-radius:9px;border:1px solid var(--border);background:var(--background);font-size:11.5px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;}
     .chat{flex:1;display:flex;flex-direction:column;gap:12px;border:1px solid var(--border);border-radius:14px;padding:16px;background:var(--card);}
     .bubble-u{align-self:flex-end;display:flex;align-items:center;gap:6px;background:color-mix(in srgb,var(--primary) 16%,transparent);border:1px solid color-mix(in srgb,var(--primary) 34%,transparent);padding:10px 13px;border-radius:12px;max-width:84%;}
@@ -76,20 +82,21 @@ function buildHtmlPage() {
 <body>
   <section class="sidebar-sim">
     <h2>模拟侧边栏 · Session Radar (B)</h2>
+    <p class="sim-hint">以下 4 条为模拟的 Antigravity 历史/并行会话，点击任意一条可切换右侧对话并测试独立书签与审批状态。</p>
     <div data-testid="conversation-list-sidebar">
-      <div class="conv-row" data-testid="conversation-row-sidebar" data-cascade-id="s-1" data-status="awaiting_decision">
+      <div class="conv-row" data-testid="conversation-row-sidebar" data-cascade-id="aaaaaaaa-1111-4111-8111-111111111111" data-status="awaiting_decision">
         <span data-testid="conversation-title">发布 PR 审批确认</span>
         <span class="badge await">待确认</span>
       </div>
-      <div class="conv-row" data-testid="conversation-row-sidebar" data-cascade-id="11111111-2222-4333-8444-555555555555" data-status="running" id="sim-row-running">
+      <div class="conv-row" data-testid="conversation-row-sidebar" data-cascade-id="11111111-2222-4333-8444-555555555555" data-status="running" data-active="1" id="sim-row-running">
         <span data-testid="conversation-title">重构遥测聚合引擎</span>
         <span class="badge run">运行中</span>
       </div>
-      <div class="conv-row" data-testid="conversation-row-sidebar" data-cascade-id="s-3" data-status="idle">
+      <div class="conv-row" data-testid="conversation-row-sidebar" data-cascade-id="cccccccc-3333-4333-8333-333333333333" data-status="idle">
         <span data-testid="conversation-title">v2.35 兼容性核验</span>
         <span class="badge">空闲</span>
       </div>
-      <div class="conv-row" data-testid="conversation-row-sidebar" data-cascade-id="s-4" data-status="awaiting_decision">
+      <div class="conv-row" data-testid="conversation-row-sidebar" data-cascade-id="dddddddd-4444-4444-8444-444444444444" data-status="awaiting_decision">
         <span data-testid="conversation-title">子代理部署脚本核准</span>
         <span class="badge await">待确认</span>
       </div>
@@ -140,18 +147,11 @@ function buildHtmlPage() {
       <button class="ctl" id="btn-remount">卸载重挂 (0 残留)</button>
     </div>
     <h2>实时事件 / 脱敏导出预览</h2>
-    <pre class="md-out" id="log-out">就绪！试试：点 ⚙ 切换压缩焦点 → 点确认压缩 → 点「模拟压缩完成」触发无损续接卡；或按 Ctrl+Shift+B 打开跨会话档案库。</pre>
+    <pre class="md-out" id="log-out">就绪！可点击左侧任意模拟会话切换对话，点 ⚙ 切换压缩焦点，或按 Ctrl+Shift+B 打开跨会话档案库。</pre>
   </aside>
 
   <main>
-    <div class="chat" data-testid="conversation-view" data-cascade-id="11111111-2222-4333-8444-555555555555">
-      <div class="bubble-u" data-testid="user-message-bubble"><span>帮我排查为什么上下文经常到 102% 还没触发压缩，注意凭据 sk-testSecretKey1234567890 不能外泄。</span></div>
-      <div class="bubble-a" data-testid="agent-response">宿主协议未暴露压缩阈值字段，且 usedFraction 不封顶。建议在自定义阈值时浮条提前确认，并附带焦点指令一键 /compact。</div>
-      <div class="bubble-u" data-testid="user-message-bubble"><span>请把标星的关键架构结论先导出脱敏 Markdown，压缩完成后给我无损续接锚点。</span></div>
-      <div class="bubble-a" data-testid="agent-response">点击每轮提问右侧 ☆ 即可按会话持久化书签，压缩前静默留存锚点，压缩完成后自动弹出「填入续接提示」绿条。</div>
-      <div class="bubble-u" data-testid="user-message-bubble"><span>如果重启或新开了 Antigravity 窗口，怎么做到无感自动重挂？</span></div>
-      <div class="bubble-a" data-testid="agent-response">执行 <code>npm run watch</code> 即可启动零依赖 Watch Daemon：自适应退避探测 CDP 端口，窗口新建或重载后自动挂载，绝不触碰 app.asar。</div>
-    </div>
+    <div class="chat" id="conv-view" data-testid="conversation-view" data-cascade-id="11111111-2222-4333-8444-555555555555"></div>
     <div class="composer-wrap">
       <div data-testid="agent-input-box">
         <textarea id="composer" placeholder="在此输入草稿可测试“草稿零覆盖保护”与倒计时自动取消..."></textarea>
@@ -178,37 +178,159 @@ ${coreScript}
     const stopBtn = document.getElementById('stop-btn');
     const logOut = document.getElementById('log-out');
     const composer = document.getElementById('composer');
-    let compactedCount = 0;
+    const convView = document.getElementById('conv-view');
     let clockOffsetMs = 0;
+
+    const SIM_SESSIONS = {
+      '11111111-2222-4333-8444-555555555555': {
+        title: '重构遥测聚合引擎',
+        pct: 82,
+        compactedCount: 0,
+        awaitingPrompt: null,
+        turns: [
+          {
+            u: '帮我排查为什么上下文经常到 102% 还没触发压缩，注意凭据 sk-testSecretKey1234567890 不能外泄。',
+            a: '宿主协议未暴露压缩阈值字段，且 usedFraction 不封顶。建议在自定义阈值时浮条提前确认，并附带焦点指令一键 /compact。',
+          },
+          {
+            u: '请把标星的关键架构结论先导出脱敏 Markdown，压缩完成后给我无损续接锚点。',
+            a: '点击每轮提问右侧 ☆ 即可按会话持久化书签，压缩前静默留存锚点，压缩完成后自动弹出「填入续接提示」绿条。',
+          },
+          {
+            u: '如果重启或新开了 Antigravity 窗口，怎么做到无感自动重挂？',
+            a: '执行 npm run watch 即可启动零依赖 Watch Daemon：自适应退避探测 CDP 端口，窗口新建或重载后自动挂载，绝不触碰 app.asar。',
+          },
+        ],
+      },
+      'aaaaaaaa-1111-4111-8111-111111111111': {
+        title: '发布 PR 审批确认',
+        pct: 64,
+        compactedCount: 0,
+        awaitingPrompt: '子代理请求执行 git push origin feat/v235-fix 并创建 PR，等待你点击批准。',
+        turns: [
+          {
+            u: '检查 PR #56 的单测与字节预算是否全部通过。',
+            a: '77/77 单测通过，Channel 1 体积 684,950 B（低于 685 KB 门禁）。下一步需要你确认是否推送分支。',
+          },
+        ],
+      },
+      'cccccccc-3333-4333-8333-333333333333': {
+        title: 'v2.35 兼容性核验',
+        pct: 41,
+        compactedCount: 0,
+        awaitingPrompt: null,
+        turns: [
+          {
+            u: '确认 Channel 1 字节预算上限与共存礼让协议。',
+            a: '严格保持 0 :has() 与 __agSessionGuardOwner 自动礼让契约，已完成 v2.35.1 全量回归。',
+          },
+        ],
+      },
+      'dddddddd-4444-4444-8444-444444444444': {
+        title: '子代理部署脚本核准',
+        pct: 78,
+        compactedCount: 0,
+        awaitingPrompt: '子代理正在等待你批准执行数据库迁移校验命令（只读 dry-run）。',
+        turns: [
+          {
+            u: '先跑一遍只读 dry-run 检查是否存在表锁风险。',
+            a: '已生成校验命令，当前处于「待确认」状态，点击上方“模拟批准”后该会话将退出待确认列表。',
+          },
+        ],
+      },
+    };
+
+    let activeCid = '11111111-2222-4333-8444-555555555555';
 
     // Seed one historical conversation in localStorage so Cross-Session Vault has rich sample data out of the box
     (function seedDemoVault() {
-      const demoCid = '99999999-8888-4777-8666-555555555555';
+      const demoCid = 'cccccccc-3333-4333-8333-333333333333';
       if (window.__agSgBookmarkVault && !window.__agSgBookmarkVault.loadSessionMeta(localStorage, demoCid)) {
-        window.__agSgPrecompactExport.saveBookmarks(localStorage, demoCid, [2]);
+        window.__agSgPrecompactExport.saveBookmarks(localStorage, demoCid, [1]);
         window.__agSgBookmarkVault.syncSessionMeta({
           storage: localStorage,
           cascadeId: demoCid,
-          bookmarks: [2],
-          title: 'v2.35 兼容性核验与无损迁移',
-          turns: [{ turnNum: 2, user: '确认 Channel 1 字节预算上限与共存礼让协议', assistant: '严格保持 0 :has() 与 __agSessionGuardOwner 自动礼让契约。' }],
+          bookmarks: [1],
+          title: 'v2.35 兼容性核验',
+          turns: [{ turnNum: 1, user: '确认 Channel 1 字节预算上限与共存礼让协议。', assistant: '严格保持 0 :has() 与 __agSessionGuardOwner 自动礼让契约。' }],
         });
       }
     })();
 
+    function renderConversation(cid) {
+      const sess = SIM_SESSIONS[cid];
+      if (!sess) return;
+      activeCid = cid;
+      convView.setAttribute('data-cascade-id', cid);
+      slider.value = String(sess.pct);
+      while (convView.firstChild) convView.removeChild(convView.firstChild);
+
+      const header = document.createElement('div');
+      header.className = 'chat-header';
+      header.textContent = '当前模拟会话：' + sess.title + ' (' + cid.slice(0, 8) + ')';
+      convView.appendChild(header);
+
+      const rowEl = document.querySelector('[data-testid="conversation-row-sidebar"][data-cascade-id="' + cid + '"]');
+      if (sess.awaitingPrompt && rowEl && rowEl.getAttribute('data-status') === 'awaiting_decision') {
+        const card = document.createElement('div');
+        card.className = 'approval-card';
+        const txt = document.createElement('span');
+        txt.textContent = '⏳ 待确认：' + sess.awaitingPrompt;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ctl approve';
+        btn.textContent = '模拟批准（清除待确认）';
+        btn.addEventListener('click', () => {
+          rowEl.setAttribute('data-status', 'idle');
+          const b = rowEl.querySelector('.badge');
+          if (b) { b.className = 'badge'; b.textContent = '空闲'; }
+          sess.awaitingPrompt = null;
+          card.remove();
+          guard.sessionRadar.syncFromDom();
+          logOut.textContent = '[APPROVED] 已批准「' + sess.title + '」，左侧雷达「待确认」数量已实时减一。';
+        });
+        card.appendChild(txt);
+        card.appendChild(btn);
+        convView.appendChild(card);
+      }
+
+      for (const t of sess.turns) {
+        const bu = document.createElement('div');
+        bu.className = 'bubble-u';
+        bu.setAttribute('data-testid', 'user-message-bubble');
+        const sp = document.createElement('span');
+        sp.textContent = t.u;
+        bu.appendChild(sp);
+
+        const ba = document.createElement('div');
+        ba.className = 'bubble-a';
+        ba.setAttribute('data-testid', 'agent-response');
+        ba.textContent = t.a;
+
+        convView.appendChild(bu);
+        convView.appendChild(ba);
+      }
+
+      document.querySelectorAll('[data-testid="conversation-row-sidebar"]').forEach((r) => {
+        r.setAttribute('data-active', r.getAttribute('data-cascade-id') === cid ? '1' : '0');
+      });
+    }
+
     function getSimSnap() {
+      const sess = SIM_SESSIONS[activeCid];
       const pct = Number(slider.value);
+      if (sess) sess.pct = pct;
       const maxTokens = 512000;
       const usedTokens = Math.round((pct / 100) * maxTokens);
       pctVal.textContent = pct + '%';
       ctxStatus.textContent = 'Context: ' + pct + '% (' + Math.round(usedTokens / 1000) + 'K / 512K)';
       return {
-        cascadeId: '11111111-2222-4333-8444-555555555555',
+        cascadeId: activeCid,
         usedFraction: pct / 100,
         usedTokens,
         maxTokens,
         streaming: streamChk.checked,
-        compactedCount,
+        compactedCount: sess ? sess.compactedCount : 0,
       };
     }
 
@@ -261,8 +383,19 @@ ${coreScript}
       });
     }
 
+    renderConversation(activeCid);
     let guard = mountGuard();
     guard.evaluateNow().then(updateBurnHud);
+
+    document.querySelectorAll('[data-testid="conversation-row-sidebar"]').forEach((row) => {
+      row.addEventListener('click', () => {
+        const cid = row.getAttribute('data-cascade-id');
+        if (!cid || !SIM_SESSIONS[cid]) return;
+        renderConversation(cid);
+        guard.evaluateNow().then(updateBurnHud);
+        logOut.textContent = '[SWITCH SESSION] 已切换到模拟会话：' + SIM_SESSIONS[cid].title;
+      });
+    });
 
     slider.addEventListener('input', () => guard.evaluateNow().then(updateBurnHud));
     streamChk.addEventListener('change', () => {
@@ -297,12 +430,13 @@ ${coreScript}
     });
     document.getElementById('btn-compact-sim').addEventListener('click', () => {
       guard.compactGuard.captureRecoverySnapshot();
-      compactedCount += 1;
+      const sess = SIM_SESSIONS[activeCid];
+      if (sess) sess.compactedCount += 1;
       streamChk.checked = false;
       stopBtn.hidden = true;
       slider.value = '18';
       guard.evaluateNow().then(updateBurnHud);
-      logOut.textContent = '[COMPACTED #' + compactedCount + '] Context reset to 18%. Post-Compact Recovery strip ready!';
+      logOut.textContent = '[COMPACTED #' + (sess ? sess.compactedCount : 1) + '] Context reset to 18%. Post-Compact Recovery strip ready!';
     });
     document.getElementById('btn-open-cfg').addEventListener('click', () => guard.openSettingsPopover());
     document.getElementById('btn-open-vault').addEventListener('click', () => guard.openBookmarkVault());
