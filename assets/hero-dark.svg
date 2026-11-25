@@ -1,0 +1,155 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="620" viewBox="0 0 1120 620" fill="none">
+  <defs>
+    <linearGradient id="winBg" x1="0" y1="0" x2="1120" y2="620" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0d1018"/>
+      <stop offset="100%" stop-color="#090b11"/>
+    </linearGradient>
+    <linearGradient id="overflowBg" x1="296" y1="416" x2="1084" y2="416" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#28131a"/>
+      <stop offset="55%" stop-color="#1c131a"/>
+      <stop offset="100%" stop-color="#171622"/>
+    </linearGradient>
+    <linearGradient id="primaryBtn" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#000000" flood-opacity="0.48"/>
+    </filter>
+  </defs>
+
+  <!-- Outer window chrome -->
+  <rect x="1" y="1" width="1118" height="618" rx="18" fill="url(#winBg)" stroke="#23293a" stroke-width="1.5"/>
+
+  <!-- Top title bar -->
+  <path d="M1 19 C1 9 9 1 19 1 H1101 C1111 1 1119 9 1119 19 V44 H1 Z" fill="#111520"/>
+  <line x1="1" y1="44" x2="1119" y2="44" stroke="#1e2433"/>
+  <circle cx="24" cy="22" r="5.5" fill="#ef4444" fill-opacity="0.85"/>
+  <circle cx="44" cy="22" r="5.5" fill="#f59e0b" fill-opacity="0.85"/>
+  <circle cx="64" cy="22" r="5.5" fill="#22c55e" fill-opacity="0.85"/>
+  <text x="560" y="27" text-anchor="middle" fill="#94a3b8" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="500">Antigravity · Session Guard (领航哨 v0.2)</text>
+
+  <!-- Left Sidebar -->
+  <rect x="1" y="45" width="268" height="574" fill="#0f131d"/>
+  <line x1="269" y1="45" x2="269" y2="619" stroke="#1e2433"/>
+
+  <!-- Sidebar header -->
+  <text x="20" y="72" fill="#64748b" font-family="Inter, -apple-system, sans-serif" font-size="10.5" font-weight="600" letter-spacing="0.06em">CONVERSATIONS · SESSION RADAR</text>
+
+  <!-- Module B: Session Radar Filter Pill Bar -->
+  <rect x="14" y="84" width="240" height="34" rx="10" fill="#141926" stroke="#252d40"/>
+  <rect x="20" y="90" width="66" height="22" rx="11" fill="transparent" stroke="#2a3347"/>
+  <text x="53" y="105" text-anchor="middle" fill="#94a3b8" font-family="Inter, -apple-system, sans-serif" font-size="11" font-weight="500">全部 4</text>
+
+  <rect x="92" y="90" width="76" height="22" rx="11" fill="transparent" stroke="#2a3347"/>
+  <text x="130" y="105" text-anchor="middle" fill="#94a3b8" font-family="Inter, -apple-system, sans-serif" font-size="11" font-weight="500">运行中 1</text>
+
+  <rect x="174" y="90" width="74" height="22" rx="11" fill="#f59e0b" fill-opacity="0.16" stroke="#f59e0b" stroke-opacity="0.68"/>
+  <text x="211" y="105" text-anchor="middle" fill="#fbbf24" font-family="Inter, -apple-system, sans-serif" font-size="11" font-weight="600">待确认 2</text>
+
+  <!-- Filtered sidebar items -->
+  <rect x="14" y="130" width="240" height="56" rx="10" fill="#171d2c" stroke="#3186ff" stroke-opacity="0.45"/>
+  <circle cx="28" cy="148" r="4" fill="#f59e0b"/>
+  <text x="40" y="152" fill="#eef1f7" font-family="Inter, -apple-system, sans-serif" font-size="12" font-weight="600">发布 PR 审批确认</text>
+  <text x="40" y="172" fill="#94a3b8" font-family="Inter, -apple-system, sans-serif" font-size="10.5">等待确认命令 · 刚切出窗口</text>
+  <rect x="196" y="140" width="48" height="18" rx="9" fill="#f59e0b" fill-opacity="0.16" stroke="#f59e0b" stroke-opacity="0.5"/>
+  <text x="220" y="153" text-anchor="middle" fill="#fbbf24" font-family="Inter, -apple-system, sans-serif" font-size="9.5" font-weight="600">待确认</text>
+
+  <rect x="14" y="196" width="240" height="56" rx="10" fill="#131824" stroke="#212838"/>
+  <circle cx="28" cy="214" r="4" fill="#f59e0b"/>
+  <text x="40" y="218" fill="#dbe2ee" font-family="Inter, -apple-system, sans-serif" font-size="12" font-weight="500">子代理部署脚本核准</text>
+  <text x="40" y="238" fill="#64748b" font-family="Inter, -apple-system, sans-serif" font-size="10.5">2 分钟前 · 等待输入</text>
+  <rect x="196" y="206" width="48" height="18" rx="9" fill="#f59e0b" fill-opacity="0.14" stroke="#f59e0b" stroke-opacity="0.45"/>
+  <text x="220" y="219" text-anchor="middle" fill="#fbbf24" font-family="Inter, -apple-system, sans-serif" font-size="9.5" font-weight="600">待确认</text>
+
+  <!-- Subtle note for blurred alert -->
+  <rect x="14" y="544" width="240" height="58" rx="10" fill="#121723" stroke="#1e273a"/>
+  <text x="26" y="566" fill="#5cc6fc" font-family="Inter, -apple-system, sans-serif" font-size="10.5" font-weight="600">失焦桌面提醒已就绪</text>
+  <text x="26" y="585" fill="#94a3b8" font-family="Inter, -apple-system, sans-serif" font-size="10">仅在切出窗口时触发，点击跳回会话</text>
+
+  <!-- Main Chat Area -->
+  <!-- Turn 1 User bubble -->
+  <rect x="526" y="68" width="560" height="56" rx="12" fill="#162238" stroke="#3186ff" stroke-opacity="0.35"/>
+  <text x="544" y="92" fill="#eef1f7" font-family="Inter, -apple-system, sans-serif" font-size="12.5">帮我排查为什么上下文经常到 102% 还没触发压缩，注意脱敏测试 Key。</text>
+  <text x="544" y="111" fill="#7da6e8" font-family="Inter, -apple-system, sans-serif" font-size="10.5">Turn #1 · 未标星</text>
+  <text x="1064" y="96" text-anchor="middle" fill="#64748b" font-family="Inter, -apple-system, sans-serif" font-size="14">☆</text>
+
+  <!-- Turn 1 Assistant reply -->
+  <rect x="296" y="136" width="540" height="58" rx="12" fill="#141824" stroke="#222839"/>
+  <text x="314" y="160" fill="#d5dce8" font-family="Inter, -apple-system, sans-serif" font-size="12">宿主协议未暴露压缩阈值字段，且 usedFraction 允许超过 100%。</text>
+  <text x="314" y="180" fill="#94a3b8" font-family="Inter, -apple-system, sans-serif" font-size="11.5">建议在 75% / 80% 提前弹出确认条，压缩前一键导出脱敏复盘。</text>
+
+  <!-- Turn 2 User bubble (STARRED!) -->
+  <rect x="498" y="210" width="588" height="56" rx="12" fill="#18243c" stroke="#f59e0b" stroke-opacity="0.45"/>
+  <text x="516" y="234" fill="#eef1f7" font-family="Inter, -apple-system, sans-serif" font-size="12.5">把这轮核心架构结论标星留档，压缩前一键导出为 Markdown。</text>
+  <text x="516" y="253" fill="#fbbf24" font-family="Inter, -apple-system, sans-serif" font-size="10.5">★ 已加入本会话书签（持久化至 cascadeId）</text>
+  <rect x="1048" y="220" width="26" height="24" rx="7" fill="#f59e0b" fill-opacity="0.18"/>
+  <text x="1061" y="237" text-anchor="middle" fill="#fbbf24" font-family="Inter, -apple-system, sans-serif" font-size="14">★</text>
+
+  <!-- Floating Quick Settings Popover (above banner right) -->
+  <g filter="url(#shadow)">
+    <rect x="758" y="198" width="328" height="202" rx="13" fill="#141925" stroke="#2d374e" stroke-width="1.2"/>
+    <text x="776" y="223" fill="#eef1f7" font-family="Inter, -apple-system, sans-serif" font-size="12.5" font-weight="600">上下文压缩守卫 · 快捷设置</text>
+
+    <text x="776" y="245" fill="#94a3b8" font-family="Inter, -apple-system, sans-serif" font-size="10.5">触发预警阈值</text>
+    <!-- Threshold chips -->
+    <rect x="776" y="253" width="44" height="24" rx="7" fill="transparent" stroke="#2a3347"/>
+    <text x="798" y="269" text-anchor="middle" fill="#94a3b8" font-family="Inter, sans-serif" font-size="10.5">关闭</text>
+    <rect x="825" y="253" width="44" height="24" rx="7" fill="transparent" stroke="#2a3347"/>
+    <text x="847" y="269" text-anchor="middle" fill="#94a3b8" font-family="Inter, sans-serif" font-size="10.5">70%</text>
+    <rect x="874" y="253" width="44" height="24" rx="7" fill="transparent" stroke="#2a3347"/>
+    <text x="896" y="269" text-anchor="middle" fill="#94a3b8" font-family="Inter, sans-serif" font-size="10.5">75%</text>
+    <rect x="923" y="253" width="46" height="24" rx="7" fill="#3186ff" fill-opacity="0.2" stroke="#3186ff" stroke-opacity="0.75"/>
+    <text x="946" y="269" text-anchor="middle" fill="#60a5fa" font-family="Inter, sans-serif" font-size="10.5" font-weight="600">80%</text>
+    <rect x="974" y="253" width="44" height="24" rx="7" fill="transparent" stroke="#2a3347"/>
+    <text x="996" y="269" text-anchor="middle" fill="#94a3b8" font-family="Inter, sans-serif" font-size="10.5">85%</text>
+    <rect x="1023" y="253" width="44" height="24" rx="7" fill="transparent" stroke="#2a3347"/>
+    <text x="1045" y="269" text-anchor="middle" fill="#94a3b8" font-family="Inter, sans-serif" font-size="10.5">90%</text>
+
+    <text x="776" y="297" fill="#94a3b8" font-family="Inter, -apple-system, sans-serif" font-size="10.5">到达阈值时</text>
+    <rect x="776" y="305" width="76" height="24" rx="7" fill="#3186ff" fill-opacity="0.2" stroke="#3186ff" stroke-opacity="0.75"/>
+    <text x="814" y="321" text-anchor="middle" fill="#60a5fa" font-family="Inter, sans-serif" font-size="10.5" font-weight="600">浮条确认</text>
+    <rect x="858" y="305" width="66" height="24" rx="7" fill="transparent" stroke="#2a3347"/>
+    <text x="891" y="321" text-anchor="middle" fill="#94a3b8" font-family="Inter, sans-serif" font-size="10.5">仅填入</text>
+    <rect x="930" y="305" width="106" height="24" rx="7" fill="transparent" stroke="#2a3347"/>
+    <text x="983" y="321" text-anchor="middle" fill="#94a3b8" font-family="Inter, sans-serif" font-size="10.5">空闲 5s 倒计时</text>
+
+    <text x="776" y="349" fill="#94a3b8" font-family="Inter, -apple-system, sans-serif" font-size="10.5">扩展模块开关</text>
+    <rect x="776" y="357" width="84" height="24" rx="7" fill="#3186ff" fill-opacity="0.2" stroke="#3186ff" stroke-opacity="0.75"/>
+    <text x="818" y="373" text-anchor="middle" fill="#60a5fa" font-family="Inter, sans-serif" font-size="10.5" font-weight="600">轮次书签 ✓</text>
+    <rect x="866" y="357" width="84" height="24" rx="7" fill="#3186ff" fill-opacity="0.2" stroke="#3186ff" stroke-opacity="0.75"/>
+    <text x="908" y="373" text-anchor="middle" fill="#60a5fa" font-family="Inter, sans-serif" font-size="10.5" font-weight="600">侧栏聚光 ✓</text>
+  </g>
+
+  <!-- Module G: Compact Guard Overflow Banner (102%!) -->
+  <g filter="url(#shadow)">
+    <rect x="296" y="416" width="790" height="50" rx="13" fill="url(#overflowBg)" stroke="#ef4444" stroke-opacity="0.62" stroke-width="1.25"/>
+    <circle cx="316" cy="441" r="5" fill="#ef4444"/>
+    <circle cx="316" cy="441" r="9" fill="#ef4444" fill-opacity="0.22"/>
+    <text x="332" y="445" fill="#fef2f2" font-family="Inter, -apple-system, sans-serif" font-size="12.5" font-weight="600">上下文已超限 102%（522K / 512K）· 强烈建议立即压缩</text>
+
+    <!-- Action Buttons -->
+    <rect x="688" y="427" width="124" height="28" rx="8" fill="url(#primaryBtn)"/>
+    <text x="750" y="445" text-anchor="middle" fill="#ffffff" font-family="Inter, -apple-system, sans-serif" font-size="11.5" font-weight="600">确认压缩 /compact</text>
+
+    <rect x="818" y="427" width="54" height="28" rx="8" fill="#ffffff" fill-opacity="0.06" stroke="#ffffff" stroke-opacity="0.16"/>
+    <text x="845" y="445" text-anchor="middle" fill="#e2e8f0" font-family="Inter, -apple-system, sans-serif" font-size="11.5" font-weight="500">仅填入</text>
+
+    <rect x="878" y="427" width="90" height="28" rx="8" fill="#f59e0b" fill-opacity="0.14" stroke="#f59e0b" stroke-opacity="0.45"/>
+    <text x="923" y="445" text-anchor="middle" fill="#fde68a" font-family="Inter, -apple-system, sans-serif" font-size="11.5" font-weight="600">仅导出 ★ (1)</text>
+
+    <rect x="974" y="427" width="30" height="28" rx="8" fill="#3186ff" fill-opacity="0.18" stroke="#3186ff" stroke-opacity="0.5"/>
+    <text x="989" y="445" text-anchor="middle" fill="#93c5fd" font-family="Inter, -apple-system, sans-serif" font-size="12.5">⚙</text>
+
+    <rect x="1010" y="427" width="64" height="28" rx="8" fill="#ffffff" fill-opacity="0.05" stroke="#ffffff" stroke-opacity="0.14"/>
+    <text x="1042" y="445" text-anchor="middle" fill="#cbd5e1" font-family="Inter, -apple-system, sans-serif" font-size="11">本轮忽略</text>
+  </g>
+
+  <!-- Composer Card -->
+  <rect x="296" y="478" width="790" height="114" rx="14" fill="#131722" stroke="#242b3d" stroke-width="1.2"/>
+  <text x="316" y="508" fill="#64748b" font-family="Inter, -apple-system, sans-serif" font-size="13">输入消息...（有未发送草稿时自动保护，绝不覆写）</text>
+  <line x1="312" y1="548" x2="1070" y2="548" stroke="#1f2637"/>
+  <text x="316" y="574" fill="#94a3b8" font-family="Inter, -apple-system, sans-serif" font-size="11.5">Gemini 4 Neon · High  |  Context 102% (522K / 512K)</text>
+  <rect x="996" y="558" width="74" height="24" rx="8" fill="#1e293b" stroke="#334155"/>
+  <text x="1033" y="574" text-anchor="middle" fill="#cbd5e1" font-family="Inter, -apple-system, sans-serif" font-size="11" font-weight="500">Send ↵</text>
+</svg>

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="232" viewBox="0 0 1120 232" fill="none">
+  <rect x="1" y="1" width="358" height="230" rx="14" fill="#111622" stroke="#f59e0b" stroke-opacity="0.42" stroke-width="1.2"/>
+  <circle cx="24" cy="28" r="5" fill="#f59e0b"/>
+  <text x="38" y="33" fill="#fde68a" font-family="Inter, -apple-system, sans-serif" font-size="12.5" font-weight="600">01 · 到达阈值（默认 80%）· 浮条提前确认</text>
+  <rect x="18" y="52" width="324" height="44" rx="10" fill="#1f1a14" stroke="#f59e0b" stroke-opacity="0.38"/>
+  <text x="32" y="79" fill="#fef3c7" font-family="Inter, -apple-system, sans-serif" font-size="11.5">上下文已达 82%（420K / 512K）· 建议提前压缩</text>
+  <rect x="18" y="110" width="124" height="28" rx="8" fill="#2563eb"/>
+  <text x="80" y="128" text-anchor="middle" fill="#ffffff" font-family="Inter, -apple-system, sans-serif" font-size="11" font-weight="600">确认压缩 /compact</text>
+  <rect x="148" y="110" width="56" height="28" rx="8" fill="#1e293b" stroke="#334155"/>
+  <text x="176" y="128" text-anchor="middle" fill="#cbd5e1" font-family="Inter, -apple-system, sans-serif" font-size="11">仅填入</text>
+  <rect x="210" y="110" width="90" height="28" rx="8" fill="#f59e0b" fill-opacity="0.14" stroke="#f59e0b" stroke-opacity="0.4"/>
+  <text x="255" y="128" text-anchor="middle" fill="#fde68a" font-family="Inter, -apple-system, sans-serif" font-size="11">仅导出 ★</text>
+  <text x="18" y="166" fill="#94a3b8" font-family="Inter, -apple-system, sans-serif" font-size="11">• 支持关闭 / 70% / 75% / 80% / 85% / 90%</text>
+  <text x="18" y="186" fill="#94a3b8" font-family="Inter, -apple-system, sans-serif" font-size="11">• 流式生成中自动锁定按钮，绝不中途打断</text>
+  <text x="18" y="206" fill="#94a3b8" font-family="Inter, -apple-system, sans-serif" font-size="11">• 点「本轮忽略」后静默至压缩或再涨 +10%</text>
+
+  <rect x="381" y="1" width="358" height="230" rx="14" fill="#111622" stroke="#3186ff" stroke-opacity="0.45" stroke-width="1.2"/>
+  <circle cx="404" cy="28" r="5" fill="#3186ff"/>
+  <text x="418" y="33" fill="#93c5fd" font-family="Inter, -apple-system, sans-serif" font-size="12.5" font-weight="600">02 · 可选 5s 空闲倒计时 · 草稿零覆盖</text>
+  <rect x="398" y="52" width="324" height="44" rx="10" fill="#131c2e" stroke="#3186ff" stroke-opacity="0.45"/>
+  <text x="412" y="79" fill="#dbeafe" font-family="Inter, -apple-system, sans-serif" font-size="11.5">上下文 84% · 4s 后自动发送 /compact</text>
+  <rect x="398" y="110" width="90" height="28" rx="8" fill="#1e293b" stroke="#3186ff" stroke-opacity="0.5"/>
+  <text x="443" y="128" text-anchor="middle" fill="#93c5fd" font-family="Inter, -apple-system, sans-serif" font-size="11" font-weight="600">取消自动</text>
+  <rect x="494" y="110" width="228" height="28" rx="8" fill="#f59e0b" fill-opacity="0.1" stroke="#f59e0b" stroke-opacity="0.32"/>
+  <text x="608" y="128" text-anchor="middle" fill="#fbbf24" font-family="Inter, -apple-system, sans-serif" font-size="10.5">检测到草稿输入 → 瞬间熔断中止</text>
+  <text x="398" y="166" fill="#94a3b8" font-family="Inter, -apple-system, sans-serif" font-size="11">• 四条件同时满足才计时：超阈值 + 空闲 + 无草稿 + 激活</text>
+  <text x="398" y="186" fill="#94a3b8" font-family="Inter, -apple-system, sans-serif" font-size="11">• 敲下任意字符立刻停止倒计时，零误发风险</text>
+  <text x="398" y="206" fill="#94a3b8" font-family="Inter, -apple-system, sans-serif" font-size="11">• 切出窗口自动休眠暂停，回到窗口再判断</text>
+
+  <rect x="761" y="1" width="358" height="230" rx="14" fill="#111622" stroke="#ef4444" stroke-opacity="0.45" stroke-width="1.2"/>
+  <circle cx="784" cy="28" r="5" fill="#ef4444"/>
+  <text x="798" y="33" fill="#fca5a5" font-family="Inter, -apple-system, sans-serif" font-size="12.5" font-weight="600">03 · 102% 超限红警 · 压缩后自动归零</text>
+  <rect x="778" y="52" width="324" height="44" rx="10" fill="#26131a" stroke="#ef4444" stroke-opacity="0.5"/>
+  <text x="792" y="79" fill="#fecaca" font-family="Inter, -apple-system, sans-serif" font-size="11.5">上下文已超限 102%（522K / 512K）· 建议立即压缩</text>
+  <rect x="778" y="110" width="324" height="28" rx="8" fill="#052e16" stroke="#34d399" stroke-opacity="0.4"/>
+  <text x="940" y="128" text-anchor="middle" fill="#6ee7b7" font-family="Inter, -apple-system, sans-serif" font-size="11">✓ 监听 compactedAtStepIndices / 回落 10% 自动重置</text>
+  <text x="778" y="166" fill="#94a3b8" font-family="Inter, -apple-system, sans-serif" font-size="11">• 压缩前一键导出复盘 MD，自动脱敏密钥 / JWT</text>
+  <text x="778" y="186" fill="#94a3b8" font-family="Inter, -apple-system, sans-serif" font-size="11">• 优先复用 Prism / Pulse 遥测桥，零重复轮询</text>
+  <text x="778" y="206" fill="#94a3b8" font-family="Inter, -apple-system, sans-serif" font-size="11">• 原生无插件环境自动回退轻量 DOM 估算</text>
+</svg>
