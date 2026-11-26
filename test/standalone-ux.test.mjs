@@ -218,6 +218,10 @@ test('Standalone user (NO Obsidian Prism): sees calm composer % pill, floating q
   assert.ok(nativeSec.querySelectorAll('[data-ag-sg-prism-row]').length <= 4, 'Settings card must stay minimal (<= 4 rows)');
   assert.equal(nativeSec.querySelector('[data-ag-sg-prism-th="75"]').getAttribute('aria-pressed'), 'true');
   assert.equal(nativeSec.textContent.includes('Prism'), false, 'Native standalone settings must never show Prism jargon');
+  const modGuide = nativeSec.querySelector('[data-testid="ag-sg-mod-guide"]');
+  assert.ok(modGuide, 'Settings must render plain-language per-module descriptions right beside module toggles');
+  assert.equal(modGuide.querySelectorAll('.ag-sg-mod-guide-item').length, 4);
+  assert.equal(guard.getConfig().modules.outlineBookmarks, false, 'outlineBookmarks must default to opt-in (false) for clean first-run UX');
 
   guard.destroy();
   assert.equal(doc.querySelectorAll('[data-ag-sg-owned="1"]').length, 0);

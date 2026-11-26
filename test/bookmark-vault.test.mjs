@@ -148,6 +148,7 @@ test('Cross-Session Bookmark Vault: aggregates & redacts multi-session stars, se
     storage: env.storage,
     autoPoll: false,
     autoObserve: false,
+    config: { modules: { outlineBookmarks: true } },
     onDownloadMarkdown: (p) => { downloaded = p; },
   });
 

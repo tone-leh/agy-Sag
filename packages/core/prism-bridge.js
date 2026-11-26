@@ -160,6 +160,7 @@
         b.type = 'button';
         b.className = inPrism ? 'ag-cs-seg-btn ag-sg-set-seg-btn' : 'ag-sg-set-seg-btn';
         b.textContent = spec.label;
+        if (spec.title) b.title = spec.title;
         if (spec.attr && spec.val !== undefined) b.setAttribute(spec.attr, String(spec.val));
         b.setAttribute('aria-pressed', String(Boolean(spec.active)));
         if (spec.active) b.setAttribute('data-pressed', '');
@@ -229,19 +230,45 @@
         })
       );
 
+      const modSpecs = [
+        ['draftGuard', strings.cfgModDraftGuard, strings.modDescDraftGuard],
+        ['outlineBookmarks', strings.cfgModBookmarks, strings.modDescBookmarks],
+        ['sessionWatchdog', strings.cfgModWatchdog, strings.modDescWatchdog],
+        ['sessionRadar', strings.cfgModRadar, strings.modDescRadar],
+      ];
+      const modGuide = doc.createElement('div');
+      modGuide.className = 'ag-sg-mod-guide';
+      modGuide.setAttribute('data-testid', 'ag-sg-mod-guide');
+      for (const [mKey, mLabel, mDesc] of modSpecs) {
+        const active = Boolean(cfg.modules?.[mKey]);
+        const item = doc.createElement('div');
+        item.className = 'ag-sg-mod-guide-item';
+        item.setAttribute('data-active', active ? '1' : '0');
+        const dot = doc.createElement('span');
+        dot.className = 'ag-sg-mod-guide-dot';
+        dot.setAttribute('aria-hidden', 'true');
+        const name = doc.createElement('span');
+        name.className = 'ag-sg-mod-guide-name';
+        name.textContent = mLabel;
+        const txt = doc.createElement('span');
+        txt.className = 'ag-sg-mod-guide-desc';
+        txt.textContent = mDesc;
+        item.appendChild(dot);
+        item.appendChild(name);
+        item.appendChild(txt);
+        modGuide.appendChild(item);
+      }
+
       card.appendChild(
         mkSegRow({
           key: 'modules',
           title: strings.cfgModules,
           desc: strings.setDescModules,
           inPrism,
-          buttons: [
-            ['draftGuard', strings.cfgModDraftGuard],
-            ['outlineBookmarks', strings.cfgModBookmarks],
-            ['sessionWatchdog', strings.cfgModWatchdog],
-            ['sessionRadar', strings.cfgModRadar],
-          ].map(([mKey, mLabel]) => ({
+          extraEl: modGuide,
+          buttons: modSpecs.map(([mKey, mLabel, mDesc]) => ({
             label: mLabel,
+            title: mDesc,
             attr: 'data-ag-sg-prism-mod',
             val: mKey,
             active: Boolean(cfg.modules?.[mKey]),

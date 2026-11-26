@@ -172,7 +172,7 @@ test('Smart /compact Focus Presets build redacted commands across default, code-
     autoPoll: false,
     autoObserve: false,
     bindVaultShortcut: false,
-    config: { compactThreshold: 80, compactTriggerMode: 'confirm', compactFocusPreset: 'default' },
+    config: { compactThreshold: 80, compactTriggerMode: 'confirm', compactFocusPreset: 'default', modules: { outlineBookmarks: true } },
     getContextSnapshot: () => ({ usedFraction: 0.86, usedTokens: 440000, maxTokens: 512000 }),
     onSubmitCompact: (ev) => submitted.push(ev),
   });
@@ -227,7 +227,7 @@ test('Post-Compact Recovery Card: silently snapshots starred turns before /compa
     autoPoll: false,
     autoObserve: false,
     bindVaultShortcut: false,
-    config: { compactThreshold: 80, compactTriggerMode: 'confirm' },
+    config: { compactThreshold: 80, compactTriggerMode: 'confirm', modules: { outlineBookmarks: true } },
     getContextSnapshot: () => ({
       usedFraction: pct / 100,
       usedTokens: Math.round((pct / 100) * 512000),

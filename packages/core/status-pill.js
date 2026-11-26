@@ -244,6 +244,7 @@
         const title = doc.createElement('span');
         title.className = 'ag-sg-pv-title';
         title.textContent = strings.pvAutoCompactTitle;
+        title.title = strings.setDescThreshold;
         titleWrap.appendChild(title);
 
         if (bmCount > 0 && typeof options.onOpenVault === 'function') {
@@ -268,6 +269,7 @@
           cleanBtn.className = 'ag-sg-pv-act';
           cleanBtn.setAttribute('data-ag-sg-pv-act', 'clean-restart');
           cleanBtn.textContent = strings.btnClearKeep;
+          cleanBtn.title = strings.clearKeepTip;
           cleanBtn.addEventListener('click', (ev) => {
             ev?.preventDefault?.();
             ev?.stopPropagation?.();
@@ -437,12 +439,12 @@
         );
       }
       if (typeof options.onCleanRestart === 'function') {
-        foot.appendChild(
-          mkAct('ag-sg-btn ag-sg-btn-primary', strings.btnClearKeep, 'clean-restart', () => {
-            close();
-            options.onCleanRestart({ mode: 'keep' });
-          })
-        );
+        const cleanBtn = mkAct('ag-sg-btn ag-sg-btn-primary', strings.btnClearKeep, 'clean-restart', () => {
+          close();
+          options.onCleanRestart({ mode: 'keep' });
+        });
+        cleanBtn.title = strings.clearKeepTip;
+        foot.appendChild(cleanBtn);
       }
       if (foot.children.length > 0) cardEl.appendChild(foot);
     }

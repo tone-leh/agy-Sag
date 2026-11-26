@@ -25,7 +25,7 @@
     modules: Object.freeze({
       compactGuard: true,
       precompactExport: true,
-      outlineBookmarks: true,
+      outlineBookmarks: false, // opt-in: adds bookmark icon beside Copy/Undo in user action bar
       draftGuard: true, // unsent composer draft auto-save & crash recovery
       sessionRadar: false, // opt-in sidebar attention filter + alerts
       sessionWatchdog: true, // burn-rate estimate + streaming stall detector
