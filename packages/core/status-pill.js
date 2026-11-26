@@ -202,9 +202,9 @@
 
       body.appendChild(
         mkRow(strings.cfgMode, [
+          { label: strings.cfgModeCountdown, attr: 'data-ag-sg-card-mode', val: 'auto-countdown', active: cfg.compactTriggerMode === 'auto-countdown', onClick: () => updateConfig({ compactTriggerMode: 'auto-countdown' }) },
           { label: strings.cfgModeConfirm, attr: 'data-ag-sg-card-mode', val: 'confirm', active: cfg.compactTriggerMode === 'confirm', onClick: () => updateConfig({ compactTriggerMode: 'confirm' }) },
           { label: strings.cfgModeFill, attr: 'data-ag-sg-card-mode', val: 'fill-only', active: cfg.compactTriggerMode === 'fill-only', onClick: () => updateConfig({ compactTriggerMode: 'fill-only' }) },
-          { label: strings.cfgModeCountdown, attr: 'data-ag-sg-card-mode', val: 'auto-countdown', active: cfg.compactTriggerMode === 'auto-countdown', onClick: () => updateConfig({ compactTriggerMode: 'auto-countdown' }) },
         ])
       );
 

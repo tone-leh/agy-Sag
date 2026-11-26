@@ -182,7 +182,7 @@ test('Smart /compact Focus Presets build redacted commands across default, code-
 
   // Switch to code-errors via settings popover
   const banner = env.doc.querySelector('[data-testid="ag-sg-compact-banner"]');
-  banner.querySelector('[data-ag-sg-act="settings"]').click();
+  guard.openSettingsPopover();
   const pop = env.doc.querySelector('[data-testid="ag-sg-settings-popover"]');
   pop.querySelector('[data-ag-sg-focus="code-errors"]').click();
 

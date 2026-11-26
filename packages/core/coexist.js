@@ -13,11 +13,11 @@
   const STORAGE_KEY = 'agSessionGuard.config.v1';
 
   const DEFAULT_CONFIG = Object.freeze({
-    compactThreshold: 80, // 'off' | 50..98 (recommended default when standalone: 80%)
-    compactTriggerMode: 'confirm', // 'confirm' | 'fill-only' | 'auto-countdown'
+    compactThreshold: 80, // 'off' | 50..98 (recommended default: 80%)
+    compactTriggerMode: 'auto-countdown', // 'auto-countdown' | 'confirm' | 'fill-only'
     compactFocusPreset: 'default', // 'default' | 'code-errors' | 'bookmarks' | 'custom'
     customCompactFocus: '', // custom focus instructions appended after /compact (<= 240 chars)
-    countdownSeconds: 5, // 3..15
+    countdownSeconds: 3, // 2..15 (snappy default: 3s)
     rearmDeltaPct: 10, // re-notify after dismiss if usage climbs another +10%
     resetDropPct: 10, // auto-reset dismiss state if usage drops by >=10% below threshold
     stallThresholdSeconds: 180, // 'off' | 60..900 (3 min default)
@@ -56,7 +56,7 @@
         : fallback.customCompactFocus || '';
 
     const cdRaw = Number(src.countdownSeconds);
-    const countdownSeconds = Number.isFinite(cdRaw) ? Math.max(3, Math.min(15, Math.round(cdRaw))) : fallback.countdownSeconds;
+    const countdownSeconds = Number.isFinite(cdRaw) ? Math.max(2, Math.min(15, Math.round(cdRaw))) : fallback.countdownSeconds;
 
     const rearmRaw = Number(src.rearmDeltaPct);
     const rearmDeltaPct = Number.isFinite(rearmRaw) ? Math.max(3, Math.min(30, Math.round(rearmRaw))) : fallback.rearmDeltaPct;

@@ -218,9 +218,9 @@
           desc: strings.setDescMode,
           inPrism,
           buttons: [
+            ['auto-countdown', strings.cfgModeCountdown],
             ['confirm', strings.cfgModeConfirm],
             ['fill-only', strings.cfgModeFill],
-            ['auto-countdown', strings.cfgModeCountdown],
           ].map(([mKey, mLabel]) => ({
             label: mLabel,
             attr: 'data-ag-sg-prism-mode',

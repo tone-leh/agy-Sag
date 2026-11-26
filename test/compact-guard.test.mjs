@@ -275,10 +275,12 @@ test('CompactGuard: triple safety guard protects unsent drafts, blocks during st
   assert.equal(env.textarea.value, 'half-written prompt', 'Existing draft must remain untouched');
   assert.equal(submitted.length, 0);
 
-  // 2) Streaming protection: never interrupt active streaming turn
+  // 2) Streaming protection: banner stays completely invisible while streaming, and insertCompact is blocked
   env.textarea.value = '';
   streaming = true;
   await guard.evaluateNow();
+  const bannerDuringStream = env.doc.querySelector('[data-testid="ag-sg-compact-banner"]');
+  assert.equal(bannerDuringStream.hidden, true, 'Compact banner must stay invisible while AI is still streaming');
   const resStream = guard.compactGuard.insertCompact({ submit: true });
   assert.equal(resStream.ok, false);
   assert.equal(resStream.reason, 'streaming');
@@ -339,7 +341,7 @@ test('CompactGuard: auto-countdown mode aborts immediately if user types draft o
   guard.destroy();
 });
 
-test('CompactGuard: built-in quick settings popover updates threshold/mode & persists, and Export / Download .md emit redacted recap', async () => {
+test('CompactGuard: minimal banner has max 2 actions (no export clutter), quick settings popover persists, and Export / Download .md APIs emit redacted recap', async () => {
   const env = createMockDom({ lang: 'zh-CN' });
   let exported = null;
   let downloaded = null;
@@ -357,22 +359,26 @@ test('CompactGuard: built-in quick settings popover updates threshold/mode & per
 
   await guard.evaluateNow();
   const banner = env.doc.querySelector('[data-testid="ag-sg-compact-banner"]');
-  banner.querySelector('[data-ag-sg-act="export-md"]').click();
-  await new Promise((r) => setTimeout(r, 10));
+  // Minimal banner invariant: zero export/handoff/gear clutter on compact banner; at most 2 visible buttons
+  assert.equal(banner.querySelector('[data-ag-sg-act="export-md"]'), null);
+  assert.equal(banner.querySelector('[data-ag-sg-act="download-md"]'), null);
+  assert.equal(banner.querySelector('[data-ag-sg-act="copy-handoff"]'), null);
+  const visibleBtns = banner.querySelectorAll('.ag-sg-actions button').filter((b) => !b.hidden);
+  assert.ok(visibleBtns.length <= 2, `Banner must stay ultra-minimal (<= 2 visible buttons), got ${visibleBtns.length}`);
 
+  // Export & Download .md remain cleanly available via API / Status Card / Bookmark Drawer
+  await guard.compactGuard.exportMarkdown();
   assert.ok(exported && exported.ok && exported.count === 1);
   assert.equal(exported.markdown.includes('sk-superSecret'), false, 'Exported MD must redact API keys');
   assert.ok(env.getCopied().includes('[REDACTED_KEY]'));
 
-  // One-click ↓ .md download button
-  banner.querySelector('[data-ag-sg-act="download-md"]').click();
-  await new Promise((r) => setTimeout(r, 10));
+  await guard.compactGuard.downloadMarkdown();
   assert.ok(downloaded && downloaded.ok && downloaded.downloaded);
   assert.ok(downloaded.filename.endsWith('.md'));
   assert.equal(downloaded.markdown.includes('sk-superSecret'), false);
 
-  // Open settings popover and switch threshold to 70% & mode to fill-only
-  banner.querySelector('[data-ag-sg-act="settings"]').click();
+  // Open settings popover programmatically and switch threshold to 70% & mode to fill-only
+  guard.openSettingsPopover();
   const pop = env.doc.querySelector('[data-testid="ag-sg-settings-popover"]');
   assert.equal(pop.hidden, false);
   pop.querySelector('[data-ag-sg-th="70"]').click();

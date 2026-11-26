@@ -62,14 +62,9 @@
     let focusTagEl = null;
     let actionsEl = null;
     let primaryBtn = null;
-    let fillBtn = null;
-    let exportBtn = null;
-    let downloadBtn = null;
-    let handoffBtn = null;
     let snoozeBtn = null;
     let cancelCdBtn = null;
     let dismissBtn = null;
-    let gearBtn = null;
     let toastEl = null;
     let popEl = null;
     let styleEl = null;
@@ -155,8 +150,10 @@
       const onInput = () => {
         if (countdownTimer && ctxSrc.readComposerDraft(doc, getScope()).length > 0) {
           stopCountdown();
-          if (lastSnapshot?.cascadeId) countdownCanceledForSession.add(lastSnapshot.cascadeId);
-          setToast(S().toastDraftProtected, 'warn');
+          if (lastSnapshot?.cascadeId) {
+            countdownCanceledForSession.add(lastSnapshot.cascadeId);
+            getSess(lastSnapshot.cascadeId).dismissedAtPct = lastSnapshot.usedPct;
+          }
           render();
         }
       };
@@ -544,9 +541,9 @@
       const seg2 = doc.createElement('div');
       seg2.className = 'ag-sg-seg';
       for (const [mKey, mLabel] of [
+        ['auto-countdown', strings.cfgModeCountdown],
         ['confirm', strings.cfgModeConfirm],
         ['fill-only', strings.cfgModeFill],
-        ['auto-countdown', strings.cfgModeCountdown],
       ]) {
         const b = doc.createElement('button');
         b.type = 'button';
@@ -737,41 +734,23 @@
       actionsEl.className = 'ag-sg-actions';
 
       primaryBtn = mkBtn('ag-sg-btn ag-sg-btn-primary', '', 'compact-now', () => {
+        stopCountdown();
         const shouldSubmit = config.compactTriggerMode !== 'fill-only';
         insertCompactIntoComposer({ submit: shouldSubmit });
         render();
-      });
-      fillBtn = mkBtn('ag-sg-btn', '', 'fill-only', () => {
-        stopCountdown();
-        insertCompactIntoComposer({ submit: false });
-        render();
-      });
-      exportBtn = mkBtn('ag-sg-btn', '', 'export-md', () => {
-        const cid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win);
-        const bmCount = exporter.loadBookmarks(storage, cid).size;
-        void handleExportMd({ onlyBookmarked: bmCount > 0, download: false });
-      });
-      downloadBtn = mkBtn('ag-sg-btn', '', 'download-md', () => {
-        const cid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win);
-        const bmCount = exporter.loadBookmarks(storage, cid).size;
-        void handleExportMd({ onlyBookmarked: bmCount > 0, download: true });
-      });
-      handoffBtn = mkBtn('ag-sg-btn', '', 'copy-handoff', () => {
-        void handleCopyNewSessionHandoff();
       });
       snoozeBtn = mkBtn('ag-sg-btn ag-sg-btn-primary', '', 'snooze-stall', () => {
         handleSnoozeStall(300);
       });
       cancelCdBtn = mkBtn('ag-sg-btn', '', 'cancel-countdown', () => {
         stopCountdown();
-        if (lastSnapshot?.cascadeId) countdownCanceledForSession.add(lastSnapshot.cascadeId);
+        if (lastSnapshot?.cascadeId) {
+          countdownCanceledForSession.add(lastSnapshot.cascadeId);
+          getSess(lastSnapshot.cascadeId).dismissedAtPct = lastSnapshot.usedPct;
+        }
         render();
       });
-      gearBtn = mkBtn('ag-sg-btn ag-sg-btn-icon', '⚙', 'settings', () => {
-        popoverOpen = !popoverOpen;
-        renderPopover();
-      });
-      dismissBtn = mkBtn('ag-sg-btn', '', 'dismiss', () => {
+      dismissBtn = mkBtn('ag-sg-btn ag-sg-btn-icon', '×', 'dismiss', () => {
         stopCountdown();
         if (lastWatchdog?.stalled && !lastWatchdog?.stallDismissed && lastSnapshot) {
           watchdog?.dismissStall?.(lastSnapshot.cascadeId);
@@ -784,13 +763,8 @@
       });
 
       actionsEl.appendChild(primaryBtn);
-      actionsEl.appendChild(fillBtn);
-      actionsEl.appendChild(exportBtn);
-      actionsEl.appendChild(downloadBtn);
-      actionsEl.appendChild(handoffBtn);
       actionsEl.appendChild(snoozeBtn);
       actionsEl.appendChild(cancelCdBtn);
-      actionsEl.appendChild(gearBtn);
       actionsEl.appendChild(dismissBtn);
 
       toastEl = doc.createElement('div');
@@ -829,13 +803,16 @@
         countdownCanceledForSession.delete(snap.cascadeId);
         if (hadPriorCompactCycle || compactedByCount) {
           const saved = handoff?.loadSnapshot?.(storage, snap.cascadeId) || null;
-          if (saved && saved.pendingRecovery) {
+          // Only surface post-compact recovery strip if the user explicitly starred anchors
+          if (saved && saved.pendingRecovery && Number(saved.starredCount) > 0) {
             activeRecovery = saved;
           }
         }
       }
 
       if (lastWatchdog?.stalled && !lastWatchdog?.stallDismissed) return true;
+      // Stay completely invisible while AI is still streaming; wait until turn finishes
+      if (snap.streaming) return false;
       if (th === null || !Number.isFinite(th)) return false;
       if (snap.usedPct < th) return false;
 
@@ -957,32 +934,14 @@
       primaryBtn.title = buildCompactCommand();
       primaryBtn.disabled = Boolean(snap?.streaming);
       primaryBtn.hidden = isStallAlert;
-      fillBtn.textContent = strings.btnFillOnly;
-      fillBtn.hidden = isStallAlert || config.compactTriggerMode === 'fill-only';
-      fillBtn.disabled = Boolean(snap?.streaming);
-      const curCid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win);
-      const bmCount = exporter.loadBookmarks(storage, curCid).size;
-      exportBtn.textContent =
-        bmCount > 0 && strings.btnExportBmMd
-          ? i18n.formatTemplate(strings.btnExportBmMd, { n: bmCount })
-          : strings.btnExportMd;
-      exportBtn.hidden = !config.modules.precompactExport;
-      downloadBtn.textContent = strings.btnDownloadMd;
-      downloadBtn.title = strings.btnDownloadMdTitle;
-      downloadBtn.setAttribute('aria-label', strings.btnDownloadMdTitle);
-      downloadBtn.hidden = !config.modules.precompactExport;
-      handoffBtn.textContent = strings.btnCopyHandoff;
-      handoffBtn.title = strings.btnCopyHandoffTitle;
-      handoffBtn.setAttribute('aria-label', strings.btnCopyHandoffTitle);
-      handoffBtn.hidden = !config.modules.precompactExport || isStallAlert;
       snoozeBtn.textContent = strings.btnSnoozeStall;
       snoozeBtn.title = strings.btnSnoozeStallTitle;
       snoozeBtn.hidden = !isStallAlert;
       cancelCdBtn.textContent = strings.btnCancelCountdown;
       cancelCdBtn.hidden = !isCounting;
-      gearBtn.title = strings.btnSettings;
-      gearBtn.setAttribute('aria-label', strings.btnSettings);
-      dismissBtn.textContent = strings.btnDismiss;
+      dismissBtn.title = strings.btnDismiss;
+      dismissBtn.setAttribute('aria-label', strings.btnDismiss);
+      dismissBtn.hidden = isCounting;
 
       renderPopover();
     };
@@ -1140,7 +1099,7 @@
       try { recoveryEl?.remove?.(); } catch {}
       try { styleEl?.remove?.(); } catch {}
       bannerEl = recoveryEl = recoveryMsgEl = recoveryFillBtn = recoveryCopyBtn = recoveryDismissBtn = null;
-      msgEl = focusTagEl = actionsEl = primaryBtn = fillBtn = exportBtn = downloadBtn = handoffBtn = snoozeBtn = cancelCdBtn = dismissBtn = gearBtn = toastEl = popEl = styleEl = null;
+      msgEl = focusTagEl = actionsEl = primaryBtn = snoozeBtn = cancelCdBtn = dismissBtn = toastEl = popEl = styleEl = null;
       activeRecovery = null;
       lastWatchdog = null;
       watchdog?.resetAll?.();
