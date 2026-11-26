@@ -55,12 +55,14 @@ Configurable Compaction Guard · Turn Bookmarks & Redacted Pre-Compact Markdown 
 
 | Module | Default | What It Does | Standalone UMD Core |
 | :--- | :---: | :--- | :--- |
-| **Compact Guard** | On (`80%` confirm) | Threshold alert bar (`off/70–90%`), Smart `/compact <focus>` presets (`Default / Code & Errors / ★ Bookmarks / Custom`), Post-Compact Recovery strip, 5s idle countdown, `↓ .md` download | [`packages/core/compact-guard.js`](./packages/core/compact-guard.js) · [`recovery-handoff.js`](./packages/core/recovery-handoff.js) |
+| **Compact Guard** | On (`80%` confirm) | Threshold alert bar (`off/70–90%`), Smart `/compact <focus>` presets (`Default / Code & Errors / ★ Bookmarks / Custom`), Post-Compact Recovery strip, 5s idle countdown, `↓ .md` download | [`packages/core/compact-guard.js`](./packages/core/compact-guard.js) |
+| **Draft Guard** | On | Per-`cascadeId` debounced unsent draft auto-save (survives switches & `Cmd+R` reloads), 1-line empty-composer recovery strip, clears automatically on send | [`packages/core/draft-guard.js`](./packages/core/draft-guard.js) |
 | **Outline Bookmarks & Vault** | On | Per-`cascadeId` `☆/★` stars, native floating `★ N` jump drawer, Cross-Session Searchable Bookmark Vault (`Ctrl+Shift+B`), plus Prism outline filter | [`packages/core/outline-bookmarks.js`](./packages/core/outline-bookmarks.js) · [`bookmark-vault.js`](./packages/core/bookmark-vault.js) |
-| **Pre-Compact Export** | On | One-click clipboard copy (`Export MD` / `Export ★ (N)`) & local `.md` file download with automatic secret redaction (`sk-`, `AIza`, `ghp_`, `Bearer`, JWT, PEM) | [`packages/core/precompact-export.js`](./packages/core/precompact-export.js) |
-| **Session Watchdog** | On (`3m` stall) | Rolling context burn-rate (`~N turns left`), `>= 18%` single-turn spike flag, and silent streaming stall detector | [`packages/core/session-watchdog.js`](./packages/core/session-watchdog.js) |
+| **Pre-Compact Export & Handoff** | On | One-click clipboard copy (`Export MD` / `Export ★ (N)`), `.md` download with secret redaction, and **one-click New-Session Handoff Prompt export** | [`packages/core/precompact-export.js`](./packages/core/precompact-export.js) · [`recovery-handoff.js`](./packages/core/recovery-handoff.js) |
+| **Session Watchdog** | On (`3m` stall) | Rolling context burn-rate (`~N turns left`), `>= 18%` single-turn spike flag, silent streaming stall detector with **`+5m Snooze`** & elapsed duration | [`packages/core/session-watchdog.js`](./packages/core/session-watchdog.js) |
+| **Prism Unified Bridge** | Auto-detect | Embeds Session Guard settings natively inside Obsidian Prism's Settings -> Modules tab with bidirectional config & live language/theme sync | [`packages/core/prism-bridge.js`](./packages/core/prism-bridge.js) |
 | **Session Radar** | Off (opt-in) | Sidebar `All / Running / Awaiting` attention filter pill + blurred-only desktop alerts (including stall alerts) | [`packages/core/session-radar.js`](./packages/core/session-radar.js) |
-| **Watch Daemon** | CLI daemon | Zero-ASAR adaptive-backoff watcher (`npm run watch`) that auto-attaches to new or `Cmd+R`-reloaded Antigravity windows | [`cli/watch-daemon.mjs`](./cli/watch-daemon.mjs) |
+| **Watch Daemon & Doctor** | CLI on-demand | Zero-ASAR adaptive-backoff watcher (`npm run watch`) + one-command read-only environment & Prism coexistence doctor (`npm run doctor`) | [`cli/watch-daemon.mjs`](./cli/watch-daemon.mjs) · [`cli/doctor.mjs`](./cli/doctor.mjs) |
 
 ### Engineering Guardrails (Tested on Every Commit)
 
@@ -86,6 +88,9 @@ npm run workbench
 ### 2. Attach or Watch via Zero-ASAR CDP
 
 ```bash
+# Inspect Node >= 22, CDP port, host windows & Obsidian Prism coexistence (100% read-only)
+npm run doctor
+
 # Preview matching host windows without injecting
 node cli/cdp-attach.mjs --attach --dry-run
 
@@ -107,7 +112,7 @@ npm run remove
 Love **[Obsidian Prism](https://github.com/RMvdesi/obsidian-prism)**'s visual themes, 3D picker, and WebGL2 effects? Run Session Guard cleanly alongside it with zero duplicate polling. Prefer a **purely lightweight, zero-theme utility** for custom compaction thresholds, post-compact recovery, turn bookmarks, and stall alerts without installing a full UI suite? Run Session Guard completely standalone:
 
 - **Split View & 8+1 Languages Ready**: Automatically follows the active focused split pane (`resolveActivePaneScope`) and ships full `zh-CN / zh-TW / en / ja / ko / es / fr / de` (+ `yue`) parity aligned 1:1 with Obsidian Prism `v1.0.8`.
-- **Obsidian Prism & AG Pulse Ready**: Reuses `window.__agPrismMetricsBridge` and `window.agPulseHost` with zero duplicate polling; marks owned nodes `data-ag-no-i18n="1"` to stay isolated from Channel 4 DOM localization; yields automatically when a host suite sets `window.__agSessionGuardOwner`.
+- **Obsidian Prism & AG Pulse Ready**: Reuses `window.__agPrismMetricsBridge` and `window.agPulseHost` with zero duplicate polling; embeds unified Session Guard controls right inside Obsidian Prism's Settings -> Modules tab with bidirectional sync & live language updates; marks owned nodes with full i18n-skip attributes to stay isolated from Channel 4 DOM localization; yields automatically when a host suite sets `window.__agSessionGuardOwner`.
 - See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) and [`docs/PRISM_CHANNEL_INTEGRATION.md`](./docs/PRISM_CHANNEL_INTEGRATION.md) for the coexistence & on-demand Channel absorption blueprint.
 
 ## License

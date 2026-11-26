@@ -1,4 +1,4 @@
-// Antigravity Session Guard — Turn Stall Watchdog & Context Burn-Rate Estimator (UMD, zero runtime deps)
+// Antigravity Session Guard — Turn Stall Watchdog (+5m Snooze & Elapsed Duration) & Context Burn-Rate Estimator (UMD, zero runtime deps)
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory(root);
@@ -10,6 +10,7 @@
 
   const SPIKE_DELTA_PCT = 18;
   const MAX_DELTAS = 5;
+  const DEFAULT_SNOOZE_SECONDS = 300;
 
   function computeConversationFingerprint(doc, snap, scopeEl = null) {
     let textLen = 0;
@@ -57,10 +58,13 @@
           streamingSince: null,
           lastProgressAt: null,
           lastFingerprint: '',
+          elapsedSec: 0,
           stalled: false,
           stalledForSec: 0,
           stallAlertedForEpisode: false,
           stallDismissedForEpisode: false,
+          snoozedUntilTs: null,
+          snoozeCount: 0,
         };
         stateByCid.set(key, s);
       }
@@ -77,10 +81,13 @@
       s.streamingSince = null;
       s.lastProgressAt = null;
       s.lastFingerprint = '';
+      s.elapsedSec = 0;
       s.stalled = false;
       s.stalledForSec = 0;
       s.stallAlertedForEpisode = false;
       s.stallDismissedForEpisode = false;
+      s.snoozedUntilTs = null;
+      s.snoozeCount = 0;
     }
 
     function observe({ snap, doc = null, scopeEl = null, threshold = 80 } = {}) {
@@ -90,10 +97,14 @@
           estimatedTurnsLeft: null,
           spikeDetected: false,
           lastDeltaPct: 0,
+          elapsedSec: 0,
           stalled: false,
           stalledForSec: 0,
           newlyStalled: false,
           stallDismissed: false,
+          snoozed: false,
+          snoozeRemainingSec: 0,
+          snoozeCount: 0,
         };
       }
 
@@ -135,8 +146,11 @@
         }
       }
 
-      // 2) Streaming stall detection
+      // 2) Streaming stall detection with +5m Snooze & elapsed duration tracking
       let newlyStalled = false;
+      let snoozed = false;
+      let snoozeRemainingSec = 0;
+
       if (!snap.streaming || stallThresholdSeconds === 'off') {
         resetStall(s);
       } else {
@@ -145,23 +159,40 @@
           s.streamingSince = ts;
           s.lastProgressAt = ts;
           s.lastFingerprint = fp;
+          s.elapsedSec = 0;
           s.stalled = false;
           s.stalledForSec = 0;
+          s.snoozedUntilTs = null;
+          s.snoozeCount = 0;
         } else if (fp !== s.lastFingerprint) {
           s.lastFingerprint = fp;
           s.lastProgressAt = ts;
+          s.elapsedSec = Math.max(0, Math.floor((ts - s.streamingSince) / 1000));
           s.stalled = false;
           s.stalledForSec = 0;
           s.stallAlertedForEpisode = false;
           s.stallDismissedForEpisode = false;
+          s.snoozedUntilTs = null;
+          s.snoozeCount = 0;
         } else {
+          s.elapsedSec = Math.max(0, Math.floor((ts - s.streamingSince) / 1000));
           const idleSec = Math.max(0, Math.floor((ts - s.lastProgressAt) / 1000));
           s.stalledForSec = idleSec;
-          if (idleSec >= stallThresholdSeconds) {
-            s.stalled = true;
-            if (!s.stallAlertedForEpisode) {
-              s.stallAlertedForEpisode = true;
-              newlyStalled = true;
+
+          if (s.snoozedUntilTs !== null && ts < s.snoozedUntilTs) {
+            snoozed = true;
+            snoozeRemainingSec = Math.max(1, Math.ceil((s.snoozedUntilTs - ts) / 1000));
+            s.stalled = false;
+          } else {
+            if (s.snoozedUntilTs !== null && ts >= s.snoozedUntilTs) {
+              s.snoozedUntilTs = null;
+            }
+            if (idleSec >= stallThresholdSeconds) {
+              s.stalled = true;
+              if (!s.stallAlertedForEpisode) {
+                s.stallAlertedForEpisode = true;
+                newlyStalled = true;
+              }
             }
           }
         }
@@ -172,16 +203,33 @@
         estimatedTurnsLeft,
         spikeDetected: s.spikeDetected,
         lastDeltaPct: s.lastDeltaPct,
+        elapsedSec: s.elapsedSec,
         stalled: s.stalled,
         stalledForSec: s.stalledForSec,
         newlyStalled,
         stallDismissed: s.stallDismissedForEpisode,
+        snoozed,
+        snoozeRemainingSec,
+        snoozeCount: s.snoozeCount,
       };
+    }
+
+    function snoozeStall(cascadeId, snoozeSec = DEFAULT_SNOOZE_SECONDS) {
+      const s = getState(cascadeId);
+      const sec = Math.max(30, Math.min(3600, Math.round(Number(snoozeSec) || DEFAULT_SNOOZE_SECONDS)));
+      const until = nowFn() + sec * 1000;
+      s.snoozedUntilTs = until;
+      s.snoozeCount += 1;
+      s.stalled = false;
+      s.stallAlertedForEpisode = false;
+      s.stallDismissedForEpisode = false;
+      return { snoozedUntilTs: until, snoozeSec: sec, snoozeCount: s.snoozeCount };
     }
 
     function dismissStall(cascadeId) {
       const s = getState(cascadeId);
       s.stallDismissedForEpisode = true;
+      s.snoozedUntilTs = null;
     }
 
     function setConfig({ enabled: nextEnabled, stallThresholdSeconds: nextSec } = {}) {
@@ -210,8 +258,11 @@
               deltas: [...s.deltas],
               lastDeltaPct: s.lastDeltaPct,
               spikeDetected: s.spikeDetected,
+              elapsedSec: s.elapsedSec,
               stalled: s.stalled,
               stalledForSec: s.stalledForSec,
+              snoozedUntilTs: s.snoozedUntilTs,
+              snoozeCount: s.snoozeCount,
             }
           : null,
       };
@@ -219,6 +270,7 @@
 
     return {
       observe,
+      snoozeStall,
       dismissStall,
       setConfig,
       resetAll,
@@ -226,5 +278,10 @@
     };
   }
 
-  return { SPIKE_DELTA_PCT, computeConversationFingerprint, createSessionWatchdog };
+  return {
+    SPIKE_DELTA_PCT,
+    DEFAULT_SNOOZE_SECONDS,
+    computeConversationFingerprint,
+    createSessionWatchdog,
+  };
 });

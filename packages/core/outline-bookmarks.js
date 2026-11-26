@@ -21,6 +21,7 @@
     const coexist = options.coexist || resolveDep('__agSgCoexist', './coexist.js');
     const ctxSrc = options.contextSource || resolveDep('__agSgContextSource', './context-source.js');
     const exporter = options.exporter || resolveDep('__agSgPrecompactExport', './precompact-export.js');
+    const handoff = options.handoff || resolveDep('__agSgRecoveryHandoff', './recovery-handoff.js');
     const vault = options.vault || resolveDep('__agSgBookmarkVault', './bookmark-vault.js');
     const i18n = options.i18n || resolveDep('__agSgI18n', './i18n.js');
 
@@ -147,6 +148,28 @@
       await exporter.copyRecapToClipboard(built.markdown, win);
       if (typeof options.onExportMarkdown === 'function') {
         try { options.onExportMarkdown(built); } catch {}
+      }
+      return built;
+    }
+
+    async function copyNewSessionHandoff() {
+      if (!handoff?.buildNewSessionHandoff) return { ok: false, prompt: '' };
+      const strings = S();
+      const scope = getScope();
+      const turns = exporter.extractConversationTurns(doc, scope);
+      const cid = currentCid || ctxSrc.detectCascadeId(doc, win, scope);
+      const title = vault?.detectConversationTitle?.(doc, cid) || '';
+      const built = handoff.buildNewSessionHandoff({
+        turns,
+        bookmarks,
+        cascadeId: cid,
+        title,
+        strings,
+      });
+      if (!built.ok) return built;
+      await exporter.copyRecapToClipboard(built.prompt, win);
+      if (typeof options.onCopyHandoff === 'function') {
+        try { options.onCopyHandoff(built); } catch {}
       }
       return built;
     }
@@ -314,6 +337,18 @@
         void exportBookmarked({ download: false });
       });
 
+      const handoffBtn = doc.createElement('button');
+      handoffBtn.type = 'button';
+      handoffBtn.className = 'ag-sg-btn';
+      handoffBtn.setAttribute('data-ag-sg-act', 'bm-copy-handoff');
+      handoffBtn.textContent = strings.btnCopyHandoff;
+      handoffBtn.title = strings.btnCopyHandoffTitle;
+      handoffBtn.addEventListener('click', (ev) => {
+        ev?.preventDefault?.();
+        ev?.stopPropagation?.();
+        void copyNewSessionHandoff();
+      });
+
       const dlBtn = doc.createElement('button');
       dlBtn.type = 'button';
       dlBtn.className = 'ag-sg-btn ag-sg-btn-primary';
@@ -326,6 +361,7 @@
       });
 
       foot.appendChild(copyBtn);
+      foot.appendChild(handoffBtn);
       foot.appendChild(dlBtn);
       drawerEl.appendChild(foot);
     }

@@ -27,6 +27,8 @@
     const ctxSrc = options.contextSource || resolveDep('__agSgContextSource', './context-source.js');
     const exporter = options.exporter || resolveDep('__agSgPrecompactExport', './precompact-export.js');
     const handoff = options.handoff || resolveDep('__agSgRecoveryHandoff', './recovery-handoff.js');
+    const vault = options.vault || resolveDep('__agSgBookmarkVault', './bookmark-vault.js');
+    const prismBridgeMod = options.prismBridgeMod || resolveDep('__agSgPrismBridge', './prism-bridge.js');
     const watchdogMod = options.watchdogMod || resolveDep('__agSgSessionWatchdog', './session-watchdog.js');
     const styles = options.styles || resolveDep('__agSgStyles', './styles.js');
 
@@ -63,6 +65,8 @@
     let fillBtn = null;
     let exportBtn = null;
     let downloadBtn = null;
+    let handoffBtn = null;
+    let snoozeBtn = null;
     let cancelCdBtn = null;
     let dismissBtn = null;
     let gearBtn = null;
@@ -335,6 +339,50 @@
       return built;
     };
 
+    const handleCopyNewSessionHandoff = async () => {
+      const strings = S();
+      if (!handoff?.buildNewSessionHandoff) return { ok: false, prompt: '' };
+      const scope = getScope();
+      const turns = exporter.extractConversationTurns(doc, scope);
+      const cid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win, scope);
+      const bm = exporter.loadBookmarks(storage, cid);
+      const title = vault?.detectConversationTitle?.(doc, cid) || '';
+      const built = handoff.buildNewSessionHandoff({
+        turns,
+        bookmarks: bm,
+        cascadeId: cid,
+        title,
+        usedPct: lastSnapshot?.usedPct ?? null,
+        strings,
+      });
+      if (!built.ok) {
+        setToast(strings.toastExportEmpty, 'warn');
+        return built;
+      }
+      await exporter.copyRecapToClipboard(built.prompt, win);
+      if (typeof options.onCopyHandoff === 'function') {
+        options.onCopyHandoff({ ...built, cascadeId: cid });
+      }
+      setToast(i18n.formatTemplate(strings.toastHandoffCopied, { n: built.anchorCount }), 'ok');
+      return built;
+    };
+
+    const handleSnoozeStall = (snoozeSec = 300) => {
+      if (!watchdog?.snoozeStall || !lastSnapshot) return null;
+      const res = watchdog.snoozeStall(lastSnapshot.cascadeId, snoozeSec);
+      lastWatchdog = {
+        ...(lastWatchdog || {}),
+        stalled: false,
+        snoozed: true,
+        snoozeRemainingSec: res.snoozeSec,
+        snoozeCount: res.snoozeCount,
+      };
+      const mins = Math.max(1, Math.round(res.snoozeSec / 60));
+      setToast(i18n.formatTemplate(S().toastStallSnoozed, { min: mins }), 'ok');
+      render();
+      return res;
+    };
+
     const mkBtn = (cls, text, attrKey, onClick) => {
       const b = doc.createElement('button');
       b.type = 'button';
@@ -441,9 +489,20 @@
 
       const title = doc.createElement('div');
       title.className = 'ag-sg-pop-title';
+      const titleLeft = doc.createElement('div');
+      titleLeft.className = 'ag-sg-pop-title-left';
       const titleTxt = doc.createElement('span');
       titleTxt.textContent = strings.cfgTitle;
-      title.appendChild(titleTxt);
+      titleLeft.appendChild(titleTxt);
+      const prismEnv = prismBridgeMod?.detectPrismEnvironment?.(doc, win) || null;
+      if (prismEnv?.active) {
+        const pb = doc.createElement('span');
+        pb.className = 'ag-sg-prism-badge';
+        pb.setAttribute('data-testid', 'ag-sg-pop-prism-badge');
+        pb.textContent = strings.prismPopSyncedShort;
+        titleLeft.appendChild(pb);
+      }
+      title.appendChild(titleLeft);
 
       if (typeof options.onOpenVault === 'function') {
         const vaultBtn = doc.createElement('button');
@@ -593,6 +652,7 @@
       const seg3 = doc.createElement('div');
       seg3.className = 'ag-sg-seg';
       for (const [mKey, mLabel] of [
+        ['draftGuard', strings.cfgModDraftGuard],
         ['outlineBookmarks', strings.cfgModBookmarks],
         ['sessionRadar', strings.cfgModRadar],
         ['sessionWatchdog', strings.cfgModWatchdog],
@@ -707,6 +767,12 @@
         const bmCount = exporter.loadBookmarks(storage, cid).size;
         void handleExportMd({ onlyBookmarked: bmCount > 0, download: true });
       });
+      handoffBtn = mkBtn('ag-sg-btn', '', 'copy-handoff', () => {
+        void handleCopyNewSessionHandoff();
+      });
+      snoozeBtn = mkBtn('ag-sg-btn ag-sg-btn-primary', '', 'snooze-stall', () => {
+        handleSnoozeStall(300);
+      });
       cancelCdBtn = mkBtn('ag-sg-btn', '', 'cancel-countdown', () => {
         stopCountdown();
         if (lastSnapshot?.cascadeId) countdownCanceledForSession.add(lastSnapshot.cascadeId);
@@ -732,6 +798,8 @@
       actionsEl.appendChild(fillBtn);
       actionsEl.appendChild(exportBtn);
       actionsEl.appendChild(downloadBtn);
+      actionsEl.appendChild(handoffBtn);
+      actionsEl.appendChild(snoozeBtn);
       actionsEl.appendChild(cancelCdBtn);
       actionsEl.appendChild(gearBtn);
       actionsEl.appendChild(dismissBtn);
@@ -862,7 +930,14 @@
         const totalSec = Math.max(1, Number(lastWatchdog.stalledForSec) || 0);
         const min = Math.floor(totalSec / 60);
         const sec = totalSec % 60;
-        msgEl.textContent = i18n.formatTemplate(strings.pillStallAlert, { min, sec });
+        let stallTxt = i18n.formatTemplate(strings.pillStallAlert, { min, sec });
+        const elapsed = Number(lastWatchdog.elapsedSec) || 0;
+        if (elapsed > totalSec + 5 && strings.pillStallElapsed) {
+          const eMin = Math.floor(elapsed / 60);
+          const eSec = elapsed % 60;
+          stallTxt += ` ${i18n.formatTemplate(strings.pillStallElapsed, { min: eMin, sec: eSec })}`;
+        }
+        msgEl.textContent = stallTxt;
       } else if (isCounting) {
         msgEl.textContent = i18n.formatTemplate(strings.pillCountdown, { pct, sec: countdownRemaining });
       } else if (snap?.streaming) {
@@ -907,6 +982,13 @@
       downloadBtn.title = strings.btnDownloadMdTitle;
       downloadBtn.setAttribute('aria-label', strings.btnDownloadMdTitle);
       downloadBtn.hidden = !config.modules.precompactExport;
+      handoffBtn.textContent = strings.btnCopyHandoff;
+      handoffBtn.title = strings.btnCopyHandoffTitle;
+      handoffBtn.setAttribute('aria-label', strings.btnCopyHandoffTitle);
+      handoffBtn.hidden = !config.modules.precompactExport || isStallAlert;
+      snoozeBtn.textContent = strings.btnSnoozeStall;
+      snoozeBtn.title = strings.btnSnoozeStallTitle;
+      snoozeBtn.hidden = !isStallAlert;
       cancelCdBtn.textContent = strings.btnCancelCountdown;
       cancelCdBtn.hidden = !isCounting;
       gearBtn.title = strings.btnSettings;
@@ -1066,7 +1148,7 @@
       try { recoveryEl?.remove?.(); } catch {}
       try { styleEl?.remove?.(); } catch {}
       bannerEl = recoveryEl = recoveryMsgEl = recoveryFillBtn = recoveryCopyBtn = recoveryDismissBtn = null;
-      msgEl = focusTagEl = actionsEl = primaryBtn = fillBtn = exportBtn = downloadBtn = cancelCdBtn = dismissBtn = gearBtn = toastEl = popEl = styleEl = null;
+      msgEl = focusTagEl = actionsEl = primaryBtn = fillBtn = exportBtn = downloadBtn = handoffBtn = snoozeBtn = cancelCdBtn = dismissBtn = gearBtn = toastEl = popEl = styleEl = null;
       activeRecovery = null;
       lastWatchdog = null;
       watchdog?.resetAll?.();
@@ -1086,6 +1168,9 @@
       insertCompact: insertCompactIntoComposer,
       exportMarkdown: handleExportMd,
       downloadMarkdown: (opts) => handleExportMd({ ...(opts || {}), download: true }),
+      copyNewSessionHandoff: handleCopyNewSessionHandoff,
+      snoozeStall: handleSnoozeStall,
+      refreshUi: render,
       openSettingsPopover,
       getDebugState,
       destroy,

@@ -263,6 +263,7 @@
     const storage = options.storage !== undefined ? options.storage : win?.localStorage || null;
     const coexist = options.coexist || resolveDep('__agSgCoexist', './coexist.js');
     const exporter = options.exporter || resolveDep('__agSgPrecompactExport', './precompact-export.js');
+    const handoff = options.handoff || resolveDep('__agSgRecoveryHandoff', './recovery-handoff.js');
     const i18n = options.i18n || resolveDep('__agSgI18n', './i18n.js');
 
     let isOpen = false;
@@ -314,6 +315,42 @@
         cidSpan.textContent = ` · ${s.cascadeId.slice(0, 8)}`;
         left.appendChild(cidSpan);
 
+        const headActs = doc.createElement('div');
+        headActs.className = 'ag-sg-actions';
+
+        if (handoff?.buildNewSessionHandoff) {
+          const handoffBtn = doc.createElement('button');
+          handoffBtn.type = 'button';
+          handoffBtn.className = 'ag-sg-btn';
+          handoffBtn.setAttribute('data-ag-sg-vault-handoff', s.cascadeId);
+          handoffBtn.textContent = strings.btnCopyHandoff;
+          handoffBtn.title = strings.btnCopyHandoffTitle;
+          handoffBtn.addEventListener('click', async (ev) => {
+            ev?.preventDefault?.();
+            ev?.stopPropagation?.();
+            const turns = s.items.map((it) => ({
+              turnNum: it.turnNum,
+              user: it.snippet,
+              assistant: it.replySnippet,
+            }));
+            const bm = s.items.map((it) => it.turnNum);
+            const built = handoff.buildNewSessionHandoff({
+              turns,
+              bookmarks: bm,
+              cascadeId: s.cascadeId,
+              title: s.title,
+              strings: S(),
+            });
+            if (!built.ok) return;
+            await exporter?.copyRecapToClipboard?.(built.prompt, win);
+            if (typeof options.onCopyHandoff === 'function') options.onCopyHandoff({ ...built, cascadeId: s.cascadeId });
+            if (statusEl) {
+              statusEl.textContent = i18n.formatTemplate(S().toastHandoffCopied, { n: built.anchorCount });
+            }
+          });
+          headActs.appendChild(handoffBtn);
+        }
+
         const clearBtn = doc.createElement('button');
         clearBtn.type = 'button';
         clearBtn.className = 'ag-sg-btn';
@@ -326,9 +363,10 @@
           if (typeof options.onVaultMutated === 'function') options.onVaultMutated({ cascadeId: s.cascadeId });
           renderBody();
         });
+        headActs.appendChild(clearBtn);
 
         chead.appendChild(left);
-        chead.appendChild(clearBtn);
+        chead.appendChild(headActs);
         card.appendChild(chead);
 
         for (const it of s.items) {

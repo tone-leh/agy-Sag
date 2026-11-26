@@ -163,6 +163,88 @@
   background:var(--success,#34d399);
   box-shadow:0 0 8px color-mix(in srgb,var(--success,#34d399) 65%,transparent);
 }
+.ag-sg-draft-bar{
+  box-sizing:border-box;
+  width:100%;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  flex-wrap:wrap;
+  margin:0 0 8px 0;
+  padding:7px 12px;
+  border-radius:12px;
+  border:1px solid color-mix(in srgb,var(--primary,#3186ff) 42%,var(--border,rgba(148,163,184,.28)));
+  background:color-mix(in srgb,var(--card,#141720) 93%,var(--primary,#3186ff) 7%);
+  color:var(--foreground,#eef1f7);
+  font:12px/1.4 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
+  z-index:28;
+}
+.ag-sg-draft-bar[hidden]{display:none!important;}
+.ag-sg-draft-dot{
+  width:8px;
+  height:8px;
+  border-radius:999px;
+  flex:0 0 auto;
+  background:var(--primary,#3186ff);
+  box-shadow:0 0 8px color-mix(in srgb,var(--primary,#3186ff) 65%,transparent);
+}
+.ag-sg-pop-title-left{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  min-width:0;
+}
+.ag-sg-prism-badge{
+  display:inline-flex;
+  align-items:center;
+  padding:1px 6px;
+  border-radius:999px;
+  border:1px solid color-mix(in srgb,var(--primary,#3186ff) 45%,transparent);
+  background:color-mix(in srgb,var(--primary,#3186ff) 14%,transparent);
+  color:var(--primary,#3186ff);
+  font:600 10px/1.35 Inter,system-ui,-apple-system,sans-serif;
+  white-space:nowrap;
+}
+.ag-sg-prism-section{
+  margin-top:12px;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+.ag-sg-prism-subhead{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+}
+.ag-sg-prism-row-inner{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  flex-wrap:wrap;
+}
+.ag-sg-prism-text{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  min-width:160px;
+}
+.ag-sg-prism-row-title{
+  font-size:12.5px;
+  font-weight:500;
+  color:var(--foreground,#eef1f7);
+}
+.ag-sg-prism-row-desc{
+  font-size:11px;
+  line-height:1.4;
+  color:var(--muted-foreground,#94a3b8);
+}
+.ag-sg-prism-input{
+  margin:0 0 8px 0;
+  box-sizing:border-box;
+}
 .ag-sg-popover{
   position:absolute;
   right:0;

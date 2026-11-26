@@ -26,6 +26,7 @@
       compactGuard: true,
       precompactExport: true,
       outlineBookmarks: true,
+      draftGuard: true, // unsent composer draft auto-save & crash recovery
       sessionRadar: false, // opt-in sidebar attention filter + alerts
       sessionWatchdog: true, // burn-rate estimate + streaming stall detector
     }),
@@ -80,6 +81,7 @@
       compactGuard: mSrc.compactGuard !== undefined ? Boolean(mSrc.compactGuard) : fbMods.compactGuard,
       precompactExport: mSrc.precompactExport !== undefined ? Boolean(mSrc.precompactExport) : fbMods.precompactExport,
       outlineBookmarks: mSrc.outlineBookmarks !== undefined ? Boolean(mSrc.outlineBookmarks) : fbMods.outlineBookmarks,
+      draftGuard: mSrc.draftGuard !== undefined ? Boolean(mSrc.draftGuard) : fbMods.draftGuard !== false,
       sessionRadar: mSrc.sessionRadar !== undefined ? Boolean(mSrc.sessionRadar) : fbMods.sessionRadar,
       sessionWatchdog: mSrc.sessionWatchdog !== undefined ? Boolean(mSrc.sessionWatchdog) : fbMods.sessionWatchdog !== false,
     };
@@ -122,7 +124,9 @@
     el.setAttribute('data-ag-no-i18n', '1');
     el.setAttribute('translate', 'no');
     el.setAttribute('data-no-translate', 'true');
+    el.setAttribute('data-ag-localization-skip', 'true');
     el.setAttribute('data-agy-no-translate', 'true');
+    el.setAttribute('data-antigravity-zh-skip', '1');
     return el;
   }
 

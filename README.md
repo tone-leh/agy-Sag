@@ -87,16 +87,18 @@
 | 模块 | 默认态 | 核心职责 | 独立源码（可单独引入） |
 | :--- | :---: | :--- | :--- |
 | **Compact Guard** | 开启（80% 浮条确认） | 上下文阈值预警、智能 `/compact <focus>` 预设、压缩后无损续接卡、5s 倒计时、`↓ .md` 下载 | [`packages/core/compact-guard.js`](./packages/core/compact-guard.js) |
+| **Draft Guard** | 开启 | 按 `cascadeId` 防抖暂存未发送草稿（防切会话/`Cmd+R` 重载丢字），空输入框时 1 行轻提示恢复，发送即清 | [`packages/core/draft-guard.js`](./packages/core/draft-guard.js) |
 | **Outline Bookmarks & Vault** | 开启 | 单轮 `☆/★` 书签、原生 `★ N` 浮动跳转抽屉、跨会话书签档案库（`Ctrl+Shift+B`）、Prism 大纲筛选 | [`packages/core/outline-bookmarks.js`](./packages/core/outline-bookmarks.js) · [`bookmark-vault.js`](./packages/core/bookmark-vault.js) |
-| **Pre-Compact Export & Recovery** | 开启 | 压缩前一键复制/下载 `.md` 脱敏复盘、压缩后关键锚点自动留存与回填 | [`packages/core/precompact-export.js`](./packages/core/precompact-export.js) · [`recovery-handoff.js`](./packages/core/recovery-handoff.js) |
-| **Session Watchdog** | 开启（3m 卡死阈值） | 上下文燃尽速率估算（约剩 N 轮）、单轮 `>=18%` 突增标记、流式静默卡死监测 | [`packages/core/session-watchdog.js`](./packages/core/session-watchdog.js) |
+| **Pre-Compact Export & Handoff** | 开启 | 压缩前一键复制/下载 `.md` 脱敏复盘、压缩后锚点回填、**「开新会话续接」一键 Handoff 提示词导出** | [`packages/core/precompact-export.js`](./packages/core/precompact-export.js) · [`recovery-handoff.js`](./packages/core/recovery-handoff.js) |
+| **Session Watchdog** | 开启（3m 卡死阈值） | 上下文燃尽速率估算（约剩 N 轮）、单轮 `>=18%` 突增标记、流式静默卡死监测与 **`+5m 延后（Snooze）`** | [`packages/core/session-watchdog.js`](./packages/core/session-watchdog.js) |
+| **Prism Unified Bridge** | 自动检测 | 与 Obsidian Prism 同装时自动把设置面板接入 Prism 设置页「模块」标签，双向实时同步配置与 8 语种切换 | [`packages/core/prism-bridge.js`](./packages/core/prism-bridge.js) |
 | **Session Radar** | 关闭（按需开启） | 侧栏 `全部/运行中/待确认` 聚光过滤条、失焦系统桌面通知（含卡死提醒） | [`packages/core/session-radar.js`](./packages/core/session-radar.js) |
-| **Watch Daemon** | CLI 按需常驻 | Zero-ASAR 自适应退避守护进程，新窗口与 `Cmd+R` 重载自动补挂 | [`cli/watch-daemon.mjs`](./cli/watch-daemon.mjs) |
+| **Watch Daemon & Doctor** | CLI 按需运行 | `npm run watch` 自适应退避守护 + **`npm run doctor`** 一键环境与 Prism 共存体检 | [`cli/watch-daemon.mjs`](./cli/watch-daemon.mjs) · [`cli/doctor.mjs`](./cli/doctor.mjs) |
 
 **五条硬红线（写进单测，每次提交必检）：**
 1. **Zero-ASAR & 不重启宿主**：纯 CDP 动态附着已有本地调试端口，绝不改 `app.asar`、不强杀或重启客户端。
 2. **三重防误触**：流式生成中禁止触发；输入框有任何草稿拒绝填入并秒停倒计时；忽略后静默至再涨 `+10%` 或完成压缩。
-3. **零运行时依赖 & 5 语种内置**：纯原生 Node.js `>= 22` + UMD 前端脚本，内置简中 / 繁中 / 粤语 / English / 日本語，自动跟随界面语言。
+3. **零运行时依赖 & 8+1 语种内置**：纯原生 Node.js `>= 22` + UMD 前端脚本，内置简中 / 繁中 / 粤语 / English / 日本語 / 한국어 / Español / Français / Deutsch，自动跟随界面语言。
 4. **0 `:has()` & 0fps 后台休眠**：全套样式只读宿主 CSS 变量，窗口失焦或隐藏立刻暂停全部定时器。
 5. **100% 无损退场**：`npm run remove` 或 `window.__agSessionGuard.destroy()` 彻底移除样式、Owned DOM、监听器和全局对象，恢复如初。
 
@@ -131,6 +133,9 @@ npm run workbench
 > 前提：Antigravity 已携带 `--remote-debugging-port=0` 启动（如果你已安装 Obsidian Prism，调试端口已经就绪；原生 macOS 用户也可通过 `open -a "/Applications/Antigravity.app" --args --remote-debugging-port=0` 启动）。
 
 ```bash
+# 0. 一键只读环境体检（检查 Node >= 22、CDP 端口、窗口挂载与 Obsidian Prism 共存状态）
+npm run doctor
+
 # 1. 先预演检查将命中的宿主窗口（只读，不注入）
 node cli/cdp-attach.mjs --attach --dry-run
 
@@ -161,7 +166,7 @@ npm run remove
 
 | 搭配对象 | 协作机制 |
 | :--- | :--- |
-| **[Obsidian Prism](https://github.com/RMvdesi/obsidian-prism)** | 零重复轮询直接复用 `window.__agPrismMetricsBridge`；四套深浅色 CSS 变量原生融入；所有 Owned DOM 标注 `data-ag-no-i18n="1"` 避免被 Channel 4 误译；左侧大纲自动挂载书签筛选；若未来被 Prism 吸收，只要设置 `window.__agSessionGuardOwner = 'obsidian-prism'`，独立版即自动礼让退出。 |
+| **[Obsidian Prism](https://github.com/RMvdesi/obsidian-prism)** | 零重复轮询直接复用 `window.__agPrismMetricsBridge`；**自动在 Prism 设置页「模块」标签内嵌统一设置区并双向实时同步**，跟随 `data-ag-cs-lang` / `data-ag-cs-theme` 即时刷新；所有 Owned DOM 标注全套 i18n 跳过属性免被 Channel 4 误译；左侧大纲自动挂载书签筛选；若未来被 Prism 吸收，设置 `window.__agSessionGuardOwner = 'obsidian-prism'` 即自动礼让退出。 |
 | **[AG Pulse (`antigrative-dashboard`)](https://github.com/ATtacK030130/antigrative-dashboard)** | 自动读取 `window.agPulseHost` 或状态条 Shadow DOM 上下文百分比，不抢占不冲突。 |
 | **原生无插件 Antigravity** | 自动回退轻量 DOM 估算与宿主原生 CSS 变量，开箱即用。 |
 
