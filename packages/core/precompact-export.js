@@ -71,9 +71,15 @@
     return String(el.textContent || '').replace(/[☆★]\s*$/, '');
   }
 
-  function extractConversationTurns(doc) {
+  function extractConversationTurns(doc, scopeEl = null) {
     if (!doc || typeof doc.querySelector !== 'function') return [];
-    const conv = doc.querySelector('[data-testid="conversation-view"]') || doc.body;
+    const scopedConv =
+      scopeEl && scopeEl.isConnected !== false
+        ? scopeEl.getAttribute?.('data-testid') === 'conversation-view'
+          ? scopeEl
+          : scopeEl.querySelector?.('[data-testid="conversation-view"]')
+        : null;
+    const conv = scopedConv || doc.querySelector('[data-testid="conversation-view"]') || doc.body;
     if (!conv || typeof conv.querySelectorAll !== 'function') return [];
 
     const nodes = Array.from(

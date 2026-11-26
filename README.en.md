@@ -15,7 +15,7 @@ Configurable Compaction Guard · Turn Bookmarks & Redacted Pre-Compact Markdown 
   <img src="https://img.shields.io/badge/Antigravity-2.34%20%7C%202.35+-0f172a?style=flat-square" alt="Antigravity 2.34 | 2.35+" />
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-1e293b?style=flat-square" alt="Platform" />
   <img src="https://img.shields.io/badge/Zero--ASAR-0_Runtime_Deps-059669?style=flat-square" alt="Zero-ASAR & Zero Runtime Deps" />
-  <img src="https://img.shields.io/badge/i18n-5_Languages-d97706?style=flat-square" alt="5 Languages" />
+  <img src="https://img.shields.io/badge/i18n-8%2B1_Languages-d97706?style=flat-square" alt="8+1 Languages" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-6366f1?style=flat-square" alt="License: MIT" /></a>
 </p>
 
@@ -102,10 +102,13 @@ npm run remove
 
 ---
 
-## Coexistence & Downstream Integration (MIT → GPL-3.0 Friendly)
+## Lightweight Standalone vs. Full Visual Suite (Coexistence & MIT Absorption)
 
+Love **[Obsidian Prism](https://github.com/RMvdesi/obsidian-prism)**'s visual themes, 3D picker, and WebGL2 effects? Run Session Guard cleanly alongside it with zero duplicate polling. Prefer a **purely lightweight, zero-theme utility** for custom compaction thresholds, post-compact recovery, turn bookmarks, and stall alerts without installing a full UI suite? Run Session Guard completely standalone:
+
+- **Split View & 8+1 Languages Ready**: Automatically follows the active focused split pane (`resolveActivePaneScope`) and ships full `zh-CN / zh-TW / en / ja / ko / es / fr / de` (+ `yue`) parity aligned 1:1 with Obsidian Prism `v1.0.8`.
 - **Obsidian Prism & AG Pulse Ready**: Reuses `window.__agPrismMetricsBridge` and `window.agPulseHost` with zero duplicate polling; marks owned nodes `data-ag-no-i18n="1"` to stay isolated from Channel 4 DOM localization; yields automatically when a host suite sets `window.__agSessionGuardOwner`.
-- See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) for the full coexistence and `vendor/` integration contract.
+- See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) and [`docs/PRISM_CHANNEL_INTEGRATION.md`](./docs/PRISM_CHANNEL_INTEGRATION.md) for the coexistence & on-demand Channel absorption blueprint.
 
 ## License
 

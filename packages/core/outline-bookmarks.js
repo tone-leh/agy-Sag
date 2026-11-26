@@ -36,10 +36,14 @@
     let drawerEl = null;
     let pulseTimer = null;
     let pulsedEl = null;
+    let activePaneEl = null;
     const ownedNodes = new Set();
+    const listeners = [];
 
     const getLang = () => (typeof options.getLang === 'function' ? i18n.normalizeLang(options.getLang()) : i18n.detectLang(doc, win));
     const S = () => i18n.getStrings(getLang());
+    const getScope = () => (ctxSrc.resolveActivePaneScope ? ctxSrc.resolveActivePaneScope(doc, activePaneEl) : doc);
+    const getConv = () => (ctxSrc.resolveActiveConversationView ? ctxSrc.resolveActiveConversationView(doc, getScope()) : doc?.querySelector?.('[data-testid="conversation-view"]') || null);
 
     function clearPulse() {
       if (pulseTimer) {
@@ -53,7 +57,7 @@
     }
 
     function refreshCascade() {
-      const nextCid = ctxSrc.detectCascadeId(doc, win);
+      const nextCid = ctxSrc.detectCascadeId(doc, win, getScope());
       if (nextCid !== currentCid) {
         currentCid = nextCid;
         bookmarks = exporter.loadBookmarks(storage, currentCid);
@@ -77,7 +81,7 @@
       if (bookmarks.size === 0) drawerOpen = false;
       exporter.saveBookmarks(storage, currentCid, bookmarks);
       if (vault) {
-        const turns = exporter.extractConversationTurns(doc);
+        const turns = exporter.extractConversationTurns(doc, getScope());
         const title = vault.detectConversationTitle(doc, currentCid);
         vault.syncSessionMeta({ storage, cascadeId: currentCid, bookmarks, turns, title });
       }
@@ -89,8 +93,7 @@
     }
 
     function getUserBubbles() {
-      if (!doc || typeof doc.querySelector !== 'function') return [];
-      const conv = doc.querySelector('[data-testid="conversation-view"]');
+      const conv = getConv();
       if (!conv || typeof conv.querySelectorAll !== 'function') return [];
       return Array.from(conv.querySelectorAll('[data-testid="user-message-bubble"]'));
     }
@@ -118,8 +121,9 @@
 
     async function exportBookmarked({ download = false } = {}) {
       const strings = S();
-      const turns = exporter.extractConversationTurns(doc);
-      const cid = currentCid || ctxSrc.detectCascadeId(doc, win);
+      const scope = getScope();
+      const turns = exporter.extractConversationTurns(doc, scope);
+      const cid = currentCid || ctxSrc.detectCascadeId(doc, win, scope);
       const built = exporter.buildRecapMarkdown({
         turns,
         bookmarks,
@@ -165,8 +169,7 @@
     }
 
     function renderNativeJumpDock(bubbles) {
-      if (!doc || typeof doc.querySelector !== 'function') return;
-      const conv = doc.querySelector('[data-testid="conversation-view"]');
+      const conv = getConv();
       if (!conv) return;
       const dockHost = conv.querySelector?.('[data-testid="autoscroll-viewport"]') || conv;
 
@@ -431,10 +434,25 @@
       decorateUserTurns();
       decoratePrismOutlinePopover();
       if (vault && bookmarks.size > 0) {
-        const turns = exporter.extractConversationTurns(doc);
+        const turns = exporter.extractConversationTurns(doc, getScope());
         const title = vault.detectConversationTitle(doc, currentCid);
         vault.syncSessionMeta({ storage, cascadeId: currentCid, bookmarks, turns, title });
       }
+    }
+
+    const onPaneFocus = (ev) => {
+      if (destroyed || !enabled || !ev?.target || !ctxSrc.findPaneRootForNode) return;
+      const rootPane = ctxSrc.findPaneRootForNode(ev.target, doc);
+      if (rootPane && rootPane !== activePaneEl) {
+        activePaneEl = rootPane;
+        sync();
+      }
+    };
+    if (doc && typeof doc.addEventListener === 'function') {
+      doc.addEventListener('pointerdown', onPaneFocus, true);
+      doc.addEventListener('focusin', onPaneFocus, true);
+      listeners.push(() => doc.removeEventListener?.('pointerdown', onPaneFocus, true));
+      listeners.push(() => doc.removeEventListener?.('focusin', onPaneFocus, true));
     }
 
     function startObserver() {
@@ -482,8 +500,12 @@
       if (destroyed) return;
       destroyed = true;
       enabled = false;
+      while (listeners.length) {
+        try { listeners.pop()(); } catch {}
+      }
       try { observer?.disconnect?.(); } catch {}
       observer = null;
+      activePaneEl = null;
       clearOwned();
       bookmarks.clear();
     }

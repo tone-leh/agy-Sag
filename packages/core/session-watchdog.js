@@ -11,11 +11,17 @@
   const SPIKE_DELTA_PCT = 18;
   const MAX_DELTAS = 5;
 
-  function computeConversationFingerprint(doc, snap) {
+  function computeConversationFingerprint(doc, snap, scopeEl = null) {
     let textLen = 0;
     let nodeCount = 0;
     if (doc && typeof doc.querySelector === 'function') {
-      const conv = doc.querySelector('[data-testid="conversation-view"]');
+      const scopedConv =
+        scopeEl && scopeEl.isConnected !== false
+          ? scopeEl.getAttribute?.('data-testid') === 'conversation-view'
+            ? scopeEl
+            : scopeEl.querySelector?.('[data-testid="conversation-view"]')
+          : null;
+      const conv = scopedConv || doc.querySelector('[data-testid="conversation-view"]');
       if (conv && typeof conv.querySelectorAll === 'function') {
         const nodes = conv.querySelectorAll(
           '[data-testid="planner-response-text"], [data-testid="agent-response"], [data-testid="user-message-bubble"]'
@@ -77,7 +83,7 @@
       s.stallDismissedForEpisode = false;
     }
 
-    function observe({ snap, doc = null, threshold = 80 } = {}) {
+    function observe({ snap, doc = null, scopeEl = null, threshold = 80 } = {}) {
       if (!enabled || !snap) {
         return {
           avgDeltaPct: 0,
@@ -134,7 +140,7 @@
       if (!snap.streaming || stallThresholdSeconds === 'off') {
         resetStall(s);
       } else {
-        const fp = computeConversationFingerprint(doc, snap);
+        const fp = computeConversationFingerprint(doc, snap, scopeEl);
         if (s.streamingSince === null) {
           s.streamingSince = ts;
           s.lastProgressAt = ts;

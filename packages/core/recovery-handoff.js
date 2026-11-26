@@ -50,6 +50,7 @@
 
   function capturePreCompactSnapshot({
     doc = null,
+    scopeEl = null,
     turns = null,
     storage = null,
     cascadeId = '',
@@ -59,7 +60,7 @@
     now = new Date(),
   } = {}) {
     const exporter = resolveDep('__agSgPrecompactExport', './precompact-export.js');
-    const allTurns = Array.isArray(turns) ? turns : exporter?.extractConversationTurns?.(doc) || [];
+    const allTurns = Array.isArray(turns) ? turns : exporter?.extractConversationTurns?.(doc, scopeEl) || [];
     if (allTurns.length === 0) return null;
 
     const cid = cascadeId || 'default-session';

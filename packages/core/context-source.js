@@ -1,4 +1,4 @@
-// Antigravity Session Guard — Context Telemetry & Host DOM State Adapter (UMD)
+// Antigravity Session Guard — Context Telemetry & Multi-Pane Split View Host DOM Adapter (UMD)
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory(root);
@@ -22,9 +22,59 @@
     return String(Math.round(n));
   }
 
-  function detectCascadeId(doc, win) {
+  function isConnectedNode(el) {
+    return Boolean(el && el.isConnected !== false);
+  }
+
+  function findPaneRootForNode(node, doc) {
+    if (!isConnectedNode(node)) return null;
+    let cur = node;
+    for (let depth = 0; cur && depth < 8; depth++) {
+      if (cur === doc?.body || cur === doc?.documentElement) break;
+      const hasConv = Boolean(cur.getAttribute?.('data-testid') === 'conversation-view' || cur.querySelector?.('[data-testid="conversation-view"]'));
+      const hasInput = Boolean(cur.getAttribute?.('data-testid') === 'agent-input-box' || cur.querySelector?.('[data-testid="agent-input-box"], .surface-composer-card'));
+      if (hasConv && hasInput) return cur;
+      cur = cur.parentElement;
+    }
+    return null;
+  }
+
+  function resolveActivePaneScope(doc, preferredNode = null) {
+    if (!doc) return null;
+    if (isConnectedNode(preferredNode)) {
+      const fromPref = findPaneRootForNode(preferredNode, doc);
+      if (fromPref) return fromPref;
+    }
+    const act = doc.activeElement;
+    if (isConnectedNode(act) && act !== doc.body && act !== doc.documentElement) {
+      const fromAct = findPaneRootForNode(act, doc);
+      if (fromAct) return fromAct;
+    }
+    const focusedCv = doc.querySelector?.(
+      '[data-testid="conversation-view"][data-focused="true"], [data-testid="conversation-view"][data-active="true"]'
+    );
+    if (isConnectedNode(focusedCv)) {
+      const fromFocus = findPaneRootForNode(focusedCv, doc);
+      if (fromFocus) return fromFocus;
+    }
+    const firstCv = doc.querySelector?.('[data-testid="conversation-view"]');
+    if (isConnectedNode(firstCv)) {
+      const fromFirst = findPaneRootForNode(firstCv, doc);
+      if (fromFirst) return fromFirst;
+    }
+    return doc;
+  }
+
+  function resolveActiveConversationView(doc, scopeEl = null) {
+    if (!doc) return null;
+    const sc = isConnectedNode(scopeEl) ? scopeEl : resolveActivePaneScope(doc);
+    if (sc?.getAttribute?.('data-testid') === 'conversation-view') return sc;
+    return sc?.querySelector?.('[data-testid="conversation-view"]') || doc.querySelector?.('[data-testid="conversation-view"]') || null;
+  }
+
+  function detectCascadeId(doc, win, scopeEl = null) {
     try {
-      const cv = doc?.querySelector?.('[data-testid="conversation-view"]');
+      const cv = resolveActiveConversationView(doc, scopeEl);
       const cvCid =
         cv?.getAttribute?.('data-cascade-id') ||
         cv?.closest?.('[data-cascade-id]')?.getAttribute?.('data-cascade-id') ||
@@ -53,35 +103,43 @@
     );
   }
 
-  function isTurnStreaming(doc) {
-    if (!doc || typeof doc.querySelector !== 'function') return false;
+  function isTurnStreaming(doc, scopeEl = null) {
+    const root = isConnectedNode(scopeEl) ? scopeEl : doc;
+    if (!root || typeof root.querySelector !== 'function') return false;
     return Boolean(
-      doc.querySelector(
+      root.querySelector(
         '[data-testid="agent-input-box"] [data-testid="input-cancel-button"], [data-testid="agent-input-box"] [data-testid="stop-button"], [data-testid="stop-button"], [data-testid="cancel-button"]'
       )
     );
   }
 
-  function findComposerEditor(doc) {
-    if (!doc || typeof doc.querySelector !== 'function') return null;
-    const box = doc.querySelector('[data-testid="agent-input-box"], .surface-composer-card') || doc;
+  function findComposerEditor(doc, scopeEl = null) {
+    const root = isConnectedNode(scopeEl) ? scopeEl : doc;
+    if (!root || typeof root.querySelector !== 'function') return null;
+    const box = root.querySelector('[data-testid="agent-input-box"], .surface-composer-card') || root;
     return (
       box.querySelector('[data-lexical-editor="true"], [contenteditable="true"], textarea') ||
-      doc.querySelector('[data-lexical-editor="true"], [contenteditable="true"], textarea')
+      root.querySelector('[data-lexical-editor="true"], [contenteditable="true"], textarea') ||
+      (root !== doc ? doc?.querySelector?.('[data-lexical-editor="true"], [contenteditable="true"], textarea') : null)
     );
   }
 
-  function readComposerDraft(doc) {
-    const ed = findComposerEditor(doc);
+  function readComposerDraft(doc, scopeEl = null) {
+    const ed = findComposerEditor(doc, scopeEl);
     if (!ed) return '';
     const tag = String(ed.tagName || '').toUpperCase();
     const raw = tag === 'TEXTAREA' || tag === 'INPUT' ? ed.value : ed.textContent;
     return String(raw || '').replace(/\u200B/g, '').trim();
   }
 
-  function readFromPulseShadowDom(doc) {
-    if (!doc || typeof doc.querySelectorAll !== 'function') return null;
-    const hosts = doc.querySelectorAll('#ag-prism-pulse-bar, [data-ag-prism-pulse-bar="true"], #ag-pulse-status-bar, [data-ag-pulse-bar="true"]');
+  function readFromPulseShadowDom(doc, scopeEl = null) {
+    const root = isConnectedNode(scopeEl) ? scopeEl : doc;
+    if (!root || typeof root.querySelectorAll !== 'function') return null;
+    const sel = '#ag-prism-pulse-bar, [data-ag-prism-pulse-bar="true"], #ag-pulse-status-bar, [data-ag-pulse-bar="true"]';
+    let hosts = root.querySelectorAll(sel);
+    if ((!hosts || hosts.length === 0) && root !== doc && doc?.querySelectorAll) {
+      hosts = doc.querySelectorAll(sel);
+    }
     for (let i = 0; i < hosts.length; i++) {
       const sr = hosts[i]?.shadowRoot;
       if (!sr) continue;
@@ -113,9 +171,8 @@
     return null;
   }
 
-  function estimateFromConversationDom(doc) {
-    if (!doc || typeof doc.querySelector !== 'function') return null;
-    const vw = doc.querySelector('[data-testid="conversation-view"]');
+  function estimateFromConversationDom(doc, scopeEl = null) {
+    const vw = resolveActiveConversationView(doc, scopeEl);
     if (!vw) return null;
     let chars = 0;
     const nodes = vw.querySelectorAll?.(
@@ -196,13 +253,14 @@
   async function sampleContextState(opts = {}) {
     const win = opts.win || globalRoot;
     const doc = opts.doc || win?.document || null;
-    const cascadeId = detectCascadeId(doc, win);
-    const streaming = isTurnStreaming(doc);
-    const draft = readComposerDraft(doc);
+    const scopeEl = opts.scopeEl || resolveActivePaneScope(doc);
+    const cascadeId = detectCascadeId(doc, win, scopeEl);
+    const streaming = isTurnStreaming(doc, scopeEl);
+    const draft = readComposerDraft(doc, scopeEl);
 
     // 1) Custom injected provider (used by host integrators & workbench simulator)
     if (typeof opts.getContextSnapshot === 'function') {
-      const custom = await withTimeout(opts.getContextSnapshot({ cascadeId }), 1200);
+      const custom = await withTimeout(opts.getContextSnapshot({ cascadeId, scopeEl }), 1200);
       if (custom && isFiniteNum(custom.usedFraction)) {
         const maxTokens = isFiniteNum(custom.maxTokens) && custom.maxTokens > 0 ? custom.maxTokens : DEFAULT_MAX_TOKENS;
         const usedTokens = isFiniteNum(custom.usedTokens) ? custom.usedTokens : Math.round(custom.usedFraction * maxTokens);
@@ -222,7 +280,7 @@
       }
     }
 
-    // 2) Zero-overhead reuse of Obsidian Prism / AG Pulse existing metrics bridge
+    // 2) Zero-overhead reuse of Obsidian Prism / AG Pulse existing metrics bridge (scoped by active pane cascadeId)
     const bridges = [win?.__agPrismMetricsBridge, win?.agPulseHost].filter((b) => b && typeof b.getMetrics === 'function');
     for (const bridge of bridges) {
       const latest = typeof bridge.getLatestSnapshot === 'function' ? bridge.getLatestSnapshot() : null;
@@ -240,8 +298,8 @@
       }
     }
 
-    // 3) Read Pulse bar shadow DOM if visible
-    const fromDomBar = readFromPulseShadowDom(doc);
+    // 3) Read active pane's Pulse bar shadow DOM if visible
+    const fromDomBar = readFromPulseShadowDom(doc, scopeEl);
     if (fromDomBar) {
       return {
         cascadeId,
@@ -252,8 +310,8 @@
       };
     }
 
-    // 4) Lightweight native conversation DOM fallback
-    const est = estimateFromConversationDom(doc);
+    // 4) Lightweight native active conversation DOM fallback
+    const est = estimateFromConversationDom(doc, scopeEl);
     if (est) {
       return {
         cascadeId,
@@ -270,11 +328,15 @@
   return {
     DEFAULT_MAX_TOKENS,
     formatTokens,
+    findPaneRootForNode,
+    resolveActivePaneScope,
+    resolveActiveConversationView,
     detectCascadeId,
     isConversationView,
     isTurnStreaming,
     findComposerEditor,
     readComposerDraft,
+    readFromPulseShadowDom,
     sampleContextState,
   };
 });

@@ -69,8 +69,10 @@
     let toastEl = null;
     let popEl = null;
     let styleEl = null;
+    let activePaneEl = null;
     let composerListenerOff = null;
     const listeners = [];
+    const getScope = () => (ctxSrc.resolveActivePaneScope ? ctxSrc.resolveActivePaneScope(doc, activePaneEl) : doc);
 
     // Per-cascadeId session state for smart dismiss & auto-reset on compaction
     const sessionState = new Map();
@@ -126,9 +128,12 @@
       styleEl = el;
     };
 
-    const findBannerAnchor = () => {
+    const findBannerAnchor = (scope = getScope()) => {
       if (!doc) return null;
       return (
+        scope?.querySelector?.('[data-testid="agent-input-box"]') ||
+        scope?.querySelector?.('.surface-composer-card') ||
+        scope?.querySelector?.('[data-testid="conversation-view"]') ||
         doc.querySelector?.('[data-testid="agent-input-box"]') ||
         doc.querySelector?.('.surface-composer-card') ||
         doc.querySelector?.('[data-testid="conversation-view"]') ||
@@ -141,10 +146,10 @@
         try { composerListenerOff(); } catch {}
         composerListenerOff = null;
       }
-      const ed = ctxSrc.findComposerEditor(doc);
+      const ed = ctxSrc.findComposerEditor(doc, getScope());
       if (!ed || typeof ed.addEventListener !== 'function') return;
       const onInput = () => {
-        if (countdownTimer && ctxSrc.readComposerDraft(doc).length > 0) {
+        if (countdownTimer && ctxSrc.readComposerDraft(doc, getScope()).length > 0) {
           stopCountdown();
           if (lastSnapshot?.cascadeId) countdownCanceledForSession.add(lastSnapshot.cascadeId);
           setToast(S().toastDraftProtected, 'warn');
@@ -176,9 +181,10 @@
         return custom ? `${COMPACT_CMD} ${custom}` : COMPACT_CMD;
       }
       if (preset === 'bookmarks') {
-        const cid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win);
+        const scope = getScope();
+        const cid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win, scope);
         const bm = exporter?.loadBookmarks?.(storage, cid) || new Set();
-        const turns = exporter?.extractConversationTurns?.(doc) || [];
+        const turns = exporter?.extractConversationTurns?.(doc, scope) || [];
         const starred = turns.filter((t) => bm.has(t.turnNum)).slice(-3);
         if (starred.length === 0) {
           return `${COMPACT_CMD} ${strings.compactFocusBookmarksFallback}`;
@@ -200,9 +206,11 @@
 
     function captureRecoverySnapshot() {
       if (!handoff) return null;
-      const cid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win);
+      const scope = getScope();
+      const cid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win, scope);
       return handoff.capturePreCompactSnapshot({
         doc,
+        scopeEl: scope,
         storage,
         cascadeId: cid,
         usedPct: lastSnapshot?.usedPct ?? null,
@@ -212,12 +220,13 @@
 
     const writeTextIntoComposer = (text, { allowSameAs = [] } = {}) => {
       const strings = S();
-      const existingDraft = ctxSrc.readComposerDraft(doc);
+      const scope = getScope();
+      const existingDraft = ctxSrc.readComposerDraft(doc, scope);
       if (existingDraft && !allowSameAs.includes(existingDraft)) {
         setToast(strings.toastDraftProtected, 'warn');
         return { ok: false, reason: 'draft-present' };
       }
-      const ed = ctxSrc.findComposerEditor(doc);
+      const ed = ctxSrc.findComposerEditor(doc, scope);
       if (!ed) return { ok: false, reason: 'no-editor' };
       try {
         ed.focus?.();
@@ -239,7 +248,8 @@
 
     const insertCompactIntoComposer = ({ submit = false } = {}) => {
       const strings = S();
-      if (ctxSrc.isTurnStreaming(doc) || lastSnapshot?.streaming) {
+      const scope = getScope();
+      if (ctxSrc.isTurnStreaming(doc, scope) || lastSnapshot?.streaming) {
         setToast(strings.toastStreamingBlocked, 'warn');
         return { ok: false, reason: 'streaming' };
       }
@@ -258,10 +268,9 @@
             cascadeId: lastSnapshot?.cascadeId || '',
           });
         } else {
-          const sendBtn =
-            doc.querySelector?.(
-              '[data-testid="agent-input-box"] [data-testid="input-send-button"], [data-testid="agent-input-box"] [data-testid="send-button"], [data-testid="send-button"], [data-testid="input-send-button"], [data-testid="agent-input-box"] button[aria-label*="Send" i], [data-testid="agent-input-box"] button[aria-label*="发送"], button[type="submit"]'
-            );
+          const sendSel =
+            '[data-testid="agent-input-box"] [data-testid="input-send-button"], [data-testid="agent-input-box"] [data-testid="send-button"], [data-testid="send-button"], [data-testid="input-send-button"], [data-testid="agent-input-box"] button[aria-label*="Send" i], [data-testid="agent-input-box"] button[aria-label*="发送"], button[type="submit"]';
+          const sendBtn = scope?.querySelector?.(sendSel) || doc.querySelector?.(sendSel);
           if (sendBtn && !sendBtn.disabled && typeof sendBtn.click === 'function') {
             sendBtn.click();
           } else {
@@ -287,8 +296,9 @@
 
     const handleExportMd = async ({ onlyBookmarked = false, download = false } = {}) => {
       const strings = S();
-      const turns = exporter.extractConversationTurns(doc);
-      const cid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win);
+      const scope = getScope();
+      const turns = exporter.extractConversationTurns(doc, scope);
+      const cid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win, scope);
       const bm = exporter.loadBookmarks(storage, cid);
       const built = exporter.buildRecapMarkdown({
         turns,
@@ -344,7 +354,12 @@
       const anchor = findBannerAnchor();
       if (!anchor || !anchor.parentElement) return null;
       ensureStyle();
-      if (recoveryEl && recoveryEl.isConnected !== false) return recoveryEl;
+      if (recoveryEl && recoveryEl.isConnected !== false) {
+        if (recoveryEl.parentElement !== anchor.parentElement) {
+          anchor.parentElement.insertBefore(recoveryEl, anchor);
+        }
+        return recoveryEl;
+      }
 
       const bar = coexist.markOwnedNoTranslate(doc.createElement('div'));
       bar.className = 'ag-sg-recovery-bar';
@@ -640,7 +655,13 @@
       const anchor = findBannerAnchor();
       if (!anchor || !anchor.parentElement) return null;
       ensureStyle();
-      if (bannerEl && bannerEl.isConnected !== false) return bannerEl;
+      if (bannerEl && bannerEl.isConnected !== false) {
+        if (bannerEl.parentElement !== anchor.parentElement) {
+          anchor.parentElement.insertBefore(bannerEl, anchor);
+          bindComposerDraftGuard();
+        }
+        return bannerEl;
+      }
 
       const wrap = coexist.markOwnedNoTranslate(doc.createElement('div'));
       wrap.className = 'ag-sg-banner';
@@ -903,9 +924,11 @@
         if (recoveryEl) recoveryEl.hidden = true;
         return lastSnapshot;
       }
+      const scope = getScope();
       const snap = await ctxSrc.sampleContextState({
         win,
         doc,
+        scopeEl: scope,
         getContextSnapshot: options.getContextSnapshot,
       });
       lastSnapshot = snap;
@@ -913,6 +936,7 @@
         lastWatchdog = watchdog.observe({
           snap,
           doc,
+          scopeEl: scope,
           threshold: config.compactThreshold,
         });
         if (lastWatchdog.newlyStalled && typeof options.onStallDetected === 'function') {
@@ -968,11 +992,22 @@
       return { ...config };
     }
 
-    const addL = (target, ev, fn) => {
+    const addL = (target, ev, fn, cap = false) => {
       if (!target || typeof target.addEventListener !== 'function') return;
-      target.addEventListener(ev, fn);
-      listeners.push(() => target.removeEventListener?.(ev, fn));
+      target.addEventListener(ev, fn, cap);
+      listeners.push(() => target.removeEventListener?.(ev, fn, cap));
     };
+
+    const onPaneFocus = (ev) => {
+      if (destroyed || !ev?.target || !ctxSrc.findPaneRootForNode) return;
+      const rootPane = ctxSrc.findPaneRootForNode(ev.target, doc);
+      if (rootPane && rootPane !== activePaneEl) {
+        activePaneEl = rootPane;
+        void evaluateNow();
+      }
+    };
+    addL(doc, 'pointerdown', onPaneFocus, true);
+    addL(doc, 'focusin', onPaneFocus, true);
 
     addL(win, 'blur', () => {
       blurred = true;

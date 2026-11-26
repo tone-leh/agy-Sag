@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/badge/Antigravity-2.34%20%7C%202.35+-0f172a?style=flat-square" alt="Antigravity 2.34 | 2.35+" />
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-1e293b?style=flat-square" alt="Platform" />
   <img src="https://img.shields.io/badge/Zero--ASAR-0_Runtime_Deps-059669?style=flat-square" alt="Zero-ASAR & Zero Runtime Deps" />
-  <img src="https://img.shields.io/badge/i18n-5_Languages-d97706?style=flat-square" alt="5 Languages" />
+  <img src="https://img.shields.io/badge/i18n-8%2B1_Languages-d97706?style=flat-square" alt="8+1 Languages" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-6366f1?style=flat-square" alt="License: MIT" /></a>
 </p>
 
@@ -148,13 +148,20 @@ npm run remove
 
 ---
 
-## 与社区皮肤 / 遥测插件和平共存
+## 与社区皮肤 / 遥测插件和平共存（轻量独立 vs 全套视觉套件）
 
-**领航哨**按「独立好用、与皮肤共存、随时可被整模块或单模块吸收」的标准设计：
+如果你喜欢 **[Obsidian Prism](https://github.com/RMvdesi/obsidian-prism)** 的全套视觉主题、桌宠、3D 元素周期表与 WebGL2 动效，两者可无缝叠用；如果你觉得整套皮肤插件太重，**只想要「自定义压缩阈值 / 压缩后无损续接 / 轮次书签与跨会话档案库 / 卡死提醒」这几个纯粹的效率功能**，**领航哨（Session Guard）** 可以完全独立运行，零视觉入侵、按模块随开随关：
+
+| 对比维度 | **Antigravity Session Guard（领航哨）** | **Obsidian Prism（全套视觉增强套件）** |
+| :--- | :--- | :--- |
+| **核心定位** | 纯效率向轻量化会话守卫（不改宿主主题、无桌宠/WebGL2） | 全套光学 UI 主题、弹簧动效、3D 模型选择器、桌宠、记忆与存储治理 |
+| **安装负担** | 零 npm 依赖、Zero-ASAR、`npm run attach` / `watch` 秒级无损进退 | 独立安装器 + 12 通道按需扩展 + 守护进程 |
+| **多分屏 & 语种** | 原生适配 Antigravity 多分屏焦点窗格 + **8+1 语种**（与 Prism v1.0.8 1:1 对齐） | 原生多分屏隔离（`v1.0.8-beta.2`）+ 8 语种完整国际化 |
+| **叠加共存** | 自动复用 `window.__agPrismMetricsBridge`（0 重复轮询）、`data-ag-no-i18n="1"` 免疫、支持 `window.__agSessionGuardOwner` 自动礼让（详见 [`docs/PRISM_CHANNEL_INTEGRATION.md`](./docs/PRISM_CHANNEL_INTEGRATION.md)） | 可随时按 MIT 协议将任意核心模块吸收为独立按需 Channel（0 Channel 1 体积增量） |
 
 | 搭配对象 | 协作机制 |
 | :--- | :--- |
-| **[Obsidian Prism](https://github.com/RMvdesi/obsidian-prism)** | 零重复轮询直接复用 `window.__agPrismMetricsBridge`；四套深浅色 CSS 变量原生融入；所有 Owned DOM 标注 `data-ag-no-i18n="1"` 避免被 Channel 4 误译；左侧大纲自动挂载书签筛选；若未来被 Prism 整合，只要设置 `window.__agSessionGuardOwner = 'obsidian-prism'`，独立版即自动礼让退出。 |
+| **[Obsidian Prism](https://github.com/RMvdesi/obsidian-prism)** | 零重复轮询直接复用 `window.__agPrismMetricsBridge`；四套深浅色 CSS 变量原生融入；所有 Owned DOM 标注 `data-ag-no-i18n="1"` 避免被 Channel 4 误译；左侧大纲自动挂载书签筛选；若未来被 Prism 吸收，只要设置 `window.__agSessionGuardOwner = 'obsidian-prism'`，独立版即自动礼让退出。 |
 | **[AG Pulse (`antigrative-dashboard`)](https://github.com/ATtacK030130/antigrative-dashboard)** | 自动读取 `window.agPulseHost` 或状态条 Shadow DOM 上下文百分比，不抢占不冲突。 |
 | **原生无插件 Antigravity** | 自动回退轻量 DOM 估算与宿主原生 CSS 变量，开箱即用。 |
 
