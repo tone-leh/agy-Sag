@@ -8,7 +8,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this, function (globalRoot) {
   'use strict';
 
-  const VERSION = '0.3.0';
+  const VERSION = '0.4.0';
 
   function resolveDep(globalKey, relPath) {
     if (globalRoot && globalRoot[globalKey]) return globalRoot[globalKey];

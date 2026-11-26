@@ -65,7 +65,7 @@ test('Doctor CLI: reports healthy Obsidian Prism + Session Guard coexistence and
       sessionGuard: {
         state: 'mounted',
         owner: 'standalone',
-        version: '0.3.0',
+        version: '0.4.0',
         codeHash: 'abcd1234',
         threshold: 80,
         mode: 'confirm',

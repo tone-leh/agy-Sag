@@ -2,6 +2,24 @@
 
 All notable changes to **Antigravity Session Guard (领航哨)** are documented in this file.
 
+## [0.4.0] - 2026-11-26
+
+### Added
+- **Zero-Popup `auto-silent` Idle Compaction & Viewport Scroll Shield (`packages/core/compact-guard.js`, `packages/core/context-source.js`)**: Switched the default compaction mode to `auto-silent` with a 3-second idle countdown that triggers `/compact` without popping up a banner, aborts silently on draft input, defers while the user is scrolling, and activates a non-intrusive viewport scroll shield + scroll-settle guard so auto-compaction preserves your reading position.
+- **Clean Slate Same-Project Fresh Restart (`packages/core/clean-slate.js`)**: Added `/clear` and `/clear keep` slash commands that start a fresh conversation inside the exact same project with zero lingering images or bloated tool logs (`/clear keep` carries a compact secret-redacted continuity brief).
+- **Native Antigravity Plugin Manifest, Watch Sidecar & Installer (`plugin.json`, `sidecars/daemon/`, `cli/install-plugin.mjs`, `npm run install:plugin`)**: Packaged Session Guard as a native Antigravity plugin with an auto-managed Zero-ASAR watch sidecar.
+- **Draft Vault, New-Session Handoff, Watchdog `+5m` Snooze & Doctor CLI (`packages/core/draft-guard.js`, `packages/core/recovery-handoff.js`, `packages/core/session-watchdog.js`, `cli/doctor.mjs`, `npm run doctor`)**: Added per-`cascadeId` debounced unsent draft recovery (7-day TTL), one-click redacted New-Session Handoff prompt generation, `+5m` stall snooze, and a read-only environment & Obsidian Prism coexistence diagnostic CLI.
+- **Obsidian Prism Native Card Integration & Standalone Calm UX (`packages/core/status-pill.js`, `packages/core/prism-bridge.js`)**: Automatically embeds auto-compact and clean-restart controls inside Obsidian Prism's context card Shadow DOM with zero extra footer pill, and bridges plain-language per-module Settings into Prism's Modules tab; standalone users receive a calm composer `%` pill, a minimal quick card (`<= 7` controls), and a slim 3-row native Settings section.
+- **Split View Multi-Pane Tracking, 8+1 Locale Parity & Prism Channel 13 Blueprint (`packages/core/context-source.js`, `packages/core/i18n.js`, `docs/PRISM_CHANNEL_INTEGRATION.md`)**: Tracks the active focused split pane (`resolveActivePaneScope`) and delivers 100% key-aligned localization across `zh-CN`, `zh-TW`, `yue`, `en`, `ja`, `ko`, `es`, `fr`, and `de`.
+- **Cross-Platform CI & Internationalized Primary README (`.github/workflows/ci.yml`, `README.md`, `README.zh-CN.md`)**: Enabled Node 22 GitHub Actions CI (`ubuntu-latest`, `macos-latest`, `windows-latest`) running `npm test` (46 tests) and `node workbench/server.mjs --smoke`, promoted English `README.md` to primary with `README.zh-CN.md` companion docs, and refreshed preview assets to `v0.4`.
+
+### Changed
+- **Inline Opt-In Turn Bookmarks (`packages/core/outline-bookmarks.js`, `packages/core/coexist.js`, `packages/core/styles.js`)**: Moved the turn bookmark control into the native Copy/Undo message action bar as a crisp 16px SVG icon with hover tooltip, and made `outlineBookmarks` opt-in by default alongside plain-language per-module Settings guides and card tooltips.
+- **Streamlined Banner & Controls (`packages/core/compact-guard.js`, `packages/core/status-pill.js`)**: Hid the confirmation banner while streaming, trimmed manual banner actions to `<= 2` with frosted-glass styling, defaulted `/clear` to clean restart, and enforced `<= 7` controls on the quick status card.
+
+### Fixed
+- **Antigravity v2.35.1 Live DOM & Lexical Compatibility (`packages/core/compact-guard.js`, `packages/core/context-source.js`, `packages/core/session-radar.js`, `packages/core/outline-bookmarks.js`, `packages/core/styles.js`)**: Updated sidebar running/awaiting selectors, autoscroll dock detection, `display:contents` banner width handling, send button selectors, Lexical v2.35 two-step slash-command picking, and `cascadeId`-scoped bridge telemetry snapshots.
+
 ## [0.3.0] - 2026-11-25
 
 ### Added
