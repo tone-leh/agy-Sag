@@ -11,6 +11,7 @@
   const THRESHOLD_PRESETS = ['off', 70, 75, 80, 85, 90];
   const STALL_PRESETS = ['off', 120, 180, 300];
   const COMPACT_CMD = '/compact';
+  const AUTO_SEND_COOLDOWN_MS = 120_000; // Hard 2-minute anti-loop cooldown per session
 
   function resolveDep(globalKey, relPath) {
     if (globalRoot && globalRoot[globalKey]) return globalRoot[globalKey];
@@ -46,6 +47,7 @@
     let pollTimer = null;
     let countdownTimer = null;
     let toastTimer = null;
+    const slashTimers = new Set();
     let countdownRemaining = 0;
     let countdownCanceledForSession = new Set();
     let lastSnapshot = null;
@@ -73,13 +75,14 @@
     const listeners = [];
     const getScope = () => (ctxSrc.resolveActivePaneScope ? ctxSrc.resolveActivePaneScope(doc, activePaneEl) : doc);
 
-    // Per-cascadeId session state for smart dismiss & auto-reset on compaction
+    const nowFn = typeof options.now === 'function' ? options.now : () => Date.now();
+    // Per-cascadeId session state for smart dismiss, anti-flicker streak & auto-reset on compaction
     const sessionState = new Map();
     const getSess = (cid) => {
       const k = cid || 'default-session';
       let s = sessionState.get(k);
       if (!s) {
-        s = { dismissedAtPct: null, lastCompactedCount: 0, autoSentAtPct: null };
+        s = { dismissedAtPct: null, lastCompactedCount: 0, autoSentAtPct: null, lastAutoSentAtMs: 0, lowDropStreak: 0 };
         sessionState.set(k, s);
       }
       return s;
@@ -219,11 +222,21 @@
       });
     }
 
-    const writeTextIntoComposer = (text, { allowSameAs = [] } = {}) => {
+    const scheduleSlashTimer = (fn, ms) => {
+      const t = setTimeout(() => {
+        slashTimers.delete(t);
+        if (!destroyed) fn();
+      }, ms);
+      t?.unref?.();
+      slashTimers.add(t);
+      return t;
+    };
+
+    const writeTextIntoComposer = (text, { allowSameAs = [], append = false } = {}) => {
       const strings = S();
       const scope = getScope();
       const existingDraft = ctxSrc.readComposerDraft(doc, scope);
-      if (existingDraft && !allowSameAs.includes(existingDraft)) {
+      if (!append && existingDraft && !allowSameAs.includes(existingDraft)) {
         setToast(strings.toastDraftProtected, 'warn');
         return { ok: false, reason: 'draft-present' };
       }
@@ -233,18 +246,114 @@
         ed.focus?.();
         const tag = String(ed.tagName || '').toUpperCase();
         if (tag === 'TEXTAREA' || tag === 'INPUT') {
-          ed.value = text;
+          ed.value = append ? `${String(ed.value || '')}${text}` : text;
           ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
-        } else if (typeof doc.execCommand === 'function' && doc.execCommand('insertText', false, text)) {
-          // inserted via execCommand
         } else {
-          ed.textContent = text;
-          ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
+          // Ensure a valid Selection inside the Lexical contenteditable editor so execCommand('insertText')
+          // reliably updates Lexical state and triggers the native slash-command typeahead menu.
+          try {
+            const sel = win?.getSelection?.() || doc?.getSelection?.();
+            if (sel?.removeAllRanges && doc?.createRange) {
+              const range = doc.createRange();
+              range.selectNodeContents(ed);
+              if (append || !existingDraft) range.collapse(false);
+              sel.removeAllRanges();
+              sel.addRange(range);
+            }
+          } catch {}
+          if (typeof doc.execCommand === 'function' && doc.execCommand('insertText', false, text)) {
+            // inserted via execCommand
+          } else {
+            ed.textContent = append ? `${String(ed.textContent || '')}${text}` : text;
+            ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
+          }
         }
         return { ok: true, editor: ed };
       } catch {
         return { ok: false, reason: 'insert-failed' };
       }
+    };
+
+    const findSlashCompactTarget = () => {
+      if (!doc || typeof doc.querySelectorAll !== 'function') return null;
+      const opts = Array.from(
+        doc.querySelectorAll('[id^="typeahead-item-"][role="option"], [role="option"], [data-testid*="command-item"]') || []
+      );
+      const seen = new Set();
+      for (const el of opts) {
+        if (!el || seen.has(el)) continue;
+        seen.add(el);
+        if (
+          el.getAttribute?.('aria-disabled') === 'true' ||
+          el.querySelector?.('[data-testid="menu-category-row"], [aria-disabled="true"]')
+        ) {
+          continue;
+        }
+        const elId = String(el.getAttribute?.('id') || '');
+        const elTestId = String(el.getAttribute?.('data-testid') || '').toLowerCase();
+        const inSlashMenu =
+          elId.startsWith('typeahead-item-') ||
+          elTestId.includes('command-item') ||
+          Boolean(el.closest?.('[role="listbox"], [data-testid*="slash"], [data-testid*="command"], [data-testid*="typeahead"]'));
+        if (!inSlashMenu) continue;
+
+        // Antigravity v2.34/v2.35 renders inner [data-testid="menu-option-label"] with bare "compact" and
+        // attaches React onClickCapture on the inner row/label rather than the outer [role="option"].
+        const labelEl = el.querySelector?.('[data-testid="menu-option-label"]');
+        if (labelEl) {
+          const lv = String(labelEl.textContent || '').trim().toLowerCase();
+          if (lv === 'compact' || lv === '/compact') {
+            return { opt: el, clickTarget: labelEl };
+          }
+          continue;
+        }
+        const txt = String(el.textContent || el.getAttribute?.('data-value') || '').trim().toLowerCase();
+        if (/(?:^|\s)\/compact(?:\s|$)|^compact(?:\s|$)/.test(txt)) {
+          return { opt: el, clickTarget: el };
+        }
+      }
+      return null;
+    };
+
+    const clickComposerSendButton = (editor, scope) => {
+      const sendSels = [
+        '[data-testid="input-send-button"]',
+        '[data-testid="send-button"]',
+        'button[aria-label*="Send" i]',
+        'button[aria-label*="发送"]',
+        'button[type="submit"]',
+      ];
+      const inSidePanel = (node) =>
+        Boolean(node?.closest?.('[data-side-panel-focus-scope="true"], [data-testid="side-question-panel"]'));
+      const box = editor?.closest?.('[data-testid="agent-input-box"], .surface-composer-card') || null;
+      const scopes = [box, scope, doc].filter(Boolean);
+      let sendBtn = null;
+      for (const sc of scopes) {
+        for (const sel of sendSels) {
+          const btns = Array.from(sc.querySelectorAll?.(sel) || []);
+          sendBtn = btns.find(
+            (b) =>
+              b &&
+              !inSidePanel(b) &&
+              !b.disabled &&
+              b.getAttribute?.('aria-disabled') !== 'true' &&
+              !b.hasAttribute?.('disabled') &&
+              typeof b.click === 'function'
+          );
+          if (sendBtn) break;
+        }
+        if (sendBtn) break;
+      }
+      if (sendBtn) {
+        sendBtn.click();
+        return 'click-send-button';
+      }
+      const KEv = win.KeyboardEvent || globalThis.KeyboardEvent;
+      if (typeof KEv === 'function' && editor) {
+        editor.dispatchEvent?.(new KEv('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+        return 'enter-key';
+      }
+      return 'none';
     };
 
     const insertCompactIntoComposer = ({ submit = false } = {}) => {
@@ -255,36 +364,107 @@
         return { ok: false, reason: 'streaming' };
       }
       const cmd = buildCompactCommand();
-      const written = writeTextIntoComposer(cmd, { allowSameAs: [COMPACT_CMD, cmd] });
+      const extraSuffix = cmd.startsWith(`${COMPACT_CMD} `) ? cmd.slice(COMPACT_CMD.length) : '';
+      const editorPreview = ctxSrc.findComposerEditor(doc, scope);
+      const isRichLexical = Boolean(
+        editorPreview?.getAttribute?.('data-lexical-editor') === 'true' ||
+        editorPreview?.getAttribute?.('contenteditable') === 'true'
+      );
+      // In Lexical with submit=true, insert bare "/compact" first so the host slash-command typeahead opens;
+      // any custom focus prompt suffix is appended right after selecting the native slash chip.
+      const initialText = submit && isRichLexical && typeof options.onSubmitCompact !== 'function' ? COMPACT_CMD : cmd;
+      const written = writeTextIntoComposer(initialText, { allowSameAs: [COMPACT_CMD, cmd] });
       if (!written.ok) return written;
 
       // Silently preserve pre-compact recovery snapshot for seamless post-compact handoff
       captureRecoverySnapshot();
 
+      const startCid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win, scope);
+      const sess = getSess(startCid);
+
       if (submit) {
+        sess.dismissedAtPct = lastSnapshot?.usedPct ?? config.compactThreshold;
+        sess.autoSentAtPct = lastSnapshot?.usedPct ?? config.compactThreshold;
+        sess.lastAutoSentAtMs = nowFn();
+        stopCountdown();
+
         if (typeof options.onSubmitCompact === 'function') {
           options.onSubmitCompact({
             command: cmd,
             preset: config.compactFocusPreset,
-            cascadeId: lastSnapshot?.cascadeId || '',
+            cascadeId: startCid || '',
           });
-        } else {
-          const sendSel =
-            '[data-testid="agent-input-box"] [data-testid="input-send-button"], [data-testid="agent-input-box"] [data-testid="send-button"], [data-testid="send-button"], [data-testid="input-send-button"], [data-testid="agent-input-box"] button[aria-label*="Send" i], [data-testid="agent-input-box"] button[aria-label*="发送"], button[type="submit"]';
-          const sendBtn = scope?.querySelector?.(sendSel) || doc.querySelector?.(sendSel);
-          if (sendBtn && !sendBtn.disabled && typeof sendBtn.click === 'function') {
-            sendBtn.click();
-          } else {
-            const KEv = win.KeyboardEvent || globalThis.KeyboardEvent;
-            if (typeof KEv === 'function') {
-              written.editor.dispatchEvent?.(new KEv('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
-            }
-          }
+          const shortCmd = cmd.length > 36 ? `${cmd.slice(0, 36)}…` : cmd;
+          setToast(i18n.formatTemplate(strings.toastSent, { cmd: shortCmd }), 'ok');
+          return { ok: true, submitted: true, command: cmd };
         }
-        const sess = getSess(lastSnapshot?.cascadeId);
-        sess.dismissedAtPct = lastSnapshot?.usedPct ?? config.compactThreshold;
-        sess.autoSentAtPct = lastSnapshot?.usedPct ?? config.compactThreshold;
-        stopCountdown();
+
+        if (isRichLexical) {
+          // Antigravity v2.34/v2.35 Lexical two-step slash execution:
+          // (1) Pick the real slash-command menu item (converts "/compact" into a native slash chip),
+          // (2) Wait briefly for Lexical chip commit (plus optional focus suffix), then click Send.
+          // Fail-safe: if no slash-command option appears, NEVER click Send (avoids spamming plain "/compact" text).
+          const slashPollMs = Number.isFinite(Number(options.slashPollMs)) ? Math.max(5, Number(options.slashPollMs)) : 45;
+          const slashSubmitDelayMs = Number.isFinite(Number(options.slashSubmitDelayMs))
+            ? Math.max(0, Number(options.slashSubmitDelayMs))
+            : 50;
+          const isSessionUnchanged = () => {
+            if (destroyed) return false;
+            if (written.editor?.isConnected === false) return false;
+            const curCid = ctxSrc.detectCascadeId(doc, win, getScope());
+            if (startCid && startCid !== 'default-session' && curCid && curCid !== 'default-session' && curCid !== startCid) {
+              return false;
+            }
+            return true;
+          };
+          const executePickedSlash = (target) => {
+            try { target.clickTarget.click(); } catch {}
+            const finalizeSubmit = () => {
+              if (!isSessionUnchanged()) return;
+              if (extraSuffix) {
+                writeTextIntoComposer(extraSuffix, { append: true });
+              }
+              clickComposerSendButton(written.editor, getScope());
+              const shortCmd = cmd.length > 36 ? `${cmd.slice(0, 36)}…` : cmd;
+              setToast(i18n.formatTemplate(strings.toastSent, { cmd: shortCmd }), 'ok');
+            };
+            if (slashSubmitDelayMs === 0) {
+              finalizeSubmit();
+            } else {
+              scheduleSlashTimer(finalizeSubmit, slashSubmitDelayMs);
+            }
+          };
+
+          const immediateTarget = findSlashCompactTarget();
+          if (immediateTarget) {
+            executePickedSlash(immediateTarget);
+            return { ok: true, submitted: true, viaSlashOption: true, command: cmd };
+          }
+
+          let attempts = 0;
+          const maxAttempts = 8;
+          const pollSlash = () => {
+            if (!isSessionUnchanged()) return;
+            const found = findSlashCompactTarget();
+            if (found) {
+              executePickedSlash(found);
+              return;
+            }
+            attempts += 1;
+            if (attempts < maxAttempts) {
+              scheduleSlashTimer(pollSlash, slashPollMs);
+            } else {
+              const shortCmd = cmd.length > 36 ? `${cmd.slice(0, 36)}…` : cmd;
+              setToast(i18n.formatTemplate(strings.toastFilled, { cmd: shortCmd }), 'ok');
+            }
+          };
+          scheduleSlashTimer(pollSlash, slashPollMs);
+          const shortCmd = cmd.length > 36 ? `${cmd.slice(0, 36)}…` : cmd;
+          setToast(i18n.formatTemplate(strings.toastFilled, { cmd: shortCmd }), 'ok');
+          return { ok: true, submitted: false, pendingSlashOption: true, command: cmd };
+        }
+
+        clickComposerSendButton(written.editor, scope);
         const shortCmd = cmd.length > 36 ? `${cmd.slice(0, 36)}…` : cmd;
         setToast(i18n.formatTemplate(strings.toastSent, { cmd: shortCmd }), 'ok');
         return { ok: true, submitted: true, command: cmd };
@@ -792,14 +972,18 @@
       const sess = getSess(snap.cascadeId);
       const th = config.compactThreshold === 'off' ? null : Number(config.compactThreshold);
 
-      // Detect compaction completed -> reset dismiss state AND surface post-compact recovery strip if snapshot exists
+      // Detect compaction completed -> reset dismiss state (require 2 consecutive low samples on drop to ignore cross-tab flicker!)
       const compactedByCount = snap.compactedCount > sess.lastCompactedCount;
-      const compactedByDrop = th !== null && Number.isFinite(th) && snap.usedPct <= th - config.resetDropPct;
+      const isBelowReset = th !== null && Number.isFinite(th) && snap.usedPct <= th - config.resetDropPct;
+      if (isBelowReset) sess.lowDropStreak += 1;
+      else sess.lowDropStreak = 0;
+      const compactedByDrop = isBelowReset && sess.lowDropStreak >= 2;
       if (compactedByCount || compactedByDrop) {
         const hadPriorCompactCycle = compactedByCount || sess.dismissedAtPct !== null || sess.autoSentAtPct !== null;
         sess.lastCompactedCount = Math.max(sess.lastCompactedCount, snap.compactedCount);
         sess.dismissedAtPct = null;
         sess.autoSentAtPct = null;
+        sess.lowDropStreak = 0;
         countdownCanceledForSession.delete(snap.cascadeId);
         if (hadPriorCompactCycle || compactedByCount) {
           const saved = handoff?.loadSnapshot?.(storage, snap.cascadeId) || null;
@@ -823,6 +1007,8 @@
     };
 
     const maybeManageCountdown = (snap, visible, isStallAlert) => {
+      const sess = snap ? getSess(snap.cascadeId) : null;
+      const inCooldown = Boolean(sess && sess.lastAutoSentAtMs && nowFn() - sess.lastAutoSentAtMs < AUTO_SEND_COOLDOWN_MS);
       const canCountdown =
         visible &&
         !isStallAlert &&
@@ -831,7 +1017,8 @@
         !snap.draft &&
         !coexist.isWindowHibernated(doc, win, blurred) &&
         !countdownCanceledForSession.has(snap.cascadeId) &&
-        getSess(snap.cascadeId).autoSentAtPct === null;
+        sess?.autoSentAtPct === null &&
+        !inCooldown;
 
       if (!canCountdown) {
         if (countdownTimer) stopCountdown();
@@ -1091,6 +1278,8 @@
       stopPoll();
       stopCountdown();
       if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+      for (const t of slashTimers) { try { clearTimeout(t); } catch {} }
+      slashTimers.clear();
       if (composerListenerOff) { try { composerListenerOff(); } catch {} composerListenerOff = null; }
       while (listeners.length) {
         try { listeners.pop()(); } catch {}

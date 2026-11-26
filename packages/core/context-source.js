@@ -281,12 +281,28 @@
     }
 
     // 2) Zero-overhead reuse of Obsidian Prism / AG Pulse existing metrics bridge (scoped by active pane cascadeId)
+    const normCid = String(cascadeId || '').toLowerCase();
+    const hasRealCid = GUID_RE.test(normCid);
+    const extractPayloadCid = (p) =>
+      String(
+        p?.conversationId ||
+        p?.cascadeId ||
+        p?.speed?.conversationId ||
+        p?.speed?.cascadeId ||
+        p?.context?.conversationId ||
+        ''
+      ).trim().toLowerCase();
     const bridges = [win?.__agPrismMetricsBridge, win?.agPulseHost].filter((b) => b && typeof b.getMetrics === 'function');
     for (const bridge of bridges) {
       const latest = typeof bridge.getLatestSnapshot === 'function' ? bridge.getLatestSnapshot() : null;
-      const fromLatest = extractFromBridgePayload(latest);
+      const latestCid = extractPayloadCid(latest);
+      // Never allow an untagged or different-session global latest snapshot to bleed into a known UUID conversation
+      const latestMatches = hasRealCid ? latestCid === normCid : (!latestCid || latestCid === normCid);
+      const fromLatest = latestMatches ? extractFromBridgePayload(latest) : null;
       const live = await withTimeout(bridge.getMetrics({ conversationId: cascadeId, force: false }), 1500);
-      const parsed = extractFromBridgePayload(live) || fromLatest;
+      const liveCid = extractPayloadCid(live);
+      const liveMatches = !liveCid || !hasRealCid || liveCid === normCid;
+      const parsed = (liveMatches ? extractFromBridgePayload(live) : null) || fromLatest;
       if (parsed) {
         return {
           cascadeId,

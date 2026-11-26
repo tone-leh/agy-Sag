@@ -392,3 +392,98 @@ test('CompactGuard: minimal banner has max 2 actions (no export clutter), quick 
 
   guard.destroy();
 });
+
+test('CompactGuard anti-flicker, scoped bridge telemetry & Lexical v2.35 two-step slash-command guard', async () => {
+  const env = createMockDom({ lang: 'zh-CN' });
+  // Convert editor to Lexical contenteditable & add send button to ensure raw send is NOT clicked without slash menu
+  env.textarea.setAttribute('data-lexical-editor', 'true');
+  env.textarea.setAttribute('contenteditable', 'true');
+  const sendBtn = env.doc.createElement('button');
+  sendBtn.setAttribute('data-testid', 'input-send-button');
+  let rawSendClicks = 0;
+  sendBtn.addEventListener('click', () => { rawSendClicks += 1; });
+  env.doc.querySelector('[data-testid="send-button"]')?.addEventListener('click', () => { rawSendClicks += 1; });
+  env.doc.querySelector('[data-testid="agent-input-box"]').appendChild(sendBtn);
+
+  let pct = 92;
+  let now = 1_000_000;
+  const guard = core.mountSessionGuard({
+    win: env.win,
+    doc: env.doc,
+    storage: env.storage,
+    autoPoll: false,
+    now: () => now,
+    slashPollMs: 5,
+    slashSubmitDelayMs: 0,
+    config: { compactThreshold: 90, compactTriggerMode: 'auto-countdown', countdownSeconds: 3 },
+    getContextSnapshot: () => ({ usedFraction: pct / 100, usedTokens: Math.round((pct / 100) * 512000), maxTokens: 512000 }),
+  });
+
+  await guard.evaluateNow();
+  // (a) Trigger compact without a slash-command typeahead -> must NEVER click raw Send button
+  const r1 = guard.compactGuard.insertCompact({ submit: true });
+  assert.equal(r1.ok, true);
+  assert.equal(r1.submitted, false);
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(rawSendClicks, 0, 'Must never send literal "/compact" text into Lexical chat without a slash-command option');
+
+  // (b) Single-tick cross-session flicker (92% -> 6% -> 92%) must NOT reset state or restart countdown!
+  env.textarea.value = '';
+  pct = 6;
+  await guard.evaluateNow();
+  pct = 92;
+  now += 15_000;
+  await guard.evaluateNow();
+  assert.equal(guard.getDebugState().compactGuard.countdownActive, false, 'Single-tick low flicker must NOT re-trigger auto-compact');
+
+  // (c) Antigravity v2.35 typeahead menu: skips category row, clicks inner [data-testid="menu-option-label"] ("compact"), THEN clicks Send once
+  const portal = env.doc.createElement('div');
+  const catOpt = env.doc.createElement('div');
+  catOpt.setAttribute('id', 'typeahead-item-0');
+  catOpt.setAttribute('role', 'option');
+  const catRow = env.doc.createElement('div');
+  catRow.setAttribute('data-testid', 'menu-category-row');
+  catRow.setAttribute('aria-disabled', 'true');
+  catRow.textContent = 'Commands';
+  catOpt.appendChild(catRow);
+  portal.appendChild(catOpt);
+
+  const opt = env.doc.createElement('div');
+  opt.setAttribute('id', 'typeahead-item-1');
+  opt.setAttribute('role', 'option');
+  const label = env.doc.createElement('span');
+  label.setAttribute('data-testid', 'menu-option-label');
+  label.textContent = 'compact';
+  let labelClicks = 0;
+  label.addEventListener('click', () => { labelClicks += 1; });
+  opt.appendChild(label);
+  portal.appendChild(opt);
+  env.doc.body.appendChild(portal);
+
+  const r2 = guard.compactGuard.insertCompact({ submit: true });
+  assert.equal(r2.ok, true);
+  assert.equal(r2.viaSlashOption, true);
+  assert.equal(labelClicks, 1, 'Must click inner [data-testid="menu-option-label"] to trigger React onClickCapture chip conversion');
+  assert.equal(rawSendClicks, 1, 'Must click Send exactly once AFTER picking the real slash-command option');
+
+  // (d) Context source strictly isolates global bridge.getLatestSnapshot() from foreign or untagged sessions
+  const ctxSrc = require('../packages/core/context-source.js');
+  const activeUuid = '11111111-2222-4333-8444-555555555555';
+  const foreignUuid = '22222222-3333-4444-8555-666666666666';
+  env.win.__agPrismMetricsBridge = {
+    getLatestSnapshot: () => ({ conversationId: foreignUuid, context: { usedFraction: 0.06, usedTokens: 30000, maxTokens: 512000 } }),
+    getMetrics: async () => ({ conversationId: activeUuid, context: { usedFraction: 0.92, usedTokens: 471000, maxTokens: 512000 } }),
+  };
+  const scopedSnap = await ctxSrc.sampleContextState({ win: env.win, doc: env.doc });
+  assert.equal(scopedSnap.usedPct, 92, 'Must prefer matching cascadeId live metrics and ignore foreign 6% snapshot');
+
+  env.win.__agPrismMetricsBridge = {
+    getLatestSnapshot: () => ({ context: { usedFraction: 0.06, usedTokens: 30000, maxTokens: 512000 } }),
+    getMetrics: async () => null,
+  };
+  const untaggedFallback = await ctxSrc.sampleContextState({ win: env.win, doc: env.doc });
+  assert.notEqual(untaggedFallback?.source, 'host-bridge', 'Must NOT adopt untagged global latest snapshot for a real UUID session');
+  delete env.win.__agPrismMetricsBridge;
+
+  guard.destroy();
+});
