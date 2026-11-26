@@ -322,6 +322,22 @@
       }
 
       const actButtons = [];
+      if (typeof options.onCleanClear === 'function') {
+        actButtons.push({
+          label: strings.btnClearBlank,
+          attr: 'data-ag-sg-prism-act',
+          val: 'clear-blank',
+          active: false,
+          onClick: () => options.onCleanClear({ mode: 'blank' }),
+        });
+        actButtons.push({
+          label: strings.btnClearKeep,
+          attr: 'data-ag-sg-prism-act',
+          val: 'clear-keep',
+          active: false,
+          onClick: () => options.onCleanClear({ mode: 'keep' }),
+        });
+      }
       if (typeof options.onOpenVault === 'function') {
         actButtons.push({
           label: strings.bmOpenVaultBtn,
@@ -329,15 +345,6 @@
           val: 'open-vault',
           active: false,
           onClick: () => options.onOpenVault(),
-        });
-      }
-      if (typeof options.onCopyHandoff === 'function') {
-        actButtons.push({
-          label: strings.btnCopyHandoff,
-          attr: 'data-ag-sg-prism-act',
-          val: 'copy-handoff',
-          active: false,
-          onClick: () => { void options.onCopyHandoff(); },
         });
       }
       if (actButtons.length > 0) {

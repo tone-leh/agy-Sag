@@ -23,6 +23,7 @@
     const coexist = options.coexist || resolveDep('__agSgCoexist', './coexist.js');
     const compactMod = options.compactGuardMod || resolveDep('__agSgCompactGuard', './compact-guard.js');
     const draftMod = options.draftGuardMod || resolveDep('__agSgDraftGuard', './draft-guard.js');
+    const cleanSlateMod = options.cleanSlateMod || resolveDep('__agSgCleanSlate', './clean-slate.js');
     const bookmarkMod = options.outlineBookmarksMod || resolveDep('__agSgOutlineBookmarks', './outline-bookmarks.js');
     const vaultMod = options.bookmarkVaultMod || resolveDep('__agSgBookmarkVault', './bookmark-vault.js');
     const radarMod = options.sessionRadarMod || resolveDep('__agSgSessionRadar', './session-radar.js');
@@ -44,6 +45,7 @@
     try { win?.[coexist.INSTANCE_GLOBAL]?.destroy?.(); } catch {}
 
     let draftGuard = null;
+    let cleanSlate = null;
     let outlineBookmarks = null;
     let bookmarkVault = null;
     let sessionRadar = null;
@@ -158,6 +160,20 @@
       onNotify: options.onRadarNotify,
     });
 
+    cleanSlate = cleanSlateMod?.createCleanSlateController
+      ? cleanSlateMod.createCleanSlateController({
+          win,
+          doc,
+          storage: options.storage,
+          draftGuardMod: draftMod,
+          now: options.now,
+          getLang: options.getLang,
+          onNavigateNewConversation: options.onNavigateNewConversation,
+          onClearTriggered: options.onClearTriggered,
+          onCleanRestartApplied: options.onCleanRestartApplied,
+        })
+      : null;
+
     statusPill = statusPillMod?.createStatusPillController
       ? statusPillMod.createStatusPillController({
           win,
@@ -166,8 +182,8 @@
           getLang: options.getLang,
           getConfig: () => compactGuard.getConfig(),
           onUpdateConfig: (patch) => api.updateConfig(patch),
+          onCleanClear: (opts) => cleanSlate?.triggerCleanClear?.(opts),
           onOpenVault: openVault,
-          onCopyHandoff: () => compactGuard.copyNewSessionHandoff(),
           onDownloadMarkdown: () => compactGuard.downloadMarkdown({ onlyBookmarked: outlineBookmarks.getBookmarks().length > 0 }),
         })
       : null;
@@ -181,8 +197,8 @@
           getLang: options.getLang,
           getConfig: () => compactGuard.getConfig(),
           onUpdateConfig: (patch) => api.updateConfig(patch),
+          onCleanClear: (opts) => cleanSlate?.triggerCleanClear?.(opts),
           onOpenVault: openVault,
-          onCopyHandoff: () => compactGuard.copyNewSessionHandoff(),
           onHostContextChange: () => {
             compactGuard.refreshUi?.();
             draftGuard?.sync?.();
@@ -201,6 +217,7 @@
       yielded: false,
       compactGuard,
       draftGuard,
+      cleanSlate,
       outlineBookmarks,
       bookmarkVault,
       sessionRadar,
@@ -208,6 +225,7 @@
       statusPill,
       evaluateNow: async () => {
         draftGuard?.sync?.();
+        cleanSlate?.sync?.();
         outlineBookmarks.sync();
         sessionRadar.syncFromDom();
         prismBridge?.sync?.();
@@ -226,6 +244,7 @@
         return next;
       },
       getConfig: () => compactGuard.getConfig(),
+      clearAndRestart: (opts) => cleanSlate?.triggerCleanClear?.(opts),
       copyNewSessionHandoff: () => compactGuard.copyNewSessionHandoff(),
       openStatusCard: () => statusPill?.open?.(),
       openSettingsPopover: () => compactGuard.openSettingsPopover(),
@@ -237,6 +256,7 @@
         destroyed,
         compactGuard: compactGuard.getDebugState(),
         draftGuard: draftGuard?.getDebugState?.() || null,
+        cleanSlate: cleanSlate?.getDebugState?.() || null,
         outlineBookmarks: outlineBookmarks.getDebugState(),
         bookmarkVault: bookmarkVault?.getDebugState?.() || null,
         sessionRadar: sessionRadar.getDebugState(),
@@ -248,6 +268,7 @@
         destroyed = true;
         statusPill?.destroy?.();
         prismBridge?.destroy?.();
+        cleanSlate?.destroy?.();
         draftGuard?.destroy?.();
         compactGuard.destroy();
         outlineBookmarks.destroy();

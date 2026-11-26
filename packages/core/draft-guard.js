@@ -38,8 +38,8 @@
   function isSaveableDraft(text) {
     const cleaned = String(text || '').replace(/\u200B/g, '').trim();
     if (cleaned.length < MIN_DRAFT_CHARS) return false;
-    // Do not cache transient /compact commands as unsent user drafts
-    if (/^\/compact(?:\s|$)/i.test(cleaned)) return false;
+    // Do not cache transient /compact or /clear commands as unsent user drafts
+    if (/^\/(?:compact|clear)(?:\s|$)/i.test(cleaned)) return false;
     return true;
   }
 

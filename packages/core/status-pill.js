@@ -283,6 +283,20 @@
         });
         return b;
       };
+      if (typeof options.onCleanClear === 'function') {
+        foot.appendChild(
+          mkAct('ag-sg-btn', strings.btnClearBlank, 'clear-blank', () => {
+            close();
+            options.onCleanClear({ mode: 'blank' });
+          })
+        );
+        foot.appendChild(
+          mkAct('ag-sg-btn ag-sg-btn-primary', strings.btnClearKeep, 'clear-keep', () => {
+            close();
+            options.onCleanClear({ mode: 'keep' });
+          })
+        );
+      }
       if (typeof options.onOpenVault === 'function') {
         foot.appendChild(
           mkAct('ag-sg-btn', strings.bmOpenVaultBtn, 'open-vault', () => {
@@ -291,16 +305,9 @@
           })
         );
       }
-      if (typeof options.onCopyHandoff === 'function') {
-        foot.appendChild(
-          mkAct('ag-sg-btn', strings.btnCopyHandoff, 'copy-handoff', () => {
-            void options.onCopyHandoff();
-          })
-        );
-      }
       if (typeof options.onDownloadMarkdown === 'function') {
         foot.appendChild(
-          mkAct('ag-sg-btn ag-sg-btn-primary', strings.btnDownloadMd, 'download-md', () => {
+          mkAct('ag-sg-btn', strings.btnDownloadMd, 'download-md', () => {
             void options.onDownloadMarkdown();
           })
         );
