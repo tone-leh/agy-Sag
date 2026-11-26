@@ -46,6 +46,7 @@
     let blurred = false;
     let pollTimer = null;
     let countdownTimer = null;
+    let silentTimer = null;
     let toastTimer = null;
     const slashTimers = new Set();
     let countdownRemaining = 0;
@@ -107,6 +108,13 @@
       }
     };
 
+    const stopSilent = () => {
+      if (silentTimer) {
+        clearTimeout(silentTimer);
+        silentTimer = null;
+      }
+    };
+
     const stopCountdown = () => {
       if (countdownTimer) {
         clearInterval(countdownTimer);
@@ -151,8 +159,9 @@
       const ed = ctxSrc.findComposerEditor(doc, getScope());
       if (!ed || typeof ed.addEventListener !== 'function') return;
       const onInput = () => {
-        if (countdownTimer && ctxSrc.readComposerDraft(doc, getScope()).length > 0) {
+        if ((countdownTimer || silentTimer) && ctxSrc.readComposerDraft(doc, getScope()).length > 0) {
           stopCountdown();
+          stopSilent();
           if (lastSnapshot?.cascadeId) {
             countdownCanceledForSession.add(lastSnapshot.cascadeId);
             getSess(lastSnapshot.cascadeId).dismissedAtPct = lastSnapshot.usedPct;
@@ -721,7 +730,7 @@
       const seg2 = doc.createElement('div');
       seg2.className = 'ag-sg-seg';
       for (const [mKey, mLabel] of [
-        ['auto-countdown', strings.cfgModeCountdown],
+        ['auto-silent', strings.cfgModeSilent],
         ['confirm', strings.cfgModeConfirm],
         ['fill-only', strings.cfgModeFill],
       ]) {
@@ -1006,6 +1015,61 @@
       return true;
     };
 
+    const maybeManageSilentAutoCompact = (snap, visible, isStallAlert) => {
+      const sess = snap ? getSess(snap.cascadeId) : null;
+      const inCooldown = Boolean(sess && sess.lastAutoSentAtMs && nowFn() - sess.lastAutoSentAtMs < AUTO_SEND_COOLDOWN_MS);
+      const canAutoSilent =
+        visible &&
+        !isStallAlert &&
+        config.compactTriggerMode === 'auto-silent' &&
+        !snap.streaming &&
+        !snap.draft &&
+        !coexist.isWindowHibernated(doc, win, blurred) &&
+        !countdownCanceledForSession.has(snap.cascadeId) &&
+        sess?.autoSentAtPct === null &&
+        !inCooldown;
+
+      if (!canAutoSilent) {
+        stopSilent();
+        return;
+      }
+      if (silentTimer) return;
+
+      // Ensure draft typing guard is active even when zero banner DOM is mounted
+      bindComposerDraftGuard();
+      const targetCid = snap.cascadeId;
+      const delayMs = Number.isFinite(Number(options.silentIdleDelayMs))
+        ? Math.max(0, Number(options.silentIdleDelayMs))
+        : 450;
+
+      const fireSilent = () => {
+        silentTimer = null;
+        if (destroyed || config.compactTriggerMode !== 'auto-silent') return;
+        const scope = getScope();
+        if (
+          coexist.isWindowHibernated(doc, win, blurred) ||
+          ctxSrc.isTurnStreaming(doc, scope) ||
+          ctxSrc.readComposerDraft(doc, scope).length > 0
+        ) {
+          if (ctxSrc.readComposerDraft(doc, scope).length > 0 && targetCid) {
+            countdownCanceledForSession.add(targetCid);
+          }
+          return;
+        }
+        const curCid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win, scope);
+        if (targetCid && curCid && targetCid !== curCid) return;
+        if (countdownCanceledForSession.has(curCid)) return;
+        insertCompactIntoComposer({ submit: true });
+      };
+
+      if (delayMs === 0) {
+        fireSilent();
+        return;
+      }
+      silentTimer = setTimeout(fireSilent, delayMs);
+      silentTimer?.unref?.();
+    };
+
     const maybeManageCountdown = (snap, visible, isStallAlert) => {
       const sess = snap ? getSess(snap.cascadeId) : null;
       const inCooldown = Boolean(sess && sess.lastAutoSentAtMs && nowFn() - sess.lastAutoSentAtMs < AUTO_SEND_COOLDOWN_MS);
@@ -1058,6 +1122,19 @@
       const visible = shouldShowForSnapshot(snap);
       renderRecoveryBar();
 
+      const isStallAlert = Boolean(lastWatchdog?.stalled && !lastWatchdog?.stallDismissed);
+
+      // Zero-popup silent mode: never pop up a countdown banner above the composer;
+      // silently trigger native two-step /compact once idle and empty.
+      if (config.compactTriggerMode === 'auto-silent' && !isStallAlert && !popoverOpen) {
+        stopCountdown();
+        if (bannerEl) bannerEl.hidden = true;
+        maybeManageSilentAutoCompact(snap, visible, false);
+        return;
+      }
+
+      stopSilent();
+
       if (!visible && !popoverOpen) {
         stopCountdown();
         if (bannerEl) bannerEl.hidden = true;
@@ -1066,7 +1143,6 @@
       const el = ensureBanner();
       if (!el) return;
 
-      const isStallAlert = Boolean(lastWatchdog?.stalled && !lastWatchdog?.stallDismissed);
       maybeManageCountdown(snap, visible, isStallAlert);
 
       const strings = S();
@@ -1205,6 +1281,9 @@
       if (config.compactTriggerMode !== 'auto-countdown' || config.compactThreshold === 'off') {
         stopCountdown();
       }
+      if (config.compactTriggerMode !== 'auto-silent' || config.compactThreshold === 'off') {
+        stopSilent();
+      }
       render();
       if (typeof options.onConfigChange === 'function') {
         try { options.onConfigChange({ ...config }); } catch {}
@@ -1233,6 +1312,7 @@
       blurred = true;
       stopPoll();
       stopCountdown();
+      stopSilent();
     });
     addL(win, 'focus', () => {
       blurred = false;
@@ -1265,6 +1345,7 @@
         popoverOpen,
         countdownActive: Boolean(countdownTimer),
         countdownRemaining,
+        silentPending: Boolean(silentTimer),
         pollActive: Boolean(pollTimer),
         hibernated: coexist.isWindowHibernated(doc, win, blurred),
         lastSnapshot: lastSnapshot ? { ...lastSnapshot } : null,
@@ -1277,6 +1358,7 @@
       destroyed = true;
       stopPoll();
       stopCountdown();
+      stopSilent();
       if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
       for (const t of slashTimers) { try { clearTimeout(t); } catch {} }
       slashTimers.clear();

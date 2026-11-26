@@ -57,8 +57,8 @@ export function parseWatchArgs(argv) {
       }
     } else if (a.startsWith('--mode=')) {
       const raw = a.slice('--mode='.length).trim();
-      if (!['confirm', 'fill-only', 'auto-countdown'].includes(raw)) {
-        throw new Error(`Invalid --mode (expected confirm|fill-only|auto-countdown): ${a}`);
+      if (!['auto-silent', 'confirm', 'fill-only', 'auto-countdown'].includes(raw)) {
+        throw new Error(`Invalid --mode (expected auto-silent|confirm|fill-only|auto-countdown): ${a}`);
       }
       opts.mode = raw;
     } else if (a.startsWith('--interval=')) {

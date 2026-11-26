@@ -487,3 +487,85 @@ test('CompactGuard anti-flicker, scoped bridge telemetry & Lexical v2.35 two-ste
 
   guard.destroy();
 });
+
+test('CompactGuard auto-silent (default): zero popup banner, aborts silently on draft input, and silently triggers two-step /compact when idle', async () => {
+  const env = createMockDom({ lang: 'zh-CN' });
+  env.textarea.setAttribute('data-lexical-editor', 'true');
+  env.textarea.setAttribute('contenteditable', 'true');
+  const sendBtn = env.doc.createElement('button');
+  sendBtn.setAttribute('data-testid', 'input-send-button');
+  let sendClicks = 0;
+  sendBtn.addEventListener('click', () => { sendClicks += 1; });
+  env.doc.querySelector('[data-testid="agent-input-box"]').appendChild(sendBtn);
+
+  // Mount Lexical v2.35 slash-command typeahead option
+  const portal = env.doc.createElement('div');
+  const opt = env.doc.createElement('div');
+  opt.setAttribute('id', 'typeahead-item-0');
+  opt.setAttribute('role', 'option');
+  const label = env.doc.createElement('span');
+  label.setAttribute('data-testid', 'menu-option-label');
+  label.textContent = 'compact';
+  let labelClicks = 0;
+  label.addEventListener('click', () => { labelClicks += 1; });
+  opt.appendChild(label);
+  portal.appendChild(opt);
+  env.doc.body.appendChild(portal);
+
+  let streaming = true;
+  const guard = core.mountSessionGuard({
+    win: env.win,
+    doc: env.doc,
+    storage: env.storage,
+    autoPoll: false,
+    silentIdleDelayMs: 25,
+    slashPollMs: 5,
+    slashSubmitDelayMs: 0,
+    config: { compactThreshold: 80 }, // default mode MUST be auto-silent
+    getContextSnapshot: () => ({ usedFraction: 0.85, usedTokens: 435000, maxTokens: 512000, streaming }),
+  });
+
+  assert.equal(guard.getConfig().compactTriggerMode, 'auto-silent');
+
+  // While streaming: zero banner, zero trigger
+  await guard.evaluateNow();
+  assert.equal(env.doc.querySelector('[data-testid="ag-sg-compact-banner"]'), null, 'auto-silent must NEVER mount a popup banner');
+  assert.equal(guard.getDebugState().compactGuard.silentPending, false);
+  assert.equal(sendClicks, 0);
+
+  // Turn finishes streaming -> schedules silent auto-compact with ZERO popup banner!
+  streaming = false;
+  await guard.evaluateNow();
+  assert.equal(env.doc.querySelector('[data-testid="ag-sg-compact-banner"]'), null, 'auto-silent must keep zero popup banner even when firing');
+  assert.equal(guard.getDebugState().compactGuard.silentPending, true);
+
+  // If user starts typing during the brief silent settle window, it aborts cleanly without touching draft
+  env.textarea.value = 'wait';
+  env.textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  assert.equal(guard.getDebugState().compactGuard.silentPending, false);
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(sendClicks, 0);
+  assert.equal(env.textarea.value, 'wait');
+
+  // New session: when truly idle and empty, auto-silent fires cleanly with ZERO popup banner!
+  guard.destroy();
+  env.textarea.value = '';
+  const guard2 = core.mountSessionGuard({
+    win: env.win,
+    doc: env.doc,
+    storage: env.storage,
+    autoPoll: false,
+    silentIdleDelayMs: 15,
+    slashPollMs: 5,
+    slashSubmitDelayMs: 0,
+    config: { compactThreshold: 80 },
+    getContextSnapshot: () => ({ usedFraction: 0.86, usedTokens: 440000, maxTokens: 512000, streaming: false }),
+  });
+  await guard2.evaluateNow();
+  assert.equal(env.doc.querySelector('[data-testid="ag-sg-compact-banner"]'), null);
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(env.doc.querySelector('[data-testid="ag-sg-compact-banner"]'), null, 'Still zero popup banner after silent auto-compact');
+  assert.equal(labelClicks, 1);
+  assert.equal(sendClicks, 1);
+  guard2.destroy();
+});

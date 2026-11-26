@@ -14,7 +14,7 @@
 
   const DEFAULT_CONFIG = Object.freeze({
     compactThreshold: 80, // 'off' | 50..98 (recommended default: 80%)
-    compactTriggerMode: 'auto-countdown', // 'auto-countdown' | 'confirm' | 'fill-only'
+    compactTriggerMode: 'auto-silent', // 'auto-silent' | 'confirm' | 'fill-only' | 'auto-countdown'
     compactFocusPreset: 'default', // 'default' | 'code-errors' | 'bookmarks' | 'custom'
     customCompactFocus: '', // custom focus instructions appended after /compact (<= 240 chars)
     countdownSeconds: 3, // 2..15 (snappy default: 3s)
@@ -42,7 +42,7 @@
       if (Number.isFinite(n) && n >= 50 && n <= 98) threshold = Math.round(n);
     }
 
-    const allowedModes = ['confirm', 'fill-only', 'auto-countdown'];
+    const allowedModes = ['auto-silent', 'confirm', 'fill-only', 'auto-countdown'];
     const mode = allowedModes.includes(src.compactTriggerMode) ? src.compactTriggerMode : fallback.compactTriggerMode;
 
     const allowedPresets = ['default', 'code-errors', 'bookmarks', 'custom'];

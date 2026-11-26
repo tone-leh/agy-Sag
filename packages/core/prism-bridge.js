@@ -217,7 +217,7 @@
           desc: strings.setDescMode,
           inPrism,
           buttons: [
-            ['auto-countdown', strings.cfgModeCountdown],
+            ['auto-silent', strings.cfgModeSilent],
             ['confirm', strings.cfgModeConfirm],
           ].map(([mKey, mLabel]) => ({
             label: mLabel,
