@@ -27,6 +27,7 @@
     const vaultMod = options.bookmarkVaultMod || resolveDep('__agSgBookmarkVault', './bookmark-vault.js');
     const radarMod = options.sessionRadarMod || resolveDep('__agSgSessionRadar', './session-radar.js');
     const prismBridgeMod = options.prismBridgeMod || resolveDep('__agSgPrismBridge', './prism-bridge.js');
+    const statusPillMod = options.statusPillMod || resolveDep('__agSgStatusPill', './status-pill.js');
 
     // Coexistence auto-yield: if a host integrator (e.g. Obsidian Prism Channel 13) already owns Session Guard, standalone yields cleanly
     if (coexist.shouldYieldToHostIntegrator(win, source)) {
@@ -47,8 +48,21 @@
     let bookmarkVault = null;
     let sessionRadar = null;
     let prismBridge = null;
+    let statusPill = null;
 
     const openVault = () => bookmarkVault?.open?.();
+    const syncStatusPill = () => {
+      if (!statusPill) return;
+      const cgState = compactGuard.getDebugState();
+      const bmState = outlineBookmarks?.getDebugState?.() || null;
+      const dgState = draftGuard?.getDebugState?.() || null;
+      statusPill.sync({
+        snap: cgState.lastSnapshot || null,
+        watchdog: cgState.watchdog || null,
+        bookmarkCount: bmState?.bookmarkCount || 0,
+        hasDraft: Boolean(dgState?.barVisible || (dgState?.savedDraftCount || 0) > 0),
+      });
+    };
 
     const compactGuard = compactMod.createCompactGuardController({
       ...options,
@@ -57,8 +71,10 @@
       coexist,
       prismBridgeMod,
       onOpenVault: openVault,
+      onEvaluated: () => syncStatusPill(),
       onStallDetected: (ev) => {
         sessionRadar?.notifyStall?.(ev);
+        syncStatusPill();
         if (typeof options.onStallDetected === 'function') options.onStallDetected(ev);
       },
       onConfigChange: (nextCfg) => {
@@ -67,6 +83,7 @@
         sessionRadar?.setEnabled?.(Boolean(nextCfg.modules?.sessionRadar));
         sessionRadar?.setNotifyMode?.(nextCfg.radarNotifyMode || 'off');
         prismBridge?.sync?.();
+        syncStatusPill();
         if (typeof options.onConfigChange === 'function') options.onConfigChange(nextCfg);
       },
     });
@@ -82,8 +99,14 @@
           now: options.now,
           debounceMs: options.draftDebounceMs,
           getLang: options.getLang,
-          onDraftRestored: options.onDraftRestored,
-          onDraftDiscarded: options.onDraftDiscarded,
+          onDraftRestored: (ev) => {
+            syncStatusPill();
+            if (typeof options.onDraftRestored === 'function') options.onDraftRestored(ev);
+          },
+          onDraftDiscarded: (ev) => {
+            syncStatusPill();
+            if (typeof options.onDraftDiscarded === 'function') options.onDraftDiscarded(ev);
+          },
         })
       : null;
 
@@ -98,7 +121,8 @@
       onOpenVault: openVault,
       onCopyHandoff: options.onCopyHandoff,
       onBookmarksChange: (ev) => {
-        void compactGuard.evaluateNow();
+        void compactGuard.evaluateNow().then(syncStatusPill);
+        syncStatusPill();
         if (typeof options.onBookmarksChange === 'function') options.onBookmarksChange(ev);
       },
       onExportMarkdown: options.onExportMarkdown,
@@ -115,7 +139,7 @@
           bindShortcut: options.bindVaultShortcut,
           onVaultMutated: () => {
             outlineBookmarks?.sync?.();
-            void compactGuard.evaluateNow();
+            void compactGuard.evaluateNow().then(syncStatusPill);
           },
           onCopyHandoff: options.onCopyHandoff,
           onExportMarkdown: options.onExportMarkdown,
@@ -134,6 +158,20 @@
       onNotify: options.onRadarNotify,
     });
 
+    statusPill = statusPillMod?.createStatusPillController
+      ? statusPillMod.createStatusPillController({
+          win,
+          doc,
+          coexist,
+          getLang: options.getLang,
+          getConfig: () => compactGuard.getConfig(),
+          onUpdateConfig: (patch) => api.updateConfig(patch),
+          onOpenVault: openVault,
+          onCopyHandoff: () => compactGuard.copyNewSessionHandoff(),
+          onDownloadMarkdown: () => compactGuard.downloadMarkdown({ onlyBookmarked: outlineBookmarks.getBookmarks().length > 0 }),
+        })
+      : null;
+
     prismBridge = prismBridgeMod?.createPrismBridgeController
       ? prismBridgeMod.createPrismBridgeController({
           win,
@@ -150,6 +188,7 @@
             draftGuard?.sync?.();
             outlineBookmarks?.sync?.();
             sessionRadar?.syncFromDom?.();
+            syncStatusPill();
           },
         })
       : null;
@@ -166,12 +205,15 @@
       bookmarkVault,
       sessionRadar,
       prismBridge,
+      statusPill,
       evaluateNow: async () => {
         draftGuard?.sync?.();
         outlineBookmarks.sync();
         sessionRadar.syncFromDom();
         prismBridge?.sync?.();
-        return compactGuard.evaluateNow();
+        const snap = await compactGuard.evaluateNow();
+        syncStatusPill();
+        return snap;
       },
       updateConfig: (patch) => {
         const next = compactGuard.updateConfig(patch);
@@ -180,10 +222,12 @@
         sessionRadar.setEnabled(Boolean(next.modules?.sessionRadar));
         sessionRadar.setNotifyMode(next.radarNotifyMode || 'off');
         prismBridge?.sync?.();
+        syncStatusPill();
         return next;
       },
       getConfig: () => compactGuard.getConfig(),
       copyNewSessionHandoff: () => compactGuard.copyNewSessionHandoff(),
+      openStatusCard: () => statusPill?.open?.(),
       openSettingsPopover: () => compactGuard.openSettingsPopover(),
       openBookmarkVault: (q) => bookmarkVault?.open?.(q),
       getDebugState: () => ({
@@ -197,10 +241,12 @@
         bookmarkVault: bookmarkVault?.getDebugState?.() || null,
         sessionRadar: sessionRadar.getDebugState(),
         prismBridge: prismBridge?.getDebugState?.() || null,
+        statusPill: statusPill?.getDebugState?.() || null,
       }),
       destroy() {
         if (destroyed) return;
         destroyed = true;
+        statusPill?.destroy?.();
         prismBridge?.destroy?.();
         draftGuard?.destroy?.();
         compactGuard.destroy();
@@ -214,6 +260,8 @@
         } catch {}
       },
     };
+
+    syncStatusPill();
 
     if (win) {
       win[coexist.INSTANCE_GLOBAL] = api;

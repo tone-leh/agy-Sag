@@ -182,7 +182,10 @@ test('Obsidian Prism Side-by-Side Coexistence: embeds unified settings in Prism 
   assert.equal(embedded.getAttribute('data-ag-no-i18n'), '1');
   assert.equal(embedded.getAttribute('data-ag-localization-skip'), 'true');
   assert.equal(embedded.getAttribute('data-antigravity-zh-skip'), '1');
-  assert.ok(embedded.textContent.includes('1.0.8-beta.3'), 'Must surface detected Prism beta version badge');
+  // Consumer-grade UI rule: ZERO version strings or defensive Prism badges shown to end-users
+  assert.equal(embedded.textContent.includes('1.0.8-beta.3'), false, 'End-user settings UI must not show internal version badges');
+  assert.equal(embedded.querySelector('[data-testid="ag-sg-prism-badge"]'), null, 'No defensive Prism badge in consumer UI');
+  assert.ok(embedded.textContent.includes('领航哨'));
 
   // Prism -> Session Guard bidirectional config sync (click 75% threshold inside Prism settings panel)
   const th75 = embedded.querySelector('[data-ag-sg-prism-th="75"]');
@@ -194,7 +197,7 @@ test('Obsidian Prism Side-by-Side Coexistence: embeds unified settings in Prism 
   // Session Guard inline popover -> Prism bidirectional sync
   guard.openSettingsPopover();
   const pop = doc.querySelector('[data-testid="ag-sg-settings-popover"]');
-  assert.ok(pop.querySelector('[data-testid="ag-sg-pop-prism-badge"]'), 'Inline popover should show Prism synced badge');
+  assert.equal(pop.querySelector('[data-testid="ag-sg-pop-prism-badge"]'), null, 'Inline popover must stay clean without Prism badges');
   pop.querySelector('[data-ag-sg-th="90"]').click();
   assert.equal(guard.getConfig().compactThreshold, 90);
   assert.equal(embedded.querySelector('[data-ag-sg-prism-th="90"]').getAttribute('aria-pressed'), 'true');
@@ -202,7 +205,7 @@ test('Obsidian Prism Side-by-Side Coexistence: embeds unified settings in Prism 
   // Live language switch driven by Obsidian Prism (zh-CN -> en)
   doc.documentElement.setAttribute('data-ag-cs-lang', 'en');
   guard.prismBridge.sync();
-  assert.ok(embedded.textContent.includes('Session Guard · Companion'), 'Embedded Prism section must follow Prism live language switch');
+  assert.ok(embedded.textContent.includes('Session Guard'), 'Embedded Prism section must follow Prism live language switch');
 
   // Destroy cleanly leaves Prism's own settings DOM intact with 0 Session Guard nodes
   guard.destroy();

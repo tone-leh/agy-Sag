@@ -29,7 +29,7 @@ export const DOCTOR_PROBE_EXPRESSION = `(() => {
   let versionHint = '';
   try {
     const aboutTxt = settingsSec?.querySelector?.('[data-ag-cs-about="1"]')?.textContent || '';
-    const m = aboutTxt.match(/Obsidian\\s+Prism\\s+v([0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?)/i);
+    const m = aboutTxt.match(/Obsidian\\s+Prism\\s+v([0-9]+\\.[0-9]+\\.[0-9]+(?:-(?:beta|alpha|rc)\\.[0-9]+)?)/i);
     if (m && m[1]) versionHint = m[1];
   } catch {}
 

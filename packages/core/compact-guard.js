@@ -489,20 +489,9 @@
 
       const title = doc.createElement('div');
       title.className = 'ag-sg-pop-title';
-      const titleLeft = doc.createElement('div');
-      titleLeft.className = 'ag-sg-pop-title-left';
       const titleTxt = doc.createElement('span');
       titleTxt.textContent = strings.cfgTitle;
-      titleLeft.appendChild(titleTxt);
-      const prismEnv = prismBridgeMod?.detectPrismEnvironment?.(doc, win) || null;
-      if (prismEnv?.active) {
-        const pb = doc.createElement('span');
-        pb.className = 'ag-sg-prism-badge';
-        pb.setAttribute('data-testid', 'ag-sg-pop-prism-badge');
-        pb.textContent = strings.prismPopSyncedShort;
-        titleLeft.appendChild(pb);
-      }
-      title.appendChild(titleLeft);
+      title.appendChild(titleTxt);
 
       if (typeof options.onOpenVault === 'function') {
         const vaultBtn = doc.createElement('button');
@@ -1031,6 +1020,9 @@
         }
       }
       render();
+      if (typeof options.onEvaluated === 'function') {
+        try { options.onEvaluated(snap, lastWatchdog); } catch {}
+      }
       return snap;
     }
 

@@ -1,9 +1,9 @@
-// Antigravity Session Guard — Obsidian Prism Coexistence & Unified Settings Bridge (UMD, zero runtime deps)
-// Enables seamless side-by-side coexistence when users install BOTH Obsidian Prism and agy-session-guard:
-//   - Embeds Session Guard settings natively inside Obsidian Prism's #ag-cs-settings-sec (Modules tab)
-//   - Syncs config bidirectionally with Session Guard's inline quick popover & localStorage
-//   - Reacts live to Obsidian Prism language (data-ag-cs-lang) and theme (data-ag-cs-theme) switches
-//   - 100% lossless destroy() without leaving any residue in Prism's settings DOM
+// Antigravity Session Guard — Universal Settings Bridge (Obsidian Prism Modules Tab + Native Standalone Settings, UMD)
+// Consumer-first design:
+//   - Zero defensive badges or version strings in end-user UI
+//   - With Obsidian Prism: mounts cleanly inside #ag-cs-settings-sec [data-ag-cs-group="modules"]
+//   - Standalone (no Obsidian Prism): mounts a clean native card directly inside Antigravity's Settings dialog
+//   - Bidirectional live sync with inline controls & live language/theme updates; 100% lossless destroy()
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory(root);
@@ -16,8 +16,21 @@
   const PRISM_SETTINGS_SEC_ID = 'ag-cs-settings-sec';
   const PRISM_MODULES_GROUP_SEL = '[data-ag-cs-group="modules"]';
   const EMBED_SECTION_TESTID = 'ag-sg-prism-settings-section';
+  const NATIVE_SECTION_TESTID = 'ag-sg-native-settings-section';
   const THRESHOLD_PRESETS = ['off', 70, 75, 80, 85, 90];
   const STALL_PRESETS = ['off', 120, 180, 300];
+  const SETTINGS_APPEARANCE_TITLES = new Set([
+    'Appearance',
+    '外观',
+    '外觀',
+    '外観',
+    '외관',
+    '모양',
+    'Apariencia',
+    'Apparence',
+    'Darstellung',
+    'Erscheinungsbild',
+  ]);
 
   function resolveDep(globalKey, relPath) {
     if (globalRoot && globalRoot[globalKey]) return globalRoot[globalKey];
@@ -37,11 +50,10 @@
     const lang = html?.getAttribute?.('data-ag-cs-lang') || settingsEl?.getAttribute?.('data-ag-cs-lang') || '';
     const theme = html?.getAttribute?.('data-ag-cs-theme') || '';
 
-    // Best-effort version extraction from Prism's about header if rendered
     let versionHint = '';
     try {
       const aboutTxt = settingsEl?.querySelector?.('[data-ag-cs-about="1"]')?.textContent || '';
-      const m = aboutTxt.match(/Obsidian\s+Prism\s+v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)/i);
+      const m = aboutTxt.match(/Obsidian\s+Prism\s+v([0-9]+\.[0-9]+\.[0-9]+(?:-(?:beta|alpha|rc)\.[0-9]+)?)/i);
       if (m && m[1]) versionHint = m[1];
     } catch {}
 
@@ -60,14 +72,39 @@
     };
   }
 
+  function findNativeSettingsAnchor(doc) {
+    if (!doc || typeof doc.querySelectorAll !== 'function') return null;
+    let panel = null;
+    const headings = Array.from(doc.querySelectorAll('[role="dialog"] h2') || []);
+    for (const h2 of headings) {
+      if (SETTINGS_APPEARANCE_TITLES.has(String(h2.textContent || '').trim())) {
+        panel = h2.closest?.('div.p-6') || h2.parentElement?.parentElement || null;
+        if (panel) break;
+      }
+    }
+    if (!panel || typeof panel.querySelectorAll !== 'function') return null;
+    const sections = Array.from(panel.querySelectorAll('div.space-y-2') || []).filter(
+      (s) =>
+        s.getAttribute?.('data-ag-sg-owned') !== '1' &&
+        !String(s.id || '').startsWith('ag-cs-') &&
+        !(s.parentElement && s.parentElement.closest?.('div.space-y-2'))
+    );
+    const anchor = sections[sections.length - 1] || null;
+    if (!anchor || !anchor.parentElement) return null;
+    return { panel, anchor, parent: anchor.parentElement };
+  }
+
   function createPrismBridgeController(options = {}) {
     const win = options.win || globalRoot;
     const doc = options.doc || win?.document || null;
     const coexist = options.coexist || resolveDep('__agSgCoexist', './coexist.js');
     const i18n = options.i18n || resolveDep('__agSgI18n', './i18n.js');
+    const styles = options.styles || resolveDep('__agSgStyles', './styles.js');
 
     let destroyed = false;
     let mountedEl = null;
+    let mountedMode = 'none'; // 'none' | 'prism' | 'native'
+    let createdStyleEl = null;
     let domObserver = null;
     let htmlObserver = null;
     let lastLang = '';
@@ -81,23 +118,34 @@
     const getLang = () => (typeof options.getLang === 'function' ? i18n.normalizeLang(options.getLang()) : i18n.detectLang(doc, win));
     const S = () => i18n.getStrings(getLang());
 
-    function mkSegRow({ key, title, desc, buttons, extraEl = null }) {
+    function ensureStyle() {
+      if (!doc || !styles) return;
+      if (doc.getElementById?.(styles.STYLE_ID)) return;
+      const el = doc.createElement('style');
+      el.id = styles.STYLE_ID;
+      el.textContent = styles.CORE_CSS;
+      coexist.markOwnedNoTranslate(el);
+      (doc.head || doc.documentElement || doc.body)?.appendChild?.(el);
+      createdStyleEl = el;
+    }
+
+    function mkSegRow({ key, title, desc, buttons, extraEl = null, inPrism = false }) {
       const row = doc.createElement('div');
-      row.className = 'ag-sg-prism-row';
+      row.className = 'ag-sg-set-row';
       row.setAttribute('data-ag-sg-prism-row', key);
 
       const inner = doc.createElement('div');
-      inner.className = 'py-2 ag-sg-prism-row-inner';
+      inner.className = inPrism ? 'py-2 ag-sg-set-row-inner' : 'ag-sg-set-row-inner';
 
       const textCol = doc.createElement('div');
-      textCol.className = 'flex-1 ag-sg-prism-text';
+      textCol.className = 'flex-1 ag-sg-set-text';
       const titleLine = doc.createElement('div');
-      titleLine.className = 'ag-cs-settings-title-line ag-sg-prism-row-title';
+      titleLine.className = inPrism ? 'ag-cs-settings-title-line ag-sg-set-row-title' : 'ag-sg-set-row-title';
       titleLine.textContent = title;
       textCol.appendChild(titleLine);
       if (desc) {
         const dSpan = doc.createElement('span');
-        dSpan.className = 'ag-sg-prism-row-desc';
+        dSpan.className = 'ag-sg-set-row-desc';
         dSpan.textContent = desc;
         textCol.appendChild(dSpan);
       }
@@ -105,13 +153,13 @@
       const ctrlWrap = doc.createElement('div');
       ctrlWrap.className = 'shrink-0';
       const group = doc.createElement('div');
-      group.className = 'ag-cs-seg-group ag-sg-seg';
+      group.className = inPrism ? 'ag-cs-seg-group ag-sg-seg' : 'ag-sg-seg';
       group.setAttribute('role', 'group');
 
       for (const spec of buttons) {
         const b = doc.createElement('button');
         b.type = 'button';
-        b.className = 'ag-cs-seg-btn ag-sg-prism-seg-btn';
+        b.className = inPrism ? 'ag-cs-seg-btn ag-sg-set-seg-btn' : 'ag-sg-set-seg-btn';
         b.textContent = spec.label;
         if (spec.attr && spec.val !== undefined) b.setAttribute(spec.attr, String(spec.val));
         b.setAttribute('aria-pressed', String(Boolean(spec.active)));
@@ -132,55 +180,27 @@
       return row;
     }
 
-    function renderIntoPrismSettings() {
-      if (destroyed || !doc) return false;
-      const settingsEl = doc.getElementById?.(PRISM_SETTINGS_SEC_ID);
-      const modulesGroup = settingsEl?.querySelector?.(PRISM_MODULES_GROUP_SEL) || null;
-      if (!settingsEl || !modulesGroup) {
-        if (mountedEl && mountedEl.isConnected === false) mountedEl = null;
-        return false;
-      }
-
-      // Reuse existing wrapper inside current modulesGroup or create a fresh one
-      let section = modulesGroup.querySelector?.(`[data-testid="${EMBED_SECTION_TESTID}"]`) || null;
-      if (!section) {
-        section = coexist.markOwnedNoTranslate(doc.createElement('div'));
-        section.className = 'ag-sg-prism-section';
-        section.setAttribute('data-testid', EMBED_SECTION_TESTID);
-        modulesGroup.appendChild(section);
-      }
-      mountedEl = section;
-
+    function populateSettingsCard(section, inPrism) {
       const cfg = getConfig();
       const strings = S();
-      const env = detectPrismEnvironment(doc, win);
 
       while (section.firstChild) section.removeChild(section.firstChild);
 
-      // Native Obsidian Prism subhead + companion badge
-      const head = doc.createElement('div');
-      head.className = 'ag-cs-settings-subhead ag-sg-prism-subhead';
-      const headTitle = doc.createElement('span');
-      headTitle.textContent = strings.prismUnifiedTitle;
-      const badge = doc.createElement('span');
-      badge.className = 'ag-sg-prism-badge';
-      badge.setAttribute('data-testid', 'ag-sg-prism-badge');
-      badge.textContent = env.versionHint
-        ? i18n.formatTemplate(strings.prismBadgeWithVer, { ver: env.versionHint })
-        : strings.prismBadgeSynced;
-      head.appendChild(headTitle);
-      head.appendChild(badge);
+      // Clean consumer-facing section header — zero engineering badges or version clutter
+      const head = doc.createElement(inPrism ? 'div' : 'h2');
+      head.className = inPrism ? 'ag-cs-settings-subhead ag-sg-set-subhead' : 'ag-sg-native-heading';
+      head.textContent = strings.brand;
       section.appendChild(head);
 
       const card = doc.createElement('div');
-      card.className = 'ag-cs-settings-card divide-y ag-sg-prism-card';
+      card.className = inPrism ? 'ag-cs-settings-card divide-y ag-sg-set-card' : 'ag-sg-native-card';
 
-      // Row 1: Threshold
       card.appendChild(
         mkSegRow({
           key: 'threshold',
           title: strings.cfgThreshold,
-          desc: strings.prismDescThreshold,
+          desc: strings.setDescThreshold,
+          inPrism,
           buttons: THRESHOLD_PRESETS.map((preset) => ({
             label: preset === 'off' ? strings.cfgThresholdOff : `${preset}%`,
             attr: 'data-ag-sg-prism-th',
@@ -191,12 +211,12 @@
         })
       );
 
-      // Row 2: Trigger mode
       card.appendChild(
         mkSegRow({
           key: 'mode',
           title: strings.cfgMode,
-          desc: strings.prismDescMode,
+          desc: strings.setDescMode,
+          inPrism,
           buttons: [
             ['confirm', strings.cfgModeConfirm],
             ['fill-only', strings.cfgModeFill],
@@ -211,12 +231,11 @@
         })
       );
 
-      // Row 3: Smart /compact Focus
       let customInput = null;
       if (cfg.compactFocusPreset === 'custom') {
         customInput = doc.createElement('input');
         customInput.type = 'text';
-        customInput.className = 'ag-sg-pop-input ag-sg-prism-input';
+        customInput.className = 'ag-sg-pop-input ag-sg-set-input';
         customInput.setAttribute('data-ag-sg-prism-custom-focus', '1');
         customInput.placeholder = strings.cfgFocusCustomPlaceholder;
         customInput.value = cfg.customCompactFocus || '';
@@ -228,6 +247,7 @@
         mkSegRow({
           key: 'focus',
           title: strings.cfgFocus,
+          inPrism,
           buttons: [
             ['default', strings.cfgFocusDefault],
             ['code-errors', strings.cfgFocusCode],
@@ -244,11 +264,11 @@
         })
       );
 
-      // Row 4: Stall Watchdog
       card.appendChild(
         mkSegRow({
           key: 'stall',
           title: strings.cfgStall,
+          inPrism,
           buttons: STALL_PRESETS.map((sec) => ({
             label: sec === 'off' ? strings.cfgStallOff : `${Math.round(sec / 60)}m`,
             attr: 'data-ag-sg-prism-stall',
@@ -259,12 +279,12 @@
         })
       );
 
-      // Row 5: Complementary Modules
       card.appendChild(
         mkSegRow({
           key: 'modules',
           title: strings.cfgModules,
-          desc: strings.prismDescModules,
+          desc: strings.setDescModules,
+          inPrism,
           buttons: [
             ['draftGuard', strings.cfgModDraftGuard],
             ['outlineBookmarks', strings.cfgModBookmarks],
@@ -280,12 +300,12 @@
         })
       );
 
-      // Row 6: Blurred OS Alerts (shown when Session Radar is active)
       if (cfg.modules?.sessionRadar) {
         card.appendChild(
           mkSegRow({
             key: 'notify',
             title: strings.cfgRadarNotify,
+            inPrism,
             buttons: [
               ['off', strings.cfgNotifyOff],
               ['awaiting', strings.cfgNotifyAwaiting],
@@ -301,7 +321,6 @@
         );
       }
 
-      // Row 7: Quick Actions (Vault + Copy New-Session Handoff)
       const actButtons = [];
       if (typeof options.onOpenVault === 'function') {
         actButtons.push({
@@ -325,24 +344,70 @@
         card.appendChild(
           mkSegRow({
             key: 'actions',
-            title: strings.prismQuickActions,
+            title: strings.setQuickActions,
+            inPrism,
             buttons: actButtons,
           })
         );
       }
 
       section.appendChild(card);
-      return true;
+    }
+
+    function renderIntoSettings() {
+      if (destroyed || !doc) return false;
+      ensureStyle();
+
+      // Priority 1: Embed cleanly inside Obsidian Prism's Modules tab if #ag-cs-settings-sec exists
+      const settingsEl = doc.getElementById?.(PRISM_SETTINGS_SEC_ID);
+      const modulesGroup = settingsEl?.querySelector?.(PRISM_MODULES_GROUP_SEL) || null;
+      if (settingsEl && modulesGroup) {
+        // Remove standalone native section if Prism appeared afterwards so there is never duplication
+        doc.querySelectorAll?.(`[data-testid="${NATIVE_SECTION_TESTID}"]`)?.forEach?.((n) => n.remove?.());
+        let section = modulesGroup.querySelector?.(`[data-testid="${EMBED_SECTION_TESTID}"]`) || null;
+        if (!section) {
+          section = coexist.markOwnedNoTranslate(doc.createElement('div'));
+          section.className = 'ag-sg-set-section';
+          section.setAttribute('data-testid', EMBED_SECTION_TESTID);
+          modulesGroup.appendChild(section);
+        }
+        mountedEl = section;
+        mountedMode = 'prism';
+        populateSettingsCard(section, true);
+        return true;
+      }
+
+      // Priority 2: Standalone user (no Obsidian Prism) -> mount cleanly in Antigravity's native Settings dialog
+      const nativeAnchor = findNativeSettingsAnchor(doc);
+      if (nativeAnchor) {
+        let section = nativeAnchor.parent.querySelector?.(`[data-testid="${NATIVE_SECTION_TESTID}"]`) || null;
+        if (!section) {
+          section = coexist.markOwnedNoTranslate(doc.createElement('div'));
+          section.className = 'space-y-2 ag-sg-native-section';
+          section.setAttribute('data-testid', NATIVE_SECTION_TESTID);
+          nativeAnchor.parent.appendChild(section);
+        }
+        mountedEl = section;
+        mountedMode = 'native';
+        populateSettingsCard(section, false);
+        return true;
+      }
+
+      if (mountedEl && mountedEl.isConnected === false) {
+        mountedEl = null;
+        mountedMode = 'none';
+      }
+      return false;
     }
 
     function checkHostContextChange() {
       if (destroyed || !doc?.documentElement) return;
-      const curLang = doc.documentElement.getAttribute?.('data-ag-cs-lang') || '';
+      const curLang = doc.documentElement.getAttribute?.('data-ag-cs-lang') || doc.documentElement.getAttribute?.('lang') || '';
       const curTheme = doc.documentElement.getAttribute?.('data-ag-cs-theme') || '';
       if (curLang !== lastLang || curTheme !== lastTheme) {
         lastLang = curLang;
         lastTheme = curTheme;
-        renderIntoPrismSettings();
+        renderIntoSettings();
         if (typeof options.onHostContextChange === 'function') {
           try { options.onHostContextChange({ lang: curLang, theme: curTheme }); } catch {}
         }
@@ -352,7 +417,7 @@
     function sync() {
       if (destroyed) return false;
       checkHostContextChange();
-      return renderIntoPrismSettings();
+      return renderIntoSettings();
     }
 
     function startObservers() {
@@ -371,7 +436,7 @@
             scheduled = true;
             const run = () => {
               scheduled = false;
-              if (!destroyed) renderIntoPrismSettings();
+              if (!destroyed) renderIntoSettings();
             };
             if (typeof win.requestAnimationFrame === 'function') win.requestAnimationFrame(run);
             else setTimeout(run, 16);
@@ -385,7 +450,7 @@
           });
           htmlObserver.observe(doc.documentElement, {
             attributes: true,
-            attributeFilter: ['data-ag-cs-lang', 'data-ag-cs-theme', 'data-ag-cs-style'],
+            attributeFilter: ['data-ag-cs-lang', 'data-ag-cs-theme', 'data-ag-cs-style', 'lang'],
           });
         }
       } catch {}
@@ -398,15 +463,17 @@
       try { htmlObserver?.disconnect?.(); } catch {}
       domObserver = htmlObserver = null;
       try { mountedEl?.remove?.(); } catch {}
+      try { createdStyleEl?.remove?.(); } catch {}
       try {
-        doc?.querySelectorAll?.(`[data-testid="${EMBED_SECTION_TESTID}"]`)?.forEach?.((n) => n.remove?.());
+        doc?.querySelectorAll?.(`[data-testid="${EMBED_SECTION_TESTID}"], [data-testid="${NATIVE_SECTION_TESTID}"]`)?.forEach?.((n) => n.remove?.());
       } catch {}
-      mountedEl = null;
+      mountedEl = createdStyleEl = null;
+      mountedMode = 'none';
     }
 
-    lastLang = doc?.documentElement?.getAttribute?.('data-ag-cs-lang') || '';
+    lastLang = doc?.documentElement?.getAttribute?.('data-ag-cs-lang') || doc?.documentElement?.getAttribute?.('lang') || '';
     lastTheme = doc?.documentElement?.getAttribute?.('data-ag-cs-theme') || '';
-    renderIntoPrismSettings();
+    renderIntoSettings();
     if (options.autoObserve !== false) startObservers();
 
     return {
@@ -415,6 +482,7 @@
       getDebugState: () => ({
         destroyed,
         embedded: Boolean(mountedEl && mountedEl.isConnected !== false),
+        mountedMode: mountedEl && mountedEl.isConnected !== false ? mountedMode : 'none',
         env: detectPrismEnvironment(doc, win),
       }),
       destroy,
@@ -425,7 +493,9 @@
     PRISM_SETTINGS_SEC_ID,
     PRISM_MODULES_GROUP_SEL,
     EMBED_SECTION_TESTID,
+    NATIVE_SECTION_TESTID,
     detectPrismEnvironment,
+    findNativeSettingsAnchor,
     createPrismBridgeController,
   };
 });
