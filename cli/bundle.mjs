@@ -30,6 +30,7 @@ export const REMOVE_EXPRESSION = `(() => {
   try { window.__agSessionGuard?.destroy?.(); } catch {}
   try { document.getElementById('ag-sg-core-css')?.remove(); } catch {}
   try { document.querySelectorAll('[data-ag-sg-owned="1"]').forEach((n) => n.remove()); } catch {}
+  try { document.querySelectorAll('#ag-prism-pulse-bar, [data-ag-prism-pulse-bar="true"], #ag-pulse-status-bar, [data-ag-pulse-bar="true"]').forEach((h) => { h?.shadowRoot?.querySelectorAll?.('[data-ag-sg-owned="1"]')?.forEach?.((n) => n.remove()); }); } catch {}
   for (const k of ['__agSessionGuard', '__agSgCore', '__agSgI18n', '__agSgCoexist', '__agSgContextSource', '__agSgPrecompactExport', '__agSgRecoveryHandoff', '__agSgBookmarkVault', '__agSgSessionWatchdog', '__agSgDraftGuard', '__agSgCleanSlate', '__agSgStatusPill', '__agSgPrismBridge', '__agSgOutlineBookmarks', '__agSgStyles', '__agSgCompactGuard', '__agSgSessionRadar']) {
     try { delete window[k]; } catch {}
     try { delete globalThis[k]; } catch {}

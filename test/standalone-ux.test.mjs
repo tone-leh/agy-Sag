@@ -117,6 +117,20 @@ function createHostDom({ withPrismPulse = false, withNativeSettingsDialog = true
   if (withPrismPulse) {
     const pulse = makeEl('div');
     pulse.setAttribute('id', 'ag-prism-pulse-bar');
+    const srRoot = makeEl('div');
+    const ctxCard = makeEl('section');
+    ctxCard.setAttribute('id', 'context-card');
+    ctxCard.setAttribute('data-ag-pulse-vial-mode', 'vial');
+    const note = makeEl('p');
+    note.setAttribute('id', 'context-note');
+    ctxCard.appendChild(note);
+    srRoot.appendChild(ctxCard);
+    pulse.shadowRoot = {
+      appendChild: (c) => srRoot.appendChild(c),
+      getElementById: (id) => srRoot.querySelector('#' + id),
+      querySelector: (s) => srRoot.querySelector(s),
+      querySelectorAll: (s) => srRoot.querySelectorAll(s),
+    };
     footer.appendChild(pulse);
   }
   const right = makeEl('div');
@@ -209,8 +223,9 @@ test('Standalone user (NO Obsidian Prism): sees calm composer % pill, floating q
   assert.equal(doc.querySelectorAll('[data-ag-sg-owned="1"]').length, 0);
 });
 
-test('Combined user (WITH Obsidian Prism Pulse bar): composer pill switches to compact mode without duplicating context %', async () => {
+test('Combined user (WITH Obsidian Prism Pulse bar): embeds directly inside Prism context-card Shadow DOM with ZERO extra top-level footer pill', async () => {
   const { doc } = createHostDom({ withPrismPulse: true, withNativeSettingsDialog: false });
+  let cleanRestarted = 0;
   const win = {
     document: doc,
     localStorage: { getItem: () => null, setItem() {}, removeItem() {}, length: 0, key: () => null },
@@ -225,16 +240,33 @@ test('Combined user (WITH Obsidian Prism Pulse bar): composer pill switches to c
     autoPoll: false,
     autoObserve: false,
     bindVaultShortcut: false,
-    getContextSnapshot: () => ({ usedFraction: 0.42, usedTokens: 215040, maxTokens: 512000, streaming: false }),
+    getContextSnapshot: () => ({ usedFraction: 0.83, usedTokens: 425000, maxTokens: 512000, streaming: false }),
+    onNavigateNewConversation: () => { cleanRestarted += 1; },
   });
 
   await guard.evaluateNow();
-  const pill = doc.querySelector(`[data-testid="${statusPill.PILL_TESTID}"]`);
-  assert.ok(pill);
-  assert.equal(pill.getAttribute('data-compact'), '1', 'Must stay compact alongside Obsidian Prism Pulse bar');
-  assert.equal(pill.textContent.includes('42%'), false, 'Must not duplicate a second % meter next to Prism Pulse bar');
-  assert.ok(pill.textContent.includes('领航哨'));
+  // Zero extra top-level pill on composer footer!
+  assert.equal(doc.querySelector(`[data-testid="${statusPill.PILL_TESTID}"]`), null, 'Must NOT add a separate top-level pill next to Prism [◔ 83%]');
+  assert.equal(guard.getDebugState().statusPill.mode, 'prism-context-card');
+
+  // Embedded cleanly inside #ag-prism-pulse-bar.shadowRoot #context-card
+  const pulseSr = doc.getElementById('ag-prism-pulse-bar').shadowRoot;
+  const sec = pulseSr.querySelector(`[data-testid="${statusPill.PRISM_SEC_TESTID}"]`);
+  assert.ok(sec, 'Must embed Auto-Compact + Clean Restart section inside Prism context-card');
+  assert.ok(pulseSr.getElementById(statusPill.PRISM_STYLE_ID), 'Must inject scoped Shadow DOM styles');
+  assert.equal(sec.querySelectorAll('button').length, 6, 'Only 5 threshold pills + 1 Clean Restart button inside Prism card');
+
+  // Clicking 85% inside Prism card updates live config
+  sec.querySelector('[data-ag-sg-pv-th="85"]').click();
+  assert.equal(guard.getConfig().compactThreshold, 85);
+  assert.equal(sec.querySelector('[data-ag-sg-pv-th="85"]').getAttribute('aria-pressed'), 'true');
+
+  // Clicking Clean Restart inside Prism card triggers clean restart
+  sec.querySelector('[data-ag-sg-pv-act="clean-restart"]').click();
+  assert.equal(cleanRestarted, 1);
 
   guard.destroy();
   assert.equal(doc.querySelectorAll('[data-ag-sg-owned="1"]').length, 0);
+  assert.equal(pulseSr.querySelector(`[data-testid="${statusPill.PRISM_SEC_TESTID}"]`), null, 'destroy() must clean Shadow DOM section');
+  assert.equal(pulseSr.getElementById(statusPill.PRISM_STYLE_ID), null, 'destroy() must clean Shadow DOM style');
 });

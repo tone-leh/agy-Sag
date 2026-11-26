@@ -1,8 +1,10 @@
-// Antigravity Session Guard — Calm Composer Status Pill & Minimal Control Card (UMD, zero runtime deps)
-// Less is More:
-//   - Standalone (no Prism Pulse bar): compact "● 42%" pill in .agy-composer-footer
-//   - With Obsidian Prism Pulse bar: compact "● 领航哨" (or "● ★ 2") pill without duplicating %
-//   - Clicking opens a serene, zero-clutter card: live context + threshold picker + 2 core actions (Compact / Clean Restart)
+// Antigravity Session Guard — Adaptive Context Control Surface (UMD, zero runtime deps)
+// Seamless dual-mode architecture (Less is More):
+//   1) With Obsidian Prism (#ag-prism-pulse-bar open Shadow DOM #context-card):
+//      - ZERO extra top-level pill on the composer footer!
+//      - Embeds a native-styled 2-line Auto-Compact + Clean Restart section directly inside Prism's [◔ XX%] Context Card
+//   2) Standalone (no Obsidian Prism):
+//      - Renders a calm, minimal "● 42%" status pill in .agy-composer-footer + clean floating control card
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory(root);
@@ -15,6 +17,100 @@
   const THRESHOLD_PRESETS = ['off', 75, 80, 85, 90];
   const PILL_TESTID = 'ag-sg-status-pill';
   const CARD_TESTID = 'ag-sg-status-card';
+  const PRISM_SEC_TESTID = 'ag-sg-pv-sec';
+  const PRISM_STYLE_ID = 'ag-sg-pv-style';
+
+  // Scoped Shadow DOM styles that inherit Obsidian Prism's exact light/dark variables (--f, --mu, --d, --ct, --sl, --ac)
+  const PRISM_SHADOW_CSS = `
+#context-card[data-ag-pulse-vial-mode="vial"] .ag-sg-pv-sec{grid-column:2;}
+.ag-sg-pv-sec{
+  margin-top:8px;
+  padding-top:8px;
+  border-top:1px solid var(--d,rgba(148,163,184,.18));
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+.ag-sg-pv-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+}
+.ag-sg-pv-title-wrap{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  min-width:0;
+}
+.ag-sg-pv-title{
+  font-size:11px;
+  font-weight:600;
+  color:var(--f,#eef1f7);
+  white-space:nowrap;
+}
+.ag-sg-pv-bm{
+  appearance:none;
+  border:0;
+  padding:0 5px;
+  height:18px;
+  border-radius:999px;
+  background:rgba(245,158,11,.14);
+  color:#d97706;
+  font:600 10px/18px inherit;
+  cursor:pointer;
+  white-space:nowrap;
+}
+.ag-sg-pv-bm:hover{filter:brightness(1.08);}
+.ag-sg-pv-act{
+  appearance:none;
+  height:20px;
+  padding:0 8px;
+  border-radius:999px;
+  border:1px solid var(--b,rgba(148,163,184,.26));
+  background:var(--ct,rgba(148,163,184,.12));
+  color:var(--ch,var(--f,#eef1f7));
+  font:500 10.5px/18px inherit;
+  cursor:pointer;
+  white-space:nowrap;
+  transition:background 130ms ease,color 130ms ease,border-color 130ms ease;
+}
+.ag-sg-pv-act:hover{
+  background:var(--hv,rgba(148,163,184,.22));
+  color:var(--f,#eef1f7);
+  border-color:var(--ac,#3186ff);
+}
+.ag-sg-pv-seg{
+  display:grid;
+  grid-template-columns:repeat(5,1fr);
+  gap:3px;
+  padding:2px;
+  border-radius:8px;
+  background:var(--ct,rgba(148,163,184,.12));
+  border:1px solid var(--d,rgba(148,163,184,.14));
+}
+.ag-sg-pv-seg button{
+  appearance:none;
+  border:0;
+  height:21px;
+  padding:0 4px;
+  border-radius:6px;
+  background:transparent;
+  color:var(--mu,#94a3b8);
+  font:500 10.5px/21px inherit;
+  font-variant-numeric:tabular-nums;
+  cursor:pointer;
+  white-space:nowrap;
+  transition:background 130ms ease,color 130ms ease,box-shadow 130ms ease;
+}
+.ag-sg-pv-seg button:hover{color:var(--f,#eef1f7);}
+.ag-sg-pv-seg button[aria-pressed="true"]{
+  background:var(--sl,rgba(49,134,255,.18));
+  color:var(--ac,var(--f,#3186ff));
+  font-weight:600;
+  box-shadow:0 1px 2px rgba(0,0,0,.08);
+}
+`.trim();
 
   function resolveDep(globalKey, relPath) {
     if (globalRoot && globalRoot[globalKey]) return globalRoot[globalKey];
@@ -39,6 +135,7 @@
     let labelEl = null;
     let cardEl = null;
     let createdStyleEl = null;
+    let embeddedShadowHosts = new Set();
     let lastState = {
       snap: null,
       watchdog: null,
@@ -67,6 +164,12 @@
       createdStyleEl = el;
     }
 
+    function removeStandalonePill() {
+      cardOpen = false;
+      try { wrapEl?.remove?.(); } catch {}
+      wrapEl = pillBtn = dotEl = labelEl = cardEl = null;
+    }
+
     function findFooterHost(scope = getScope()) {
       if (!doc) return null;
       const root = scope && scope.isConnected !== false ? scope : doc;
@@ -79,11 +182,125 @@
       );
     }
 
-    function hasSiblingPulseBar(footerEl) {
-      if (!footerEl || typeof footerEl.querySelector !== 'function') return false;
-      return Boolean(
-        footerEl.querySelector('#ag-prism-pulse-bar, [data-ag-prism-pulse-bar="true"], #ag-pulse-status-bar, [data-ag-pulse-bar="true"]')
+    function findPrismPulseHosts() {
+      if (!doc || typeof doc.querySelectorAll !== 'function') return [];
+      return Array.from(
+        doc.querySelectorAll('#ag-prism-pulse-bar, [data-ag-prism-pulse-bar="true"], #ag-pulse-status-bar, [data-ag-pulse-bar="true"]') || []
       );
+    }
+
+    function closePrismContextCard(sr) {
+      try {
+        const card = sr?.getElementById?.('context-card');
+        if (card) card.hidden = true;
+        const chip = sr?.querySelector?.('.chip[data-card="context"], .chip[aria-expanded="true"]');
+        if (chip) chip.setAttribute?.('aria-expanded', 'false');
+      } catch {}
+    }
+
+    function syncPrismContextCards() {
+      const hosts = findPrismPulseHosts();
+      let embeddedCount = 0;
+      const cfg = getConfig();
+      const strings = S();
+      const bmCount = Number(lastState.bookmarkCount) || 0;
+
+      for (const host of hosts) {
+        const sr = host?.shadowRoot;
+        if (!sr || typeof sr.getElementById !== 'function') continue;
+        const ctxCard = sr.getElementById('context-card');
+        if (!ctxCard) continue;
+
+        // Ensure scoped Shadow DOM style
+        let st = sr.getElementById(PRISM_STYLE_ID);
+        if (!st) {
+          st = coexist.markOwnedNoTranslate(doc.createElement('style'));
+          st.id = PRISM_STYLE_ID;
+          st.textContent = PRISM_SHADOW_CSS;
+          sr.appendChild(st);
+        }
+
+        // Reuse or create embedded section right before #context-note inside #context-card
+        let sec = ctxCard.querySelector?.(`[data-testid="${PRISM_SEC_TESTID}"]`) || null;
+        if (!sec) {
+          sec = coexist.markOwnedNoTranslate(doc.createElement('section'));
+          sec.className = 'ag-sg-pv-sec';
+          sec.setAttribute('data-testid', PRISM_SEC_TESTID);
+          const note = sr.getElementById('context-note');
+          if (note && note.parentElement === ctxCard && typeof ctxCard.insertBefore === 'function') {
+            ctxCard.insertBefore(sec, note);
+          } else {
+            ctxCard.appendChild(sec);
+          }
+        }
+
+        while (sec.firstChild) sec.removeChild(sec.firstChild);
+
+        const head = doc.createElement('div');
+        head.className = 'ag-sg-pv-head';
+
+        const titleWrap = doc.createElement('div');
+        titleWrap.className = 'ag-sg-pv-title-wrap';
+        const title = doc.createElement('span');
+        title.className = 'ag-sg-pv-title';
+        title.textContent = strings.pvAutoCompactTitle;
+        titleWrap.appendChild(title);
+
+        if (bmCount > 0 && typeof options.onOpenVault === 'function') {
+          const bmBtn = doc.createElement('button');
+          bmBtn.type = 'button';
+          bmBtn.className = 'ag-sg-pv-bm';
+          bmBtn.setAttribute('data-ag-sg-pv-act', 'open-vault');
+          bmBtn.textContent = `★ ${bmCount}`;
+          bmBtn.addEventListener('click', (ev) => {
+            ev?.preventDefault?.();
+            ev?.stopPropagation?.();
+            closePrismContextCard(sr);
+            options.onOpenVault();
+          });
+          titleWrap.appendChild(bmBtn);
+        }
+        head.appendChild(titleWrap);
+
+        if (typeof options.onCleanRestart === 'function') {
+          const cleanBtn = doc.createElement('button');
+          cleanBtn.type = 'button';
+          cleanBtn.className = 'ag-sg-pv-act';
+          cleanBtn.setAttribute('data-ag-sg-pv-act', 'clean-restart');
+          cleanBtn.textContent = strings.btnClearKeep;
+          cleanBtn.addEventListener('click', (ev) => {
+            ev?.preventDefault?.();
+            ev?.stopPropagation?.();
+            closePrismContextCard(sr);
+            options.onCleanRestart({ mode: 'keep' });
+          });
+          head.appendChild(cleanBtn);
+        }
+        sec.appendChild(head);
+
+        const seg = doc.createElement('div');
+        seg.className = 'ag-sg-pv-seg';
+        seg.setAttribute('role', 'group');
+        for (const p of THRESHOLD_PRESETS) {
+          const b = doc.createElement('button');
+          b.type = 'button';
+          b.textContent = p === 'off' ? strings.cfgThresholdOff : `${p}%`;
+          b.setAttribute('data-ag-sg-pv-th', String(p));
+          b.setAttribute('aria-pressed', String(cfg.compactThreshold === p));
+          b.addEventListener('click', (ev) => {
+            ev?.preventDefault?.();
+            ev?.stopPropagation?.();
+            updateConfig({ compactThreshold: p });
+          });
+          seg.appendChild(b);
+        }
+        sec.appendChild(seg);
+
+        embeddedShadowHosts.add(host);
+        embeddedCount += 1;
+      }
+
+      return embeddedCount;
     }
 
     function computeTone(snap, cfg, watchdog) {
@@ -97,7 +314,7 @@
       return 'ok';
     }
 
-    function renderCard() {
+    function renderStandaloneCard() {
       if (!cardEl || destroyed) return;
       cardEl.hidden = !cardOpen;
       if (!cardOpen) return;
@@ -113,7 +330,6 @@
 
       while (cardEl.firstChild) cardEl.removeChild(cardEl.firstChild);
 
-      // 1) Header: Brand + live %
       const head = doc.createElement('div');
       head.className = 'ag-sg-card-head';
       const titleEl = doc.createElement('span');
@@ -126,7 +342,6 @@
       head.appendChild(metaEl);
       cardEl.appendChild(head);
 
-      // 2) Single calm telemetry row (Context + optional clickable Bookmarks count)
       const grid = doc.createElement('div');
       grid.className = 'ag-sg-card-grid';
 
@@ -171,7 +386,6 @@
       grid.appendChild(bmCell);
       cardEl.appendChild(grid);
 
-      // 3) Single core setting: Auto-Compact Threshold (Off / 75% / 80% / 85% / 90%)
       const body = doc.createElement('div');
       body.className = 'ag-sg-card-body';
       const row = doc.createElement('div');
@@ -199,7 +413,6 @@
       body.appendChild(row);
       cardEl.appendChild(body);
 
-      // 4) Two irreplaceable actions only: Compact Now + Clean Restart (keep minimal text, drop images/logs)
       const foot = doc.createElement('div');
       foot.className = 'ag-sg-card-foot';
       const mkAct = (cls, text, act, onClick) => {
@@ -234,7 +447,7 @@
       if (foot.children.length > 0) cardEl.appendChild(foot);
     }
 
-    function ensurePill() {
+    function ensureStandalonePill() {
       if (!doc || destroyed) return null;
       const footer = findFooterHost();
       if (!footer) return null;
@@ -295,11 +508,18 @@
       if (statePatch && typeof statePatch === 'object') {
         lastState = { ...lastState, ...statePatch };
       }
-      const el = ensurePill();
+
+      // Priority 1: Integrate directly inside Obsidian Prism's [◔ XX%] Context Card -> zero extra top-level footer pill!
+      const embeddedCount = syncPrismContextCards();
+      if (embeddedCount > 0) {
+        removeStandalonePill();
+        return;
+      }
+
+      // Priority 2: Standalone user (no Obsidian Prism Context Card) -> render calm "● XX%" pill in composer footer
+      const el = ensureStandalonePill();
       if (!el || !pillBtn || !labelEl) return;
 
-      const footer = el.parentElement;
-      const compactMode = hasSiblingPulseBar(footer);
       const cfg = getConfig();
       const strings = S();
       const snap = lastState.snap;
@@ -307,18 +527,13 @@
       const bmCount = Number(lastState.bookmarkCount) || 0;
 
       pillBtn.setAttribute('data-tone', tone);
-      pillBtn.setAttribute('data-compact', compactMode ? '1' : '0');
+      pillBtn.setAttribute('data-compact', '0');
       pillBtn.setAttribute('aria-expanded', String(cardOpen));
       pillBtn.title = strings.pillEntryTitle;
 
-      if (compactMode) {
-        labelEl.textContent = bmCount > 0 ? `★ ${bmCount}` : strings.brandShort;
-      } else {
-        const pctTxt = snap && typeof snap.usedPct === 'number' ? `${snap.usedPct}%` : strings.brandShort;
-        labelEl.textContent = bmCount > 0 ? `${pctTxt} · ★${bmCount}` : pctTxt;
-      }
-
-      renderCard();
+      const pctTxt = snap && typeof snap.usedPct === 'number' ? `${snap.usedPct}%` : strings.brandShort;
+      labelEl.textContent = bmCount > 0 ? `${pctTxt} · ★${bmCount}` : pctTxt;
+      renderStandaloneCard();
     }
 
     function open() {
@@ -377,9 +592,19 @@
       while (listeners.length) {
         try { listeners.pop()(); } catch {}
       }
-      try { wrapEl?.remove?.(); } catch {}
+      removeStandalonePill();
       try { createdStyleEl?.remove?.(); } catch {}
-      wrapEl = pillBtn = dotEl = labelEl = cardEl = createdStyleEl = null;
+      createdStyleEl = null;
+      // Lossless Shadow DOM teardown across every Obsidian Prism Pulse host
+      const hosts = new Set([...embeddedShadowHosts, ...findPrismPulseHosts()]);
+      for (const h of hosts) {
+        try {
+          const sr = h?.shadowRoot;
+          sr?.getElementById?.(PRISM_STYLE_ID)?.remove?.();
+          sr?.querySelectorAll?.(`[data-testid="${PRISM_SEC_TESTID}"]`)?.forEach?.((n) => n.remove?.());
+        } catch {}
+      }
+      embeddedShadowHosts.clear();
       activePaneEl = null;
     }
 
@@ -390,13 +615,19 @@
       open,
       close,
       toggle,
-      getDebugState: () => ({
-        destroyed,
-        mounted: Boolean(wrapEl && wrapEl.isConnected !== false),
-        cardOpen,
-        compactMode: Boolean(pillBtn?.getAttribute?.('data-compact') === '1'),
-        label: labelEl?.textContent || '',
-      }),
+      getDebugState: () => {
+        const prismEmbedded = findPrismPulseHosts().some((h) =>
+          Boolean(h?.shadowRoot?.querySelector?.(`[data-testid="${PRISM_SEC_TESTID}"]`))
+        );
+        return {
+          destroyed,
+          mode: prismEmbedded ? 'prism-context-card' : wrapEl && wrapEl.isConnected !== false ? 'standalone-pill' : 'none',
+          prismCardEmbedded: prismEmbedded,
+          mounted: prismEmbedded || Boolean(wrapEl && wrapEl.isConnected !== false),
+          cardOpen,
+          label: labelEl?.textContent || '',
+        };
+      },
       destroy,
     };
   }
@@ -404,6 +635,8 @@
   return {
     PILL_TESTID,
     CARD_TESTID,
+    PRISM_SEC_TESTID,
+    PRISM_STYLE_ID,
     createStatusPillController,
   };
 });
