@@ -11,6 +11,7 @@ import {
   runDoctor,
   formatDoctorHuman,
 } from '../cli/doctor.mjs';
+import { installLocalPlugin } from '../cli/install-plugin.mjs';
 
 test('Doctor CLI: parses arguments and validates Node >= 22 runtime check', () => {
   assert.deepEqual(parseDoctorArgs(['--json', '--port=61743']), { port: 61743, prismDir: null, json: true });
@@ -101,4 +102,20 @@ test('Doctor CLI: emits platform-specific remediation hints when CDP port is mis
 
   const hintsWin = buildRemediationHints({ node: { ok: true }, cdp: { port: null, reachable: false }, windows: [] }, 'win32');
   assert.ok(hintsWin.some((h) => h.includes('--remote-debugging-port=0')));
+});
+
+test('Plugin installer: copies plugin.json, sidecar manifest, core modules & CLI cleanly into target dir', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-sg-plg-'));
+  try {
+    const target = path.join(tmp, 'agy-session-guard');
+    const res = installLocalPlugin({ targetDir: target });
+    assert.equal(res.ok, true);
+    assert.ok(res.filesCopied >= 18);
+    assert.equal(fs.existsSync(path.join(target, 'plugin.json')), true);
+    assert.equal(fs.existsSync(path.join(target, 'sidecars', 'daemon', 'sidecar.json')), true);
+    assert.equal(fs.existsSync(path.join(target, 'sidecars', 'daemon', 'main.mjs')), true);
+    assert.equal(fs.existsSync(path.join(target, 'packages', 'core', 'prism-bridge.js')), true);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

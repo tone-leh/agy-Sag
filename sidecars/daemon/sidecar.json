@@ -1,0 +1,10 @@
+{
+  "command": "node",
+  "args": [
+    "main.mjs"
+  ],
+  "restart_policy": "always",
+  "display_name": "Session Guard Watch Daemon",
+  "description": "Zero-ASAR adaptive-backoff CDP watcher that auto-attaches Session Guard to Antigravity windows and coexists cleanly with Obsidian Prism.",
+  "has_web_ui": false
+}

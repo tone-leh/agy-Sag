@@ -23,6 +23,7 @@
     "attach": "node cli/cdp-attach.mjs --attach",
     "watch": "node cli/watch-daemon.mjs",
     "doctor": "node cli/doctor.mjs",
+    "install:plugin": "node cli/install-plugin.mjs",
     "remove": "node cli/cdp-attach.mjs --remove",
     "status": "node cli/cdp-attach.mjs --status"
   }

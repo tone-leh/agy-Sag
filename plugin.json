@@ -1,0 +1,7 @@
+{
+  "name": "agy-session-guard",
+  "displayName": "Antigravity Session Guard · 领航哨",
+  "description": "Lightweight Zero-ASAR session copilot for Antigravity: custom /compact threshold, draft vault, turn bookmarks, new-session handoff prompt, stall watchdog (+5m snooze), and Obsidian Prism unified settings coexistence.",
+  "version": "0.3.0",
+  "logo": "assets/logo.svg"
+}

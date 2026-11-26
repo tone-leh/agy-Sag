@@ -297,8 +297,8 @@ export class SessionGuardWatchDaemon {
   }
 }
 
-async function runCli() {
-  const opts = parseWatchArgs(process.argv.slice(2));
+export async function startWatchDaemonCli(argv = process.argv.slice(2)) {
+  const opts = parseWatchArgs(argv);
   const cfgPatch = {};
   if (opts.threshold !== null) cfgPatch.compactThreshold = opts.threshold;
   if (opts.mode !== null) cfgPatch.compactTriggerMode = opts.mode;
@@ -359,7 +359,7 @@ async function runCli() {
 
 const isEntry = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 if (isEntry) {
-  runCli().catch((err) => {
+  startWatchDaemonCli(process.argv.slice(2)).catch((err) => {
     console.error('[agy-session-guard:watch]', err?.message || err);
     process.exitCode = 1;
   });
