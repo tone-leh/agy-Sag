@@ -366,6 +366,45 @@
       drawerEl.appendChild(foot);
     }
 
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const BOOKMARK_PATH_OUTLINE =
+      'M200-120v-640q0-33 23.5-56.5T280-840h400q33 0 56.5 23.5T760-760v640L480-240 200-120Zm80-122 200-86 200 86v-518H280v518Zm0-518h400-400Z';
+    const BOOKMARK_PATH_FILLED =
+      'M200-120v-640q0-33 23.5-56.5T280-840h400q33 0 56.5 23.5T760-760v640L480-240 200-120Z';
+
+    function resolveTurnActionSlot(bubble) {
+      const step = bubble?.closest?.('[data-testid="user-input-step"]') || null;
+      const actions = step?.querySelector?.('[data-testid="user-message-actions"]') || null;
+      if (!actions) return null;
+      const revertBtn = actions.querySelector?.('[data-testid="revert-button"]') || null;
+      if (revertBtn?.parentElement && revertBtn.parentElement !== actions) return revertBtn.parentElement;
+      const firstBtn = actions.querySelector?.('button:not(.ag-sg-bm-star)') || null;
+      if (firstBtn?.parentElement && firstBtn.parentElement !== actions) return firstBtn.parentElement;
+      return actions;
+    }
+
+    function renderBookmarkIcon(btn, starred) {
+      if (typeof doc?.createElementNS === 'function') {
+        let svg = btn.querySelector?.('svg');
+        let pathEl = svg?.firstChild || null;
+        if (!svg || !pathEl) {
+          while (btn.firstChild) btn.removeChild(btn.firstChild);
+          svg = doc.createElementNS(SVG_NS, 'svg');
+          svg.setAttribute('width', '16');
+          svg.setAttribute('height', '16');
+          svg.setAttribute('viewBox', '0 -960 960 960');
+          svg.setAttribute('fill', 'currentColor');
+          svg.setAttribute('aria-hidden', 'true');
+          pathEl = doc.createElementNS(SVG_NS, 'path');
+          svg.appendChild(pathEl);
+          btn.appendChild(svg);
+        }
+        pathEl.setAttribute('d', starred ? BOOKMARK_PATH_FILLED : BOOKMARK_PATH_OUTLINE);
+      } else {
+        btn.textContent = starred ? '★' : '☆';
+      }
+    }
+
     function decorateUserTurns() {
       const bubbles = getUserBubbles();
       if (bubbles.length === 0) {
@@ -376,7 +415,17 @@
       bubbles.forEach((bubble, idx) => {
         const turnNum = idx + 1;
         const starred = bookmarks.has(turnNum);
-        let btn = bubble.querySelector?.('.ag-sg-bm-star');
+        const actionSlot = resolveTurnActionSlot(bubble);
+        const host = actionSlot || bubble;
+        // Migrate away from legacy in-bubble placement if a native action row exists
+        if (actionSlot) {
+          const legacyBtn = bubble.querySelector?.('.ag-sg-bm-star');
+          if (legacyBtn) {
+            try { legacyBtn.remove?.(); } catch {}
+            ownedNodes.delete(legacyBtn);
+          }
+        }
+        let btn = host.querySelector?.('.ag-sg-bm-star');
         if (!btn) {
           btn = coexist.markOwnedNoTranslate(doc.createElement('button'));
           btn.type = 'button';
@@ -387,14 +436,19 @@
             ev?.stopPropagation?.();
             toggleBookmark(turnNum);
           });
-          bubble.appendChild(btn);
+          host.appendChild(btn);
           ownedNodes.add(btn);
         }
+        if (actionSlot) btn.setAttribute('data-inline-action', '1');
+        else btn.removeAttribute?.('data-inline-action');
         btn.setAttribute('data-ag-sg-turn', String(turnNum));
         btn.setAttribute('aria-pressed', String(starred));
         btn.setAttribute('data-starred', starred ? '1' : '0');
-        btn.title = starred ? strings.bmUnstarTitle : strings.bmStarTitle;
-        btn.textContent = starred ? '★' : '☆';
+        const tip = starred ? strings.bmUnstarTitle : strings.bmStarTitle;
+        btn.title = tip;
+        btn.setAttribute('aria-label', tip);
+        btn.setAttribute('data-tip', tip);
+        renderBookmarkIcon(btn, starred);
       });
       renderNativeJumpDock(bubbles);
     }

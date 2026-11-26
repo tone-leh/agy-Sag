@@ -61,6 +61,7 @@ function makeNode(tag, doc) {
       const parts = String(sel).split(',').map((s) => s.trim()).filter(Boolean);
       const matchOne = (n, part) => {
         if (part.startsWith('.')) return n.classList.contains(part.slice(1).split('[')[0]);
+        if (/^[a-zA-Z]+$/.test(part)) return n.tagName === part.toUpperCase();
         const m = /^\[([^\]=]+)(?:="([^"]*)")?\]$/.exec(part);
         if (m) return m[2] === undefined ? n.hasAttribute(m[1]) : n.getAttribute(m[1]) === m[2];
         return false;
@@ -74,6 +75,15 @@ function makeNode(tag, doc) {
       };
       walk(el);
       return out;
+    },
+    closest(sel) {
+      const m = /^\[([^\]=]+)(?:="([^"]*)")?\]$/.exec(String(sel || '').trim());
+      let cur = el;
+      while (cur) {
+        if (m && (m[2] === undefined ? cur.hasAttribute(m[1]) : cur.getAttribute(m[1]) === m[2])) return cur;
+        cur = cur.parentElement;
+      }
+      return null;
     },
     querySelector(sel) { return el.querySelectorAll(sel)[0] || null; },
   };
@@ -253,4 +263,81 @@ test('OutlineBookmarks native jump drawer: works without Obsidian Prism, redacts
   ctl.destroy();
   assert.equal(b2.hasAttribute('data-ag-sg-pulse'), false, 'destroy() must remove active pulse attribute');
   assert.equal(doc.querySelectorAll('[data-ag-sg-owned="1"]').length, 0);
+});
+
+test('OutlineBookmarks inline action bar: places crisp 16x16 SVG bookmark beside native Copy & Undo buttons, never inside user bubble', () => {
+  const doc = {
+    documentElement: null,
+    body: null,
+    createElement: (t) => makeNode(t, doc),
+    createElementNS: (_ns, t) => makeNode(t, doc),
+    querySelectorAll: (s) => doc.body.querySelectorAll(s),
+    querySelector: (s) => doc.body.querySelector(s),
+  };
+  doc.documentElement = makeNode('html', doc);
+  doc.documentElement.setAttribute('data-ag-cs-lang', 'zh-CN');
+  doc.body = makeNode('body', doc);
+
+  const conv = makeNode('div', doc);
+  conv.setAttribute('data-testid', 'conversation-view');
+  conv.setAttribute('data-cascade-id', 'cccccccc-3333-4444-8555-dddddddddddd');
+
+  const step = makeNode('div', doc);
+  step.setAttribute('data-testid', 'user-input-step');
+  const bubble = makeNode('div', doc);
+  bubble.setAttribute('data-testid', 'user-message-bubble');
+  bubble.textContent = 'Keep bubble 100% clean';
+
+  const actions = makeNode('div', doc);
+  actions.setAttribute('data-testid', 'user-message-actions');
+  const timeSpan = makeNode('span', doc);
+  timeSpan.textContent = '10m ago';
+  const btnGroup = makeNode('div', doc);
+  const copyBtn = makeNode('button', doc);
+  copyBtn.setAttribute('aria-label', 'Copy');
+  const undoBtn = makeNode('button', doc);
+  undoBtn.setAttribute('data-testid', 'revert-button');
+  btnGroup.appendChild(copyBtn);
+  btnGroup.appendChild(undoBtn);
+  actions.appendChild(timeSpan);
+  actions.appendChild(btnGroup);
+
+  step.appendChild(bubble);
+  step.appendChild(actions);
+  conv.appendChild(step);
+  doc.body.appendChild(conv);
+
+  const store = new Map();
+  const storage = {
+    getItem: (k) => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, v),
+    removeItem: (k) => store.delete(k),
+  };
+
+  const ctl = bmMod.createOutlineBookmarksController({
+    win: { document: doc, localStorage: storage },
+    doc,
+    storage,
+    enabled: true,
+    autoObserve: false,
+  });
+
+  // Must NEVER inject floating star inside the user message bubble
+  assert.equal(bubble.querySelector('.ag-sg-bm-star'), null, 'Bookmark button must NOT sit inside user-message-bubble');
+  const inlineBtn = btnGroup.querySelector('.ag-sg-bm-star');
+  assert.ok(inlineBtn, 'Bookmark button must mount inline next to Copy & Undo buttons');
+  assert.equal(inlineBtn.getAttribute('data-inline-action'), '1');
+  assert.ok(inlineBtn.getAttribute('data-tip').includes('收藏本轮'));
+  const svg = inlineBtn.querySelector('svg');
+  assert.ok(svg && svg.getAttribute('width') === '16', 'Must render 16x16 SVG matching native Material icons');
+  const outlinePath = svg.firstChild.getAttribute('d');
+
+  // Toggling bookmark switches to filled SVG and updates tooltip
+  inlineBtn.click();
+  assert.equal(inlineBtn.getAttribute('data-starred'), '1');
+  assert.notEqual(svg.firstChild.getAttribute('d'), outlinePath, 'Filled bookmark SVG path must differ from outline');
+  assert.ok(inlineBtn.getAttribute('data-tip').includes('取消收藏'));
+
+  ctl.destroy();
+  assert.equal(btnGroup.querySelector('.ag-sg-bm-star'), null);
 });
