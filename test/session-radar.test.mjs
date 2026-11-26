@@ -165,3 +165,21 @@ test('SessionRadar: sidebar attention filter pill filters rows, sends blurred-on
   assert.equal(rIdle.hidden, false, 'destroy() must unhide all filtered sidebar rows');
   assert.equal(doc.querySelector('[data-testid="ag-sg-radar-bar"]'), null);
 });
+
+test('SessionRadar: recognizes real Antigravity v2.35.1 running & awaiting row indicators', () => {
+  const rowSpinner = makeNode('div');
+  const sp = makeNode('span');
+  sp.setAttribute('data-testid', 'status-loading-spinner');
+  rowSpinner.appendChild(sp);
+  assert.equal(radar.classifyRowStatus(rowSpinner), 'running');
+
+  const rowPrismRun = makeNode('div');
+  rowPrismRun.setAttribute('data-ag-cs-row-running', '1');
+  assert.equal(radar.classifyRowStatus(rowPrismRun), 'running');
+
+  const rowPerm = makeNode('div');
+  const p = makeNode('span');
+  p.setAttribute('data-testid', 'permission-request-badge');
+  rowPerm.appendChild(p);
+  assert.equal(radar.classifyRowStatus(rowPerm), 'awaiting_decision');
+});

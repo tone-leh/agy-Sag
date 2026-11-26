@@ -25,15 +25,16 @@
   function detectCascadeId(doc, win) {
     try {
       const cv = doc?.querySelector?.('[data-testid="conversation-view"]');
-      const cid =
+      const cvCid =
         cv?.getAttribute?.('data-cascade-id') ||
         cv?.closest?.('[data-cascade-id]')?.getAttribute?.('data-cascade-id') ||
-        doc?.querySelector?.('[data-cascade-id]')?.getAttribute?.('data-cascade-id') ||
         '';
-      if (cid && GUID_RE.test(cid.trim())) return cid.trim().toLowerCase();
+      if (cvCid && GUID_RE.test(cvCid.trim())) return cvCid.trim().toLowerCase();
       const pathname = String(win?.location?.pathname || '');
       const m = pathname.match(/\/c\/([0-9a-f-]{36})/i);
       if (m && m[1]) return m[1].toLowerCase();
+      const fallback = doc?.querySelector?.('[data-cascade-id]:not([data-testid="conversation-row-sidebar"])')?.getAttribute?.('data-cascade-id') || '';
+      if (fallback && GUID_RE.test(fallback.trim())) return fallback.trim().toLowerCase();
     } catch {}
     return 'default-session';
   }

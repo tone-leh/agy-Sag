@@ -14,6 +14,8 @@
   const CORE_CSS = `
 .ag-sg-banner{
   position:relative;
+  box-sizing:border-box;
+  width:100%;
   display:flex;
   align-items:center;
   justify-content:space-between;
@@ -136,6 +138,8 @@
 .ag-sg-toast[data-tone="warn"]{color:var(--warning,#f59e0b);}
 .ag-sg-toast[data-tone="ok"]{color:var(--success,#34d399);}
 .ag-sg-recovery-bar{
+  box-sizing:border-box;
+  width:100%;
   display:flex;
   align-items:center;
   justify-content:space-between;
@@ -235,6 +239,8 @@
 }
 .ag-sg-bm-star{
   appearance:none;
+  flex:0 0 auto;
+  align-self:center;
   display:inline-flex;
   align-items:center;
   justify-content:center;

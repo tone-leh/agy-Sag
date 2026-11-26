@@ -31,6 +31,16 @@ test('context-source: reuses __agPrismMetricsBridge without duplicate polling an
   assert.equal(snap.usedPct, 84);
   assert.equal(snap.compactedCount, 2);
   assert.equal(snap.cascadeId, 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
+
+  // detectCascadeId must prioritize pathname /c/<UUID> over arbitrary sidebar row data-cascade-id
+  const mockDoc = {
+    querySelector: (sel) => {
+      if (sel === '[data-testid="conversation-view"]') return { getAttribute: () => null, closest: () => null };
+      if (sel.includes(':not(')) return null;
+      return { getAttribute: () => '99999999-9999-4999-8999-999999999999' };
+    },
+  };
+  assert.equal(ctxSrc.detectCascadeId(mockDoc, win), 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
 });
 
 test('coexistence: standalone auto-yields when __agSessionGuardOwner is owned by a host integrator (e.g. Obsidian Prism)', () => {

@@ -168,6 +168,7 @@
       if (!doc || typeof doc.querySelector !== 'function') return;
       const conv = doc.querySelector('[data-testid="conversation-view"]');
       if (!conv) return;
+      const dockHost = conv.querySelector?.('[data-testid="autoscroll-viewport"]') || conv;
 
       const sorted = [...bookmarks].sort((a, b) => a - b);
       if (sorted.length === 0) {
@@ -177,7 +178,7 @@
         return;
       }
 
-      if (!dockEl || dockEl.parentElement !== conv) {
+      if (!dockEl || dockEl.parentElement !== dockHost) {
         if (dockEl) {
           try { dockEl.remove?.(); } catch {}
           ownedNodes.delete(dockEl);
@@ -209,10 +210,10 @@
         inner.appendChild(drawerEl);
         dockEl.appendChild(inner);
 
-        if (typeof conv.insertBefore === 'function' && conv.firstChild) {
-          conv.insertBefore(dockEl, conv.firstChild);
+        if (typeof dockHost.insertBefore === 'function' && dockHost.firstChild) {
+          dockHost.insertBefore(dockEl, dockHost.firstChild);
         } else {
-          conv.appendChild(dockEl);
+          dockHost.appendChild(dockEl);
         }
         ownedNodes.add(dockEl);
       }

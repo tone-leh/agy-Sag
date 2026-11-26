@@ -28,10 +28,20 @@
     if (/await|wait|approv|decision|attention|blocked/.test(explicit)) return 'awaiting_decision';
     if (/run|work|stream|progress|active/.test(explicit)) return 'running';
 
-    if (row.querySelector?.('[data-testid*="await"], [data-testid*="approval"], [data-testid*="attention"], [data-status="awaiting_decision"]')) {
+    if (
+      row.hasAttribute?.('data-ag-cs-row-awaiting') ||
+      row.querySelector?.(
+        '[data-testid*="await"], [data-testid*="approval"], [data-testid*="attention"], [data-testid*="needs-input"], [data-testid*="permission-request"], [data-status="awaiting_decision"]'
+      )
+    ) {
       return 'awaiting_decision';
     }
-    if (row.querySelector?.('[data-testid*="running"], [data-ag-sub-running="1"], [data-status="running"]')) {
+    if (
+      row.hasAttribute?.('data-ag-cs-row-running') ||
+      row.querySelector?.(
+        '[data-testid="status-loading-spinner"], [data-testid="status-task-running"], [data-testid*="running"], [data-ag-sub-running="1"], [data-status="running"]'
+      )
+    ) {
       return 'running';
     }
     const label = `${row.getAttribute?.('aria-label') || ''} ${row.textContent || ''}`;

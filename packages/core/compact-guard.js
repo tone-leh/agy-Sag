@@ -259,7 +259,9 @@
           });
         } else {
           const sendBtn =
-            doc.querySelector?.('[data-testid="send-button"], [data-testid="input-send-button"], button[type="submit"]');
+            doc.querySelector?.(
+              '[data-testid="agent-input-box"] [data-testid="input-send-button"], [data-testid="agent-input-box"] [data-testid="send-button"], [data-testid="send-button"], [data-testid="input-send-button"], [data-testid="agent-input-box"] button[aria-label*="Send" i], [data-testid="agent-input-box"] button[aria-label*="发送"], button[type="submit"]'
+            );
           if (sendBtn && !sendBtn.disabled && typeof sendBtn.click === 'function') {
             sendBtn.click();
           } else {
