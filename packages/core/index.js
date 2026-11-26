@@ -182,9 +182,9 @@
           getLang: options.getLang,
           getConfig: () => compactGuard.getConfig(),
           onUpdateConfig: (patch) => api.updateConfig(patch),
-          onCleanClear: (opts) => cleanSlate?.triggerCleanClear?.(opts),
+          onCompactNow: () => compactGuard.insertCompact({ submit: true }),
+          onCleanRestart: (opts) => cleanSlate?.triggerCleanClear?.(opts),
           onOpenVault: openVault,
-          onDownloadMarkdown: () => compactGuard.downloadMarkdown({ onlyBookmarked: outlineBookmarks.getBookmarks().length > 0 }),
         })
       : null;
 
@@ -197,8 +197,6 @@
           getLang: options.getLang,
           getConfig: () => compactGuard.getConfig(),
           onUpdateConfig: (patch) => api.updateConfig(patch),
-          onCleanClear: (opts) => cleanSlate?.triggerCleanClear?.(opts),
-          onOpenVault: openVault,
           onHostContextChange: () => {
             compactGuard.refreshUi?.();
             draftGuard?.sync?.();

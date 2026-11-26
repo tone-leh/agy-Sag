@@ -141,7 +141,8 @@ function createCleanSlateDom({ cid, projectId }) {
 }
 
 test('CleanSlate helpers: parseClearCommand & buildCleanRestartBrief strip code blocks, redact secrets, and stay ultra-compact', () => {
-  assert.deepEqual(cleanSlate.parseClearCommand('/clear'), { mode: 'blank', focus: '' });
+  assert.deepEqual(cleanSlate.parseClearCommand('/clear'), { mode: 'keep', focus: '' });
+  assert.deepEqual(cleanSlate.parseClearCommand('/clear blank'), { mode: 'blank', focus: '' });
   assert.deepEqual(cleanSlate.parseClearCommand('/clear keep'), { mode: 'keep', focus: '' });
   assert.deepEqual(cleanSlate.parseClearCommand('/clear 续接'), { mode: 'keep', focus: '' });
   assert.deepEqual(cleanSlate.parseClearCommand('/clear finish OAuth'), { mode: 'keep', focus: 'finish OAuth' });
@@ -192,8 +193,8 @@ test('CleanSlate controller: intercepts /clear on Enter, clicks exact same-proje
     now: () => now,
   });
 
-  // 1) Pure /clear via Enter -> intercepts event, clicks same-project link, saves no pending brief
-  dom1.ta.value = '/clear';
+  // 1) /clear blank via Enter -> intercepts event, clicks same-project link, saves no pending brief
+  dom1.ta.value = '/clear blank';
   let prevented = false;
   dom1.doc.dispatchEvent({
     type: 'keydown',
@@ -213,8 +214,8 @@ test('CleanSlate controller: intercepts /clear on Enter, clicks exact same-proje
   assert.equal(dom1.ta.value, '');
   assert.equal(storage.getItem(cleanSlate.PENDING_CLEAR_KEY), null);
 
-  // 2) /clear keep -> saves ultra-compact pure-text brief & navigates to same-project fresh conversation
-  dom1.ta.value = '/clear keep';
+  // 2) Default /clear -> saves ultra-compact pure-text brief & navigates to same-project fresh conversation
+  dom1.ta.value = '/clear';
   dom1.doc.dispatchEvent({
     type: 'keydown',
     key: 'Enter',

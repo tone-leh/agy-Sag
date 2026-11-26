@@ -231,9 +231,8 @@
   position:absolute;
   right:0;
   bottom:calc(100% + 10px);
-  width:min(336px,calc(100vw - 28px));
-  max-height:min(76vh,540px);
-  overflow:auto;
+  width:min(288px,calc(100vw - 28px));
+  overflow:hidden;
   border-radius:12px;
   border:1px solid var(--border,rgba(148,163,184,.28));
   background:var(--popover,var(--card,#ffffff));
@@ -243,6 +242,17 @@
   z-index:60;
 }
 .ag-sg-status-card[hidden]{display:none!important;}
+.ag-sg-card-link{
+  appearance:none;
+  border:0;
+  padding:0;
+  background:transparent;
+  color:var(--warning,#d97706);
+  font:600 11.5px/1.3 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei UI",sans-serif;
+  font-variant-numeric:tabular-nums;
+  cursor:pointer;
+}
+.ag-sg-card-link:hover{text-decoration:underline;}
 .ag-sg-card-head{
   display:flex;
   align-items:center;

@@ -17,8 +17,7 @@
   const PRISM_MODULES_GROUP_SEL = '[data-ag-cs-group="modules"]';
   const EMBED_SECTION_TESTID = 'ag-sg-prism-settings-section';
   const NATIVE_SECTION_TESTID = 'ag-sg-native-settings-section';
-  const THRESHOLD_PRESETS = ['off', 70, 75, 80, 85, 90];
-  const STALL_PRESETS = ['off', 120, 180, 300];
+  const THRESHOLD_PRESETS = ['off', 75, 80, 85, 90];
   const SETTINGS_APPEARANCE_TITLES = new Set([
     'Appearance',
     '外观',
@@ -220,61 +219,12 @@
           buttons: [
             ['auto-countdown', strings.cfgModeCountdown],
             ['confirm', strings.cfgModeConfirm],
-            ['fill-only', strings.cfgModeFill],
           ].map(([mKey, mLabel]) => ({
             label: mLabel,
             attr: 'data-ag-sg-prism-mode',
             val: mKey,
             active: cfg.compactTriggerMode === mKey,
             onClick: () => updateConfig({ compactTriggerMode: mKey }),
-          })),
-        })
-      );
-
-      let customInput = null;
-      if (cfg.compactFocusPreset === 'custom') {
-        customInput = doc.createElement('input');
-        customInput.type = 'text';
-        customInput.className = 'ag-sg-pop-input ag-sg-set-input';
-        customInput.setAttribute('data-ag-sg-prism-custom-focus', '1');
-        customInput.placeholder = strings.cfgFocusCustomPlaceholder;
-        customInput.value = cfg.customCompactFocus || '';
-        customInput.addEventListener('input', () => {
-          updateConfig({ customCompactFocus: customInput.value });
-        });
-      }
-      card.appendChild(
-        mkSegRow({
-          key: 'focus',
-          title: strings.cfgFocus,
-          inPrism,
-          buttons: [
-            ['default', strings.cfgFocusDefault],
-            ['code-errors', strings.cfgFocusCode],
-            ['bookmarks', strings.cfgFocusBookmarks],
-            ['custom', strings.cfgFocusCustom],
-          ].map(([fKey, fLabel]) => ({
-            label: fLabel,
-            attr: 'data-ag-sg-prism-focus',
-            val: fKey,
-            active: cfg.compactFocusPreset === fKey,
-            onClick: () => updateConfig({ compactFocusPreset: fKey }),
-          })),
-          extraEl: customInput,
-        })
-      );
-
-      card.appendChild(
-        mkSegRow({
-          key: 'stall',
-          title: strings.cfgStall,
-          inPrism,
-          buttons: STALL_PRESETS.map((sec) => ({
-            label: sec === 'off' ? strings.cfgStallOff : `${Math.round(sec / 60)}m`,
-            attr: 'data-ag-sg-prism-stall',
-            val: sec,
-            active: cfg.stallThresholdSeconds === sec,
-            onClick: () => updateConfig({ stallThresholdSeconds: sec }),
           })),
         })
       );
@@ -288,8 +238,8 @@
           buttons: [
             ['draftGuard', strings.cfgModDraftGuard],
             ['outlineBookmarks', strings.cfgModBookmarks],
-            ['sessionRadar', strings.cfgModRadar],
             ['sessionWatchdog', strings.cfgModWatchdog],
+            ['sessionRadar', strings.cfgModRadar],
           ].map(([mKey, mLabel]) => ({
             label: mLabel,
             attr: 'data-ag-sg-prism-mod',
@@ -317,43 +267,6 @@
               active: cfg.radarNotifyMode === nKey,
               onClick: () => updateConfig({ radarNotifyMode: nKey }),
             })),
-          })
-        );
-      }
-
-      const actButtons = [];
-      if (typeof options.onCleanClear === 'function') {
-        actButtons.push({
-          label: strings.btnClearBlank,
-          attr: 'data-ag-sg-prism-act',
-          val: 'clear-blank',
-          active: false,
-          onClick: () => options.onCleanClear({ mode: 'blank' }),
-        });
-        actButtons.push({
-          label: strings.btnClearKeep,
-          attr: 'data-ag-sg-prism-act',
-          val: 'clear-keep',
-          active: false,
-          onClick: () => options.onCleanClear({ mode: 'keep' }),
-        });
-      }
-      if (typeof options.onOpenVault === 'function') {
-        actButtons.push({
-          label: strings.bmOpenVaultBtn,
-          attr: 'data-ag-sg-prism-act',
-          val: 'open-vault',
-          active: false,
-          onClick: () => options.onOpenVault(),
-        });
-      }
-      if (actButtons.length > 0) {
-        card.appendChild(
-          mkSegRow({
-            key: 'actions',
-            title: strings.setQuickActions,
-            inPrism,
-            buttons: actButtons,
           })
         );
       }

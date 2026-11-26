@@ -183,22 +183,26 @@ test('Standalone user (NO Obsidian Prism): sees calm composer % pill, floating q
   assert.equal(pill.getAttribute('data-tone'), 'ok');
   assert.ok(pill.textContent.includes('34%'));
 
-  // Clicking the pill opens the clean floating card with live metrics & inline controls
+  // Clicking the pill opens the minimal floating card (Less is More: <= 8 buttons total, no redundant clear-blank)
   pill.click();
   const card = doc.querySelector(`[data-testid="${statusPill.CARD_TESTID}"]`);
   assert.ok(card && !card.hidden, 'Clicking status pill must open the quick status & settings card');
   assert.ok(card.textContent.includes('174K / 512K'));
   assert.equal(card.textContent.includes('Prism'), false, 'Standalone consumer card must never mention Prism');
+  assert.equal(card.querySelector('[data-ag-sg-card-act="clear-blank"]'), null, 'Must not include redundant blank-clear button');
+  assert.ok(card.querySelector('[data-ag-sg-card-act="clean-restart"]'), 'Must include Clean Restart action');
+  assert.ok(card.querySelectorAll('button').length <= 8, `Status card must stay serene (<= 8 buttons), got ${card.querySelectorAll('button').length}`);
 
   // Changing threshold from floating card updates live config and syncs to native Settings card
-  card.querySelector('[data-ag-sg-card-th="70"]').click();
-  assert.equal(guard.getConfig().compactThreshold, 70);
+  card.querySelector('[data-ag-sg-card-th="75"]').click();
+  assert.equal(guard.getConfig().compactThreshold, 75);
 
-  // Native Antigravity Settings Dialog gets a clean standalone card (WITHOUT Obsidian Prism!)
+  // Native Antigravity Settings Dialog gets a clean standalone card (WITHOUT Obsidian Prism!, <= 4 rows)
   const nativeSec = doc.querySelector(`[data-testid="${prismBridge.NATIVE_SECTION_TESTID}"]`);
   assert.ok(nativeSec, 'Standalone user must see a clean native Settings section inside Antigravity Settings');
   assert.equal(guard.getDebugState().prismBridge.mountedMode, 'native');
-  assert.equal(nativeSec.querySelector('[data-ag-sg-prism-th="70"]').getAttribute('aria-pressed'), 'true');
+  assert.ok(nativeSec.querySelectorAll('[data-ag-sg-prism-row]').length <= 4, 'Settings card must stay minimal (<= 4 rows)');
+  assert.equal(nativeSec.querySelector('[data-ag-sg-prism-th="75"]').getAttribute('aria-pressed'), 'true');
   assert.equal(nativeSec.textContent.includes('Prism'), false, 'Native standalone settings must never show Prism jargon');
 
   guard.destroy();

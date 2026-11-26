@@ -26,7 +26,10 @@
     const m = trimmed.match(/^\/clear(?:\s+([\s\S]+))?$/i);
     if (!m) return null;
     const arg = (m[1] || '').trim();
-    if (!arg) return { mode: 'blank', focus: '' };
+    if (!arg) return { mode: 'keep', focus: '' };
+    if (/^(?:blank|empty|reset|空白)$/i.test(arg)) {
+      return { mode: 'blank', focus: '' };
+    }
     if (/^(?:keep|brief|continue|续接|保留)$/i.test(arg)) {
       return { mode: 'keep', focus: '' };
     }
@@ -248,7 +251,7 @@
       applyTimer?.unref?.();
     }
 
-    function triggerCleanClear({ mode = 'blank', focus = '' } = {}) {
+    function triggerCleanClear({ mode = 'keep', focus = '' } = {}) {
       if (destroyed || !doc) return { ok: false, reason: 'destroyed' };
       if (ctxSrc.isTurnStreaming(doc)) {
         return { ok: false, reason: 'streaming' };

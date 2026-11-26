@@ -1,8 +1,8 @@
-// Antigravity Session Guard — Calm Composer Status Pill & Floating Control Card (UMD, zero runtime deps)
-// Provides a quiet, always-reachable entry point for BOTH standalone users (no Obsidian Prism) and combined users:
-//   - Standalone (no Prism Pulse bar): compact "● 42%" status pill in .agy-composer-footer
-//   - With Obsidian Prism Pulse bar: compact icon+dot pill (never duplicates a second % readout)
-//   - Clicking opens a minimal, light/dark-adaptive floating card with live metrics, inline settings & quick tools
+// Antigravity Session Guard — Calm Composer Status Pill & Minimal Control Card (UMD, zero runtime deps)
+// Less is More:
+//   - Standalone (no Prism Pulse bar): compact "● 42%" pill in .agy-composer-footer
+//   - With Obsidian Prism Pulse bar: compact "● 领航哨" (or "● ★ 2") pill without duplicating %
+//   - Clicking opens a serene, zero-clutter card: live context + threshold picker + 2 core actions (Compact / Clean Restart)
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory(root);
@@ -12,8 +12,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this, function (globalRoot) {
   'use strict';
 
-  const THRESHOLD_PRESETS = ['off', 70, 75, 80, 85, 90];
-  const STALL_PRESETS = ['off', 120, 180, 300];
+  const THRESHOLD_PRESETS = ['off', 75, 80, 85, 90];
   const PILL_TESTID = 'ag-sg-status-pill';
   const CARD_TESTID = 'ag-sg-status-card';
 
@@ -106,22 +105,15 @@
       const cfg = getConfig();
       const strings = S();
       const snap = lastState.snap;
-      const wd = lastState.watchdog;
       const pct = snap && typeof snap.usedPct === 'number' ? `${snap.usedPct}%` : '—';
-      const thText = cfg.compactThreshold === 'off' ? strings.cfgThresholdOff : `${cfg.compactThreshold}%`;
       const usedLbl = snap ? ctxSrc.formatTokens(snap.usedTokens) : '—';
       const maxLbl = snap ? ctxSrc.formatTokens(snap.maxTokens) : '—';
       const tokText = snap ? `${usedLbl} / ${maxLbl}` : '—';
-      const etaText =
-        wd && typeof wd.estimatedTurnsLeft === 'number' && wd.estimatedTurnsLeft > 0
-          ? i18n.formatTemplate(strings.cardTurnsVal, { n: wd.estimatedTurnsLeft })
-          : '—';
-      const bmText = i18n.formatTemplate(strings.cardCountVal, { n: lastState.bookmarkCount || 0 });
-      const draftText = lastState.hasDraft ? strings.cardDraftSaved : strings.cardDraftNone;
+      const bmCount = Number(lastState.bookmarkCount) || 0;
 
       while (cardEl.firstChild) cardEl.removeChild(cardEl.firstChild);
 
-      // Header
+      // 1) Header: Brand + live %
       const head = doc.createElement('div');
       head.className = 'ag-sg-card-head';
       const titleEl = doc.createElement('span');
@@ -129,145 +121,85 @@
       titleEl.textContent = strings.brand;
       const metaEl = doc.createElement('span');
       metaEl.className = 'ag-sg-card-meta';
-      metaEl.textContent = `${pct} · ${strings.cardThresholdShort} ${thText}`;
+      metaEl.textContent = pct;
       head.appendChild(titleEl);
       head.appendChild(metaEl);
       cardEl.appendChild(head);
 
-      // Clean 2-column live telemetry grid
+      // 2) Single calm telemetry row (Context + optional clickable Bookmarks count)
       const grid = doc.createElement('div');
       grid.className = 'ag-sg-card-grid';
-      const mkMetric = (k, v) => {
-        const cell = doc.createElement('div');
-        cell.className = 'ag-sg-card-metric';
-        const kEl = doc.createElement('span');
-        kEl.className = 'ag-sg-card-mk';
-        kEl.textContent = k;
-        const vEl = doc.createElement('span');
-        vEl.className = 'ag-sg-card-mv';
-        vEl.textContent = v;
-        cell.appendChild(kEl);
-        cell.appendChild(vEl);
-        return cell;
-      };
-      grid.appendChild(mkMetric(strings.cardContextLabel, tokText));
-      grid.appendChild(mkMetric(strings.cardEtaLabel, etaText));
-      grid.appendChild(mkMetric(strings.cardBookmarksLabel, bmText));
-      grid.appendChild(mkMetric(strings.cardDraftLabel, draftText));
+
+      const ctxCell = doc.createElement('div');
+      ctxCell.className = 'ag-sg-card-metric';
+      const ctxK = doc.createElement('span');
+      ctxK.className = 'ag-sg-card-mk';
+      ctxK.textContent = strings.cardContextLabel;
+      const ctxV = doc.createElement('span');
+      ctxV.className = 'ag-sg-card-mv';
+      ctxV.textContent = tokText;
+      ctxCell.appendChild(ctxK);
+      ctxCell.appendChild(ctxV);
+      grid.appendChild(ctxCell);
+
+      const bmCell = doc.createElement('div');
+      bmCell.className = 'ag-sg-card-metric';
+      const bmK = doc.createElement('span');
+      bmK.className = 'ag-sg-card-mk';
+      bmK.textContent = strings.cardBookmarksLabel;
+      if (bmCount > 0 && typeof options.onOpenVault === 'function') {
+        const bmLink = doc.createElement('button');
+        bmLink.type = 'button';
+        bmLink.className = 'ag-sg-card-link';
+        bmLink.setAttribute('data-ag-sg-card-act', 'open-vault');
+        bmLink.textContent = `★ ${bmCount}`;
+        bmLink.addEventListener('click', (ev) => {
+          ev?.preventDefault?.();
+          ev?.stopPropagation?.();
+          close();
+          options.onOpenVault();
+        });
+        bmCell.appendChild(bmK);
+        bmCell.appendChild(bmLink);
+      } else {
+        const bmV = doc.createElement('span');
+        bmV.className = 'ag-sg-card-mv';
+        bmV.textContent = String(bmCount);
+        bmCell.appendChild(bmK);
+        bmCell.appendChild(bmV);
+      }
+      grid.appendChild(bmCell);
       cardEl.appendChild(grid);
 
-      // Settings body
+      // 3) Single core setting: Auto-Compact Threshold (Off / 75% / 80% / 85% / 90%)
       const body = doc.createElement('div');
       body.className = 'ag-sg-card-body';
-
-      const mkRow = (label, specs, extraEl = null) => {
-        const r = doc.createElement('div');
-        r.className = 'ag-sg-pop-row';
-        const l = doc.createElement('span');
-        l.className = 'ag-sg-pop-lbl';
-        l.textContent = label;
-        const seg = doc.createElement('div');
-        seg.className = 'ag-sg-seg';
-        for (const sp of specs) {
-          const b = doc.createElement('button');
-          b.type = 'button';
-          b.textContent = sp.label;
-          if (sp.attr) b.setAttribute(sp.attr, String(sp.val));
-          b.setAttribute('aria-pressed', String(Boolean(sp.active)));
-          b.addEventListener('click', (ev) => {
-            ev?.preventDefault?.();
-            ev?.stopPropagation?.();
-            sp.onClick();
-          });
-          seg.appendChild(b);
-        }
-        r.appendChild(l);
-        r.appendChild(seg);
-        if (extraEl) r.appendChild(extraEl);
-        return r;
-      };
-
-      body.appendChild(
-        mkRow(
-          strings.cfgThreshold,
-          THRESHOLD_PRESETS.map((p) => ({
-            label: p === 'off' ? strings.cfgThresholdOff : `${p}%`,
-            attr: 'data-ag-sg-card-th',
-            val: p,
-            active: cfg.compactThreshold === p,
-            onClick: () => updateConfig({ compactThreshold: p }),
-          }))
-        )
-      );
-
-      body.appendChild(
-        mkRow(strings.cfgMode, [
-          { label: strings.cfgModeCountdown, attr: 'data-ag-sg-card-mode', val: 'auto-countdown', active: cfg.compactTriggerMode === 'auto-countdown', onClick: () => updateConfig({ compactTriggerMode: 'auto-countdown' }) },
-          { label: strings.cfgModeConfirm, attr: 'data-ag-sg-card-mode', val: 'confirm', active: cfg.compactTriggerMode === 'confirm', onClick: () => updateConfig({ compactTriggerMode: 'confirm' }) },
-          { label: strings.cfgModeFill, attr: 'data-ag-sg-card-mode', val: 'fill-only', active: cfg.compactTriggerMode === 'fill-only', onClick: () => updateConfig({ compactTriggerMode: 'fill-only' }) },
-        ])
-      );
-
-      let customInput = null;
-      if (cfg.compactFocusPreset === 'custom') {
-        customInput = doc.createElement('input');
-        customInput.type = 'text';
-        customInput.className = 'ag-sg-pop-input';
-        customInput.setAttribute('data-ag-sg-card-custom-focus', '1');
-        customInput.placeholder = strings.cfgFocusCustomPlaceholder;
-        customInput.value = cfg.customCompactFocus || '';
-        customInput.addEventListener('input', () => {
-          updateConfig({ customCompactFocus: customInput.value });
+      const row = doc.createElement('div');
+      row.className = 'ag-sg-pop-row';
+      const lbl = doc.createElement('span');
+      lbl.className = 'ag-sg-pop-lbl';
+      lbl.textContent = strings.cfgThreshold;
+      const seg = doc.createElement('div');
+      seg.className = 'ag-sg-seg';
+      for (const p of THRESHOLD_PRESETS) {
+        const b = doc.createElement('button');
+        b.type = 'button';
+        b.textContent = p === 'off' ? strings.cfgThresholdOff : `${p}%`;
+        b.setAttribute('data-ag-sg-card-th', String(p));
+        b.setAttribute('aria-pressed', String(cfg.compactThreshold === p));
+        b.addEventListener('click', (ev) => {
+          ev?.preventDefault?.();
+          ev?.stopPropagation?.();
+          updateConfig({ compactThreshold: p });
         });
+        seg.appendChild(b);
       }
-      body.appendChild(
-        mkRow(
-          strings.cfgFocus,
-          [
-            { label: strings.cfgFocusDefault, attr: 'data-ag-sg-card-focus', val: 'default', active: cfg.compactFocusPreset === 'default', onClick: () => updateConfig({ compactFocusPreset: 'default' }) },
-            { label: strings.cfgFocusCode, attr: 'data-ag-sg-card-focus', val: 'code-errors', active: cfg.compactFocusPreset === 'code-errors', onClick: () => updateConfig({ compactFocusPreset: 'code-errors' }) },
-            { label: strings.cfgFocusBookmarks, attr: 'data-ag-sg-card-focus', val: 'bookmarks', active: cfg.compactFocusPreset === 'bookmarks', onClick: () => updateConfig({ compactFocusPreset: 'bookmarks' }) },
-            { label: strings.cfgFocusCustom, attr: 'data-ag-sg-card-focus', val: 'custom', active: cfg.compactFocusPreset === 'custom', onClick: () => updateConfig({ compactFocusPreset: 'custom' }) },
-          ],
-          customInput
-        )
-      );
-
-      body.appendChild(
-        mkRow(
-          strings.cfgStall,
-          STALL_PRESETS.map((sec) => ({
-            label: sec === 'off' ? strings.cfgStallOff : `${Math.round(sec / 60)}m`,
-            attr: 'data-ag-sg-card-stall',
-            val: sec,
-            active: cfg.stallThresholdSeconds === sec,
-            onClick: () => updateConfig({ stallThresholdSeconds: sec }),
-          }))
-        )
-      );
-
-      body.appendChild(
-        mkRow(strings.cfgModules, [
-          { label: strings.cfgModDraftGuard, attr: 'data-ag-sg-card-mod', val: 'draftGuard', active: Boolean(cfg.modules?.draftGuard), onClick: () => updateConfig({ modules: { ...cfg.modules, draftGuard: !cfg.modules?.draftGuard } }) },
-          { label: strings.cfgModBookmarks, attr: 'data-ag-sg-card-mod', val: 'outlineBookmarks', active: Boolean(cfg.modules?.outlineBookmarks), onClick: () => updateConfig({ modules: { ...cfg.modules, outlineBookmarks: !cfg.modules?.outlineBookmarks } }) },
-          { label: strings.cfgModRadar, attr: 'data-ag-sg-card-mod', val: 'sessionRadar', active: Boolean(cfg.modules?.sessionRadar), onClick: () => updateConfig({ modules: { ...cfg.modules, sessionRadar: !cfg.modules?.sessionRadar } }) },
-          { label: strings.cfgModWatchdog, attr: 'data-ag-sg-card-mod', val: 'sessionWatchdog', active: Boolean(cfg.modules?.sessionWatchdog), onClick: () => updateConfig({ modules: { ...cfg.modules, sessionWatchdog: !cfg.modules?.sessionWatchdog } }) },
-        ])
-      );
-
-      if (cfg.modules?.sessionRadar) {
-        body.appendChild(
-          mkRow(strings.cfgRadarNotify, [
-            { label: strings.cfgNotifyOff, attr: 'data-ag-sg-card-notify', val: 'off', active: cfg.radarNotifyMode === 'off', onClick: () => updateConfig({ radarNotifyMode: 'off' }) },
-            { label: strings.cfgNotifyAwaiting, attr: 'data-ag-sg-card-notify', val: 'awaiting', active: cfg.radarNotifyMode === 'awaiting', onClick: () => updateConfig({ radarNotifyMode: 'awaiting' }) },
-            { label: strings.cfgNotifyAll, attr: 'data-ag-sg-card-notify', val: 'all', active: cfg.radarNotifyMode === 'all', onClick: () => updateConfig({ radarNotifyMode: 'all' }) },
-          ])
-        );
-      }
-
+      row.appendChild(lbl);
+      row.appendChild(seg);
+      body.appendChild(row);
       cardEl.appendChild(body);
 
-      // Footer quick actions
+      // 4) Two irreplaceable actions only: Compact Now + Clean Restart (keep minimal text, drop images/logs)
       const foot = doc.createElement('div');
       foot.className = 'ag-sg-card-foot';
       const mkAct = (cls, text, act, onClick) => {
@@ -283,32 +215,19 @@
         });
         return b;
       };
-      if (typeof options.onCleanClear === 'function') {
+      if (typeof options.onCompactNow === 'function') {
         foot.appendChild(
-          mkAct('ag-sg-btn', strings.btnClearBlank, 'clear-blank', () => {
+          mkAct('ag-sg-btn', strings.btnCompactNow, 'compact-now', () => {
             close();
-            options.onCleanClear({ mode: 'blank' });
-          })
-        );
-        foot.appendChild(
-          mkAct('ag-sg-btn ag-sg-btn-primary', strings.btnClearKeep, 'clear-keep', () => {
-            close();
-            options.onCleanClear({ mode: 'keep' });
+            options.onCompactNow();
           })
         );
       }
-      if (typeof options.onOpenVault === 'function') {
+      if (typeof options.onCleanRestart === 'function') {
         foot.appendChild(
-          mkAct('ag-sg-btn', strings.bmOpenVaultBtn, 'open-vault', () => {
+          mkAct('ag-sg-btn ag-sg-btn-primary', strings.btnClearKeep, 'clean-restart', () => {
             close();
-            options.onOpenVault();
-          })
-        );
-      }
-      if (typeof options.onDownloadMarkdown === 'function') {
-        foot.appendChild(
-          mkAct('ag-sg-btn', strings.btnDownloadMd, 'download-md', () => {
-            void options.onDownloadMarkdown();
+            options.onCleanRestart({ mode: 'keep' });
           })
         );
       }
@@ -360,7 +279,6 @@
         wrapEl.appendChild(pillBtn);
         wrapEl.appendChild(cardEl);
 
-        // Insert right before the trailing action cluster in .agy-composer-footer so layout stays balanced
         const kids = Array.from(footer.children || []);
         const trailing = kids.length > 1 ? kids[kids.length - 1] : null;
         if (trailing && typeof footer.insertBefore === 'function') {
@@ -394,7 +312,6 @@
       pillBtn.title = strings.pillEntryTitle;
 
       if (compactMode) {
-        // Alongside Obsidian Prism Pulse bar: avoid duplicate % meter; stay ultra-compact
         labelEl.textContent = bmCount > 0 ? `★ ${bmCount}` : strings.brandShort;
       } else {
         const pctTxt = snap && typeof snap.usedPct === 'number' ? `${snap.usedPct}%` : strings.brandShort;
