@@ -11,7 +11,8 @@ Configurable Compaction Guard · Turn Bookmarks & Redacted Pre-Compact Markdown 
 [**English**](./README.en.md) · [**简体中文**](./README.md) · [**Changelog**](./CHANGELOG.md) · [**Architecture & Coexistence**](./docs/ARCHITECTURE.md) · [**Issues**](https://github.com/tone-leh/agy-session-guard/issues)
 
 <p>
-  <a href="https://github.com/tone-leh/agy-session-guard/releases"><img src="https://img.shields.io/github/v/release/tone-leh/agy-session-guard?style=flat-square&color=3186ff&label=Release" alt="Latest Release" /></a>
+  <a href="https://github.com/tone-leh/agy-session-guard/releases"><img src="https://img.shields.io/github/v/release/tone-leh/agy-session-guard?style=flat-square&color=D4B475&labelColor=0B0D11&label=Release" alt="Latest Release" /></a>
+  <a href="https://github.com/tone-leh/agy-session-guard/actions"><img src="https://img.shields.io/github/actions/workflow/status/tone-leh/agy-session-guard/ci.yml?branch=main&style=flat-square&label=CI&labelColor=0B0D11" alt="CI" /></a>
   <img src="https://img.shields.io/badge/Antigravity-2.34%20%7C%202.35+-0f172a?style=flat-square" alt="Antigravity 2.34 | 2.35+" />
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-1e293b?style=flat-square" alt="Platform" />
   <img src="https://img.shields.io/badge/Zero--ASAR-0_Runtime_Deps-059669?style=flat-square" alt="Zero-ASAR & Zero Runtime Deps" />
@@ -32,6 +33,9 @@ Configurable Compaction Guard · Turn Bookmarks & Redacted Pre-Compact Markdown 
 > **Non-Affiliation Disclaimer**  
 > **Antigravity Session Guard is an independent MIT open-source project and is not affiliated with or endorsed by Google LLC.**  
 > Zero `app.asar` patches, zero host restarts; “Antigravity” and “Google” are referenced solely for compatibility.
+
+> **Ecosystem Positioning**  
+> Session Guard is a **Zero-ASAR Electron CDP** session copilot & sidebar attention radar (fully compatible with Obsidian Prism). If you prefer **zero-CDP, 100% native MCP App** side-pane instruments for Antigravity 2.0, explore the companion suite: [agy-xray](https://github.com/tone-leh/agy-xray), [agy-guard](https://github.com/tone-leh/agy-guard), [agy-mem](https://github.com/tone-leh/agy-mem), [agy-canvas](https://github.com/tone-leh/agy-canvas), and [agy-remote](https://github.com/tone-leh/agy-remote).
 
 ---
 

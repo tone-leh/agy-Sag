@@ -11,7 +11,8 @@
 [**简体中文**](./README.md) · [**English**](./README.en.md) · [**更新日志**](./CHANGELOG.md) · [**架构与共存契约**](./docs/ARCHITECTURE.md) · [**问题反馈**](https://github.com/tone-leh/agy-session-guard/issues)
 
 <p>
-  <a href="https://github.com/tone-leh/agy-session-guard/releases"><img src="https://img.shields.io/github/v/release/tone-leh/agy-session-guard?style=flat-square&color=3186ff&label=Release" alt="Latest Release" /></a>
+  <a href="https://github.com/tone-leh/agy-session-guard/releases"><img src="https://img.shields.io/github/v/release/tone-leh/agy-session-guard?style=flat-square&color=D4B475&labelColor=0B0D11&label=Release" alt="Latest Release" /></a>
+  <a href="https://github.com/tone-leh/agy-session-guard/actions"><img src="https://img.shields.io/github/actions/workflow/status/tone-leh/agy-session-guard/ci.yml?branch=main&style=flat-square&label=CI&labelColor=0B0D11" alt="CI" /></a>
   <img src="https://img.shields.io/badge/Antigravity-2.34%20%7C%202.35+-0f172a?style=flat-square" alt="Antigravity 2.34 | 2.35+" />
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-1e293b?style=flat-square" alt="Platform" />
   <img src="https://img.shields.io/badge/Zero--ASAR-0_Runtime_Deps-059669?style=flat-square" alt="Zero-ASAR & Zero Runtime Deps" />
@@ -32,6 +33,9 @@
 > **非官方开源声明 (Non-Affiliation Disclaimer)**  
 > **Antigravity Session Guard is an independent MIT open-source project and is not affiliated with or endorsed by Google LLC.**  
 > 本项目为独立社区开源工程，不修改任何官方安装包或 `app.asar`；文中出现的 “Antigravity” 与 “Google” 仅用于说明兼容对象。
+
+> **生态定位说明**  
+> 本项目是基于 **Zero-ASAR Electron CDP** 的 Antigravity 会话护航与侧栏聚光插件（深度兼容 Obsidian Prism）。如果你更偏好 **零 CDP 注入、100% 原生 MCP App 侧边栏** 的模块化方案，也可以搭配或选用同系列 Antigravity 2.0 原生套件：[agy-xray](https://github.com/tone-leh/agy-xray)（上下文透视与时光机）、[agy-guard](https://github.com/tone-leh/agy-guard)（本地安全围栏与快照）、[agy-mem](https://github.com/tone-leh/agy-mem)（代码锚定记忆图谱）、[agy-canvas](https://github.com/tone-leh/agy-canvas)（视觉批注画布）、[agy-remote](https://github.com/tone-leh/agy-remote)（手机与 IM 远程遥控）。
 
 ---
 
