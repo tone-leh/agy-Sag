@@ -569,3 +569,160 @@ test('CompactGuard auto-silent (default): zero popup banner, aborts silently on 
   assert.equal(sendClicks, 1);
   guard2.destroy();
 });
+
+test('auto-silent viewport scroll shield blocks host jump-to-bottom, honors user wheel & restores cleanly', async () => {
+  const env = createMockDom({ lang: 'zh-CN', streaming: false });
+  const conv = env.doc.querySelector('[data-testid="conversation-view"]');
+  const vp = env.doc.createElement('div');
+  vp.setAttribute('data-testid', 'autoscroll-viewport');
+  vp.scrollHeight = 3600;
+  vp.clientHeight = 720;
+
+  // Give vp a prototype-backed scrollTop + scrollTo just like real Chromium Element.prototype
+  let nativeScrollTop = 1200;
+  const vpProto = Object.create(Object.prototype, {
+    scrollTop: {
+      configurable: true,
+      enumerable: true,
+      get() { return nativeScrollTop; },
+      set(v) { nativeScrollTop = Math.max(0, Math.min(2880, Number(v) || 0)); },
+    },
+    scrollTo: {
+      configurable: true,
+      writable: true,
+      value(arg) {
+        const top = typeof arg === 'object' && arg ? arg.top : arg;
+        nativeScrollTop = Math.max(0, Math.min(2880, Number(top) || 0));
+      },
+    },
+    scroll: {
+      configurable: true,
+      writable: true,
+      value(arg) { this.scrollTo(arg); },
+    },
+    scrollBy: {
+      configurable: true,
+      writable: true,
+      value(arg) {
+        const top = typeof arg === 'object' && arg ? arg.top : arg;
+        nativeScrollTop = Math.max(0, Math.min(2880, nativeScrollTop + (Number(top) || 0)));
+      },
+    },
+  });
+  Object.setPrototypeOf(vp, vpProto);
+  conv.appendChild(vp);
+
+  // Track focus({ preventScroll: true }) and blur() restoration
+  let lastFocusArg = null;
+  let blurCount = 0;
+  env.textarea.focus = (arg) => { lastFocusArg = arg; };
+  env.textarea.blur = () => { blurCount += 1; };
+
+  // Simulate host auto-scrolling to the bottom on send via all 3 mechanisms: scrollTop, scrollTo, and scrollIntoView
+  let sendClicks = 0;
+  const sendBtn = env.doc.querySelector('[data-testid="send-button"]');
+  sendBtn.addEventListener('click', () => {
+    sendClicks += 1;
+    vp.scrollTop = vp.scrollHeight;
+    vp.scrollTo({ top: vp.scrollHeight });
+    // Simulate child.scrollIntoView() bypassing vp.scrollTop setter
+    nativeScrollTop = 2880;
+    vp.dispatchEvent({ type: 'scroll' });
+  });
+
+  // Mount native "滚动到底部" button
+  const toBottomBtn = env.doc.createElement('button');
+  toBottomBtn.setAttribute('aria-label', '滚动到底部');
+  conv.appendChild(toBottomBtn);
+
+  let fakeNow = 10_000;
+  const guard = core.mountSessionGuard({
+    win: env.win,
+    doc: env.doc,
+    storage: env.storage,
+    autoPoll: false,
+    now: () => fakeNow,
+    silentIdleDelayMs: 0,
+    scrollSettleMs: 0,
+    scrollShieldMs: 500,
+    config: { compactThreshold: 80 },
+    getContextSnapshot: () => ({ usedFraction: 0.86, usedTokens: 440000, maxTokens: 512000, streaming: false }),
+  });
+
+  await guard.evaluateNow();
+  assert.equal(sendClicks, 1, 'auto-silent should submit /compact');
+  assert.equal(lastFocusArg?.preventScroll, true, 'must focus editor with preventScroll: true');
+  assert.equal(blurCount, 1, 'must blur composer after silent submit when user was not focused in composer');
+  assert.equal(guard.getDebugState().compactGuard.scrollShieldActive, true);
+  assert.equal(vp.scrollTop, 1200, 'host jump-to-bottom (scrollTop, scrollTo, scrollIntoView) must be blocked with 0px jump');
+
+  // Genuine user trackpad/wheel scroll UP MUST work immediately and update the pinned anchor
+  vp.dispatchEvent({ type: 'wheel', deltaY: -180 });
+  nativeScrollTop = 1020;
+  vp.dispatchEvent({ type: 'scroll' });
+  assert.equal(vp.scrollTop, 1020, 'user manual scroll up must be allowed immediately');
+
+  // After user wheel window expires, another host snap-to-bottom must be pinned back to user new position (1020)
+  fakeNow += 500;
+  vp.scrollTop = 2880;
+  assert.equal(vp.scrollTop, 1020, 'subsequent programmatic scrollTop snap must stay at user new reading position');
+  nativeScrollTop = 2880;
+  vp.dispatchEvent({ type: 'scroll' });
+  assert.equal(vp.scrollTop, 1020, 'subsequent scrollIntoView snap must snap back to 1020');
+
+  // Clicking native "滚动到底部" releases the shield immediately and leaves zero own-property residue
+  env.doc.dispatchEvent({ type: 'pointerdown', target: toBottomBtn });
+  assert.equal(guard.getDebugState().compactGuard.scrollShieldActive, false);
+  assert.equal(Object.prototype.hasOwnProperty.call(vp, 'scrollTop'), false, 'zero own scrollTop residue after release');
+  assert.equal(Object.prototype.hasOwnProperty.call(vp, 'scrollTo'), false, 'zero own scrollTo residue after release');
+  vp.scrollTop = 2880;
+  assert.equal(vp.scrollTop, 2880, 'native scrolling works normally after release');
+
+  guard.destroy();
+});
+
+test('auto-silent defers while user is actively scrolling and releases viewport shield on destroy', async () => {
+  const env = createMockDom({ lang: 'zh-CN', streaming: false });
+  const conv = env.doc.querySelector('[data-testid="conversation-view"]');
+  const vp = env.doc.createElement('div');
+  vp.setAttribute('data-testid', 'autoscroll-viewport');
+  vp.scrollHeight = 3000;
+  vp.clientHeight = 700;
+  vp.scrollTop = 900;
+  conv.appendChild(vp);
+
+  let sendClicks = 0;
+  env.doc.querySelector('[data-testid="send-button"]').addEventListener('click', () => {
+    sendClicks += 1;
+    vp.scrollTop = 2300;
+  });
+
+  const guard = core.mountSessionGuard({
+    win: env.win,
+    doc: env.doc,
+    storage: env.storage,
+    autoPoll: false,
+    silentIdleDelayMs: 20,
+    scrollSettleMs: 90,
+    scrollShieldMs: 500,
+    config: { compactThreshold: 80 },
+    getContextSnapshot: () => ({ usedFraction: 0.87, usedTokens: 445000, maxTokens: 512000, streaming: false }),
+  });
+
+  // User starts scrolling right as they enter the conversation
+  env.doc.dispatchEvent({ type: 'wheel', deltaY: -120 });
+  await guard.evaluateNow();
+  await new Promise((r) => setTimeout(r, 45));
+  assert.equal(sendClicks, 0, 'must NOT trigger mid-scroll while user wheel is still active');
+
+  // Wait for scrollSettleMs + buffer -> fires quietly without moving scrollTop
+  await new Promise((r) => setTimeout(r, 120));
+  assert.equal(sendClicks, 1, 'fires quietly once user stops scrolling');
+  assert.equal(vp.scrollTop, 900, 'scrollTop stays pinned at 900 during silent submit');
+  assert.equal(guard.getDebugState().compactGuard.scrollShieldActive, true);
+
+  // destroy() immediately releases shield and restores normal scrolling
+  guard.destroy();
+  vp.scrollTop = 1800;
+  assert.equal(vp.scrollTop, 1800, 'vp.scrollTop restored cleanly after destroy()');
+});

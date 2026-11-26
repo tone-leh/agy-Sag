@@ -73,8 +73,275 @@
     let styleEl = null;
     let activePaneEl = null;
     let composerListenerOff = null;
+    let activeScrollShield = null;
+    let lastUserScrollAtMs = 0;
     const listeners = [];
     const getScope = () => (ctxSrc.resolveActivePaneScope ? ctxSrc.resolveActivePaneScope(doc, activePaneEl) : doc);
+
+    const SCROLL_NAV_KEYS = new Set(['PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', 'Home', 'End', ' ']);
+
+    const findProtoDescriptor = (obj, prop) => {
+      let cur = obj ? Object.getPrototypeOf(obj) : null;
+      while (cur) {
+        const desc = Object.getOwnPropertyDescriptor(cur, prop);
+        if (desc) return desc;
+        cur = Object.getPrototypeOf(cur);
+      }
+      return null;
+    };
+
+    const releaseActiveScrollShield = () => {
+      if (activeScrollShield) {
+        try { activeScrollShield.release(); } catch {}
+        activeScrollShield = null;
+      }
+    };
+
+    const isEditableEventTarget = (target) => {
+      if (!target || typeof target !== 'object') return false;
+      const tag = String(target.tagName || '').toUpperCase();
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+      if (target.isContentEditable || target.getAttribute?.('contenteditable') === 'true') return true;
+      return Boolean(target.closest?.('[contenteditable="true"], [data-lexical-editor="true"]'));
+    };
+
+    // Temporarily pin the active conversation scroll viewport during automated /compact submission so
+    // host auto-scroll never yanks the user to the bottom while reading earlier replies.
+    // Zero global prototype mutation: overrides live only on the single viewport instance and are deleted on release.
+    const engageViewportScrollShield = (scope) => {
+      releaseActiveScrollShield();
+      const vp = ctxSrc.findConversationScrollViewport?.(doc, scope) || null;
+      if (!vp) return { active: false, release() {} };
+
+      const shieldDurationMs = Number.isFinite(Number(options.scrollShieldMs))
+        ? Math.max(50, Number(options.scrollShieldMs))
+        : 2800;
+      const maxShieldMs = Number.isFinite(Number(options.scrollShieldMaxMs))
+        ? Math.max(shieldDurationMs, Number(options.scrollShieldMaxMs))
+        : 14000;
+      const shieldStartCid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win, scope);
+
+      const hadOwnScrollTop = Object.prototype.hasOwnProperty.call(vp, 'scrollTop');
+      const ownScrollTopDesc = hadOwnScrollTop ? Object.getOwnPropertyDescriptor(vp, 'scrollTop') : null;
+      const protoScrollTopDesc = findProtoDescriptor(vp, 'scrollTop');
+
+      let getRawTop;
+      let setRawTop;
+      if (protoScrollTopDesc && typeof protoScrollTopDesc.get === 'function' && typeof protoScrollTopDesc.set === 'function') {
+        getRawTop = () => Number(protoScrollTopDesc.get.call(vp)) || 0;
+        setRawTop = (v) => {
+          try { protoScrollTopDesc.set.call(vp, v); } catch {}
+        };
+      } else if (ownScrollTopDesc && typeof ownScrollTopDesc.get === 'function' && typeof ownScrollTopDesc.set === 'function') {
+        getRawTop = () => Number(ownScrollTopDesc.get.call(vp)) || 0;
+        setRawTop = (v) => {
+          try { ownScrollTopDesc.set.call(vp, v); } catch {}
+        };
+      } else {
+        let mockRawTop = Number(vp.scrollTop) || 0;
+        getRawTop = () => mockRawTop;
+        setRawTop = (v) => { mockRawTop = Math.max(0, Number(v) || 0); };
+      }
+
+      let pinnedTop = getRawTop();
+      let userIntentUntil = 0;
+      let lastWheelDeltaY = 0;
+      let pointerDragging = false;
+      let released = false;
+      let sawStreaming = false;
+      let releaseTimer = null;
+      const startedAt = nowFn();
+      const shieldListeners = [];
+      const overriddenMethods = [];
+      let scrollTopOverridden = false;
+
+      const isUserScrollIntent = () => pointerDragging || nowFn() <= userIntentUntil;
+      const markUserIntent = (graceMs = 400) => {
+        userIntentUntil = Math.max(userIntentUntil, nowFn() + graceMs);
+      };
+
+      const handle = { active: true, release: () => {} };
+
+      const release = () => {
+        if (released) return;
+        released = true;
+        handle.active = false;
+        if (releaseTimer) {
+          clearTimeout(releaseTimer);
+          releaseTimer = null;
+        }
+        while (shieldListeners.length) {
+          try { shieldListeners.pop()(); } catch {}
+        }
+        if (scrollTopOverridden) {
+          try {
+            if (!hadOwnScrollTop) {
+              delete vp.scrollTop;
+            } else if (ownScrollTopDesc) {
+              if ('value' in ownScrollTopDesc) {
+                Object.defineProperty(vp, 'scrollTop', { ...ownScrollTopDesc, value: getRawTop() });
+              } else {
+                Object.defineProperty(vp, 'scrollTop', ownScrollTopDesc);
+              }
+            }
+          } catch {}
+          scrollTopOverridden = false;
+        }
+        while (overriddenMethods.length) {
+          const item = overriddenMethods.pop();
+          try {
+            if (!item.hadOwn) {
+              delete vp[item.name];
+            } else if (item.prevDesc) {
+              Object.defineProperty(vp, item.name, item.prevDesc);
+            }
+          } catch {}
+        }
+        if (activeScrollShield === handle) {
+          activeScrollShield = null;
+        }
+      };
+      handle.release = release;
+
+      // 1) Block programmatic vp.scrollTop = ... assignments on this viewport instance only
+      try {
+        const canRedefine = !hadOwnScrollTop || ownScrollTopDesc?.configurable !== false;
+        if (canRedefine) {
+          Object.defineProperty(vp, 'scrollTop', {
+            configurable: true,
+            enumerable: ownScrollTopDesc ? Boolean(ownScrollTopDesc.enumerable) : false,
+            get: () => getRawTop(),
+            set: () => {
+              // Swallow programmatic auto-scroll while the reading shield is active
+            },
+          });
+          scrollTopOverridden = true;
+        }
+      } catch {}
+
+      // 2) Block programmatic vp.scrollTo / vp.scroll / vp.scrollBy on this viewport instance only
+      for (const mName of ['scrollTo', 'scroll', 'scrollBy']) {
+        try {
+          const hadOwn = Object.prototype.hasOwnProperty.call(vp, mName);
+          const prevDesc = hadOwn ? Object.getOwnPropertyDescriptor(vp, mName) : null;
+          if (!hadOwn || prevDesc?.configurable !== false) {
+            Object.defineProperty(vp, mName, {
+              configurable: true,
+              writable: true,
+              enumerable: prevDesc ? Boolean(prevDesc.enumerable) : false,
+              value: () => {},
+            });
+            overriddenMethods.push({ name: mName, hadOwn, prevDesc });
+          }
+        } catch {}
+      }
+
+      const addSL = (target, ev, fn, opts) => {
+        if (!target || typeof target.addEventListener !== 'function') return;
+        target.addEventListener(ev, fn, opts);
+        shieldListeners.push(() => target.removeEventListener?.(ev, fn, opts));
+      };
+
+      // 3) Track genuine user scroll gestures so manual wheel/touch/scrollbar/keys ALWAYS win immediately
+      const onWheel = (ev) => {
+        lastWheelDeltaY = Number(ev?.deltaY) || 0;
+        lastUserScrollAtMs = nowFn();
+        markUserIntent(420);
+      };
+      addSL(vp, 'wheel', onWheel, { passive: true, capture: true });
+      addSL(doc, 'wheel', onWheel, { passive: true, capture: true });
+      addSL(vp, 'touchstart', () => { lastWheelDeltaY = 0; lastUserScrollAtMs = nowFn(); markUserIntent(480); }, { passive: true });
+      addSL(vp, 'touchmove', () => { lastWheelDeltaY = 0; lastUserScrollAtMs = nowFn(); markUserIntent(480); }, { passive: true });
+      addSL(doc, 'pointerdown', (ev) => {
+        if (ev?.target?.closest?.('[data-testid="conversation-row-sidebar"]')) {
+          release();
+          return;
+        }
+        const btn = ev?.target?.closest?.('button');
+        if (btn) {
+          const lbl = `${btn.getAttribute?.('aria-label') || ''} ${btn.getAttribute?.('data-testid') || ''} ${btn.textContent || ''}`;
+          if (/scroll.?to.?bottom|滚动到底部|回到最新/i.test(lbl)) {
+            release();
+            return;
+          }
+        }
+        if (ev?.target === vp || vp.contains?.(ev?.target)) {
+          pointerDragging = true;
+          markUserIntent(450);
+        }
+      }, true);
+      addSL(doc, 'pointermove', (ev) => {
+        if (pointerDragging && (ev?.buttons === undefined || ev.buttons > 0)) {
+          markUserIntent(350);
+        }
+      }, true);
+      addSL(doc, 'pointerup', () => {
+        if (pointerDragging) {
+          pointerDragging = false;
+          markUserIntent(220);
+        }
+      }, true);
+      addSL(doc, 'pointercancel', () => { pointerDragging = false; }, true);
+      addSL(doc, 'keydown', (ev) => {
+        if (!ev || !SCROLL_NAV_KEYS.has(ev.key) || isEditableEventTarget(ev.target)) return;
+        lastWheelDeltaY = ev.key === 'ArrowUp' || ev.key === 'PageUp' || ev.key === 'Home' ? -1 : 1;
+        lastUserScrollAtMs = nowFn();
+        markUserIntent(380);
+      }, true);
+
+      // 4) Guard against child.scrollIntoView() bypassing vp.scrollTop setter
+      addSL(vp, 'scroll', () => {
+        if (released || destroyed) return;
+        const curTop = getRawTop();
+        const jumpDown = curTop - pinnedTop;
+        const looksLikeHostSnap = !isUserScrollIntent() || (lastWheelDeltaY < 0 && jumpDown > 260);
+        if (looksLikeHostSnap && Math.abs(curTop - pinnedTop) > 1) {
+          setRawTop(pinnedTop);
+          return;
+        }
+        pinnedTop = curTop;
+        const distFromBottom = (Number(vp.scrollHeight) || 0) - (Number(vp.clientHeight) || 0) - curTop;
+        if (isUserScrollIntent() && lastWheelDeltaY > 0 && distFromBottom <= 24) {
+          release();
+        }
+      }, false);
+
+      // 5) Auto-release once compaction settles (extends through active streaming up to maxShieldMs)
+      const scheduleReleaseCheck = (delayMs) => {
+        if (released || destroyed) return;
+        releaseTimer = setTimeout(() => {
+          releaseTimer = null;
+          if (released || destroyed) return;
+          if (vp.isConnected === false) {
+            release();
+            return;
+          }
+          const curCid = ctxSrc.detectCascadeId(doc, win, getScope());
+          if (shieldStartCid && shieldStartCid !== 'default-session' && curCid && curCid !== 'default-session' && curCid !== shieldStartCid) {
+            release();
+            return;
+          }
+          const elapsed = nowFn() - startedAt;
+          const streamingNow = ctxSrc.isTurnStreaming(doc, getScope());
+          if (streamingNow) sawStreaming = true;
+          if (elapsed < maxShieldMs && streamingNow) {
+            scheduleReleaseCheck(Math.min(600, maxShieldMs - elapsed));
+            return;
+          }
+          if (sawStreaming && elapsed < maxShieldMs) {
+            sawStreaming = false;
+            scheduleReleaseCheck(Math.min(900, maxShieldMs - elapsed));
+            return;
+          }
+          release();
+        }, delayMs);
+        releaseTimer?.unref?.();
+      };
+      scheduleReleaseCheck(shieldDurationMs);
+
+      activeScrollShield = handle;
+      return handle;
+    };
 
     const nowFn = typeof options.now === 'function' ? options.now : () => Date.now();
     // Per-cascadeId session state for smart dismiss, anti-flicker streak & auto-reset on compaction
@@ -252,7 +519,11 @@
       const ed = ctxSrc.findComposerEditor(doc, scope);
       if (!ed) return { ok: false, reason: 'no-editor' };
       try {
-        ed.focus?.();
+        try {
+          ed.focus?.({ preventScroll: true });
+        } catch {
+          ed.focus?.();
+        }
         const tag = String(ed.tagName || '').toUpperCase();
         if (tag === 'TEXTAREA' || tag === 'INPUT') {
           ed.value = append ? `${String(ed.value || '')}${text}` : text;
@@ -365,7 +636,7 @@
       return 'none';
     };
 
-    const insertCompactIntoComposer = ({ submit = false } = {}) => {
+    const insertCompactIntoComposer = ({ submit = false, preserveScroll = false } = {}) => {
       const strings = S();
       const scope = getScope();
       if (ctxSrc.isTurnStreaming(doc, scope) || lastSnapshot?.streaming) {
@@ -375,6 +646,27 @@
       const cmd = buildCompactCommand();
       const extraSuffix = cmd.startsWith(`${COMPACT_CMD} `) ? cmd.slice(COMPACT_CMD.length) : '';
       const editorPreview = ctxSrc.findComposerEditor(doc, scope);
+      const prevActiveEl = doc?.activeElement || null;
+      const wasInComposer = Boolean(
+        prevActiveEl &&
+        editorPreview &&
+        (prevActiveEl === editorPreview || editorPreview.contains?.(prevActiveEl))
+      );
+      const restoreReadingFocus = (editor) => {
+        if (!preserveScroll || wasInComposer) return;
+        try { editor?.blur?.(); } catch {}
+        if (
+          prevActiveEl &&
+          prevActiveEl !== doc?.body &&
+          prevActiveEl !== doc?.documentElement &&
+          prevActiveEl.isConnected !== false &&
+          typeof prevActiveEl.focus === 'function'
+        ) {
+          try { prevActiveEl.focus({ preventScroll: true }); } catch {}
+        }
+      };
+
+      const shield = submit && preserveScroll ? engageViewportScrollShield(scope) : null;
       const isRichLexical = Boolean(
         editorPreview?.getAttribute?.('data-lexical-editor') === 'true' ||
         editorPreview?.getAttribute?.('contenteditable') === 'true'
@@ -383,7 +675,10 @@
       // any custom focus prompt suffix is appended right after selecting the native slash chip.
       const initialText = submit && isRichLexical && typeof options.onSubmitCompact !== 'function' ? COMPACT_CMD : cmd;
       const written = writeTextIntoComposer(initialText, { allowSameAs: [COMPACT_CMD, cmd] });
-      if (!written.ok) return written;
+      if (!written.ok) {
+        shield?.release?.();
+        return written;
+      }
 
       // Silently preserve pre-compact recovery snapshot for seamless post-compact handoff
       captureRecoverySnapshot();
@@ -403,6 +698,7 @@
             preset: config.compactFocusPreset,
             cascadeId: startCid || '',
           });
+          restoreReadingFocus(written.editor);
           const shortCmd = cmd.length > 36 ? `${cmd.slice(0, 36)}…` : cmd;
           setToast(i18n.formatTemplate(strings.toastSent, { cmd: shortCmd }), 'ok');
           return { ok: true, submitted: true, command: cmd };
@@ -429,11 +725,15 @@
           const executePickedSlash = (target) => {
             try { target.clickTarget.click(); } catch {}
             const finalizeSubmit = () => {
-              if (!isSessionUnchanged()) return;
+              if (!isSessionUnchanged()) {
+                shield?.release?.();
+                return;
+              }
               if (extraSuffix) {
                 writeTextIntoComposer(extraSuffix, { append: true });
               }
               clickComposerSendButton(written.editor, getScope());
+              restoreReadingFocus(written.editor);
               const shortCmd = cmd.length > 36 ? `${cmd.slice(0, 36)}…` : cmd;
               setToast(i18n.formatTemplate(strings.toastSent, { cmd: shortCmd }), 'ok');
             };
@@ -453,7 +753,10 @@
           let attempts = 0;
           const maxAttempts = 8;
           const pollSlash = () => {
-            if (!isSessionUnchanged()) return;
+            if (!isSessionUnchanged()) {
+              shield?.release?.();
+              return;
+            }
             const found = findSlashCompactTarget();
             if (found) {
               executePickedSlash(found);
@@ -463,6 +766,8 @@
             if (attempts < maxAttempts) {
               scheduleSlashTimer(pollSlash, slashPollMs);
             } else {
+              restoreReadingFocus(written.editor);
+              shield?.release?.();
               const shortCmd = cmd.length > 36 ? `${cmd.slice(0, 36)}…` : cmd;
               setToast(i18n.formatTemplate(strings.toastFilled, { cmd: shortCmd }), 'ok');
             }
@@ -474,6 +779,7 @@
         }
 
         clickComposerSendButton(written.editor, scope);
+        restoreReadingFocus(written.editor);
         const shortCmd = cmd.length > 36 ? `${cmd.slice(0, 36)}…` : cmd;
         setToast(i18n.formatTemplate(strings.toastSent, { cmd: shortCmd }), 'ok');
         return { ok: true, submitted: true, command: cmd };
@@ -1041,6 +1347,10 @@
       const delayMs = Number.isFinite(Number(options.silentIdleDelayMs))
         ? Math.max(0, Number(options.silentIdleDelayMs))
         : 450;
+      const defaultSettleMs = options.silentIdleDelayMs === 0 ? 0 : 800;
+      const scrollSettleMs = Number.isFinite(Number(options.scrollSettleMs))
+        ? Math.max(0, Number(options.scrollSettleMs))
+        : defaultSettleMs;
 
       const fireSilent = () => {
         silentTimer = null;
@@ -1059,14 +1369,32 @@
         const curCid = lastSnapshot?.cascadeId || ctxSrc.detectCascadeId(doc, win, scope);
         if (targetCid && curCid && targetCid !== curCid) return;
         if (countdownCanceledForSession.has(curCid)) return;
-        insertCompactIntoComposer({ submit: true });
+
+        // Defer quietly while the user is actively scrolling through conversation history
+        if (scrollSettleMs > 0 && lastUserScrollAtMs > 0) {
+          const sinceScroll = nowFn() - lastUserScrollAtMs;
+          if (sinceScroll >= 0 && sinceScroll < scrollSettleMs) {
+            silentTimer = setTimeout(fireSilent, Math.max(25, scrollSettleMs - sinceScroll + 40));
+            silentTimer?.unref?.();
+            return;
+          }
+        }
+
+        insertCompactIntoComposer({ submit: true, preserveScroll: true });
       };
 
-      if (delayMs === 0) {
+      const sinceScrollInitial = lastUserScrollAtMs > 0 ? nowFn() - lastUserScrollAtMs : Infinity;
+      const waitForScroll =
+        scrollSettleMs > 0 && sinceScrollInitial >= 0 && sinceScrollInitial < scrollSettleMs
+          ? scrollSettleMs - sinceScrollInitial + 40
+          : 0;
+      const effectiveDelayMs = Math.max(delayMs, waitForScroll);
+
+      if (effectiveDelayMs === 0) {
         fireSilent();
         return;
       }
-      silentTimer = setTimeout(fireSilent, delayMs);
+      silentTimer = setTimeout(fireSilent, effectiveDelayMs);
       silentTimer?.unref?.();
     };
 
@@ -1109,7 +1437,7 @@
         countdownRemaining -= 1;
         if (countdownRemaining <= 0) {
           stopCountdown();
-          insertCompactIntoComposer({ submit: true });
+          insertCompactIntoComposer({ submit: true, preserveScroll: true });
         }
         render();
       }, 1000);
@@ -1224,7 +1552,11 @@
         scopeEl: scope,
         getContextSnapshot: options.getContextSnapshot,
       });
+      const prevCid = lastSnapshot?.cascadeId || '';
       lastSnapshot = snap;
+      if (activeScrollShield && prevCid && snap?.cascadeId && snap.cascadeId !== prevCid) {
+        releaseActiveScrollShield();
+      }
       if (watchdog && snap) {
         lastWatchdog = watchdog.observe({
           snap,
@@ -1308,6 +1640,18 @@
     addL(doc, 'pointerdown', onPaneFocus, true);
     addL(doc, 'focusin', onPaneFocus, true);
 
+    // Lightweight passive reading-scroll tracker so auto-silent waits for the user to finish scrolling
+    const onUserScrollActivity = () => {
+      if (!destroyed) lastUserScrollAtMs = nowFn();
+    };
+    addL(doc, 'wheel', onUserScrollActivity, { passive: true, capture: true });
+    addL(doc, 'touchmove', onUserScrollActivity, { passive: true, capture: true });
+    addL(doc, 'keydown', (ev) => {
+      if (!destroyed && ev && SCROLL_NAV_KEYS.has(ev.key) && !isEditableEventTarget(ev.target)) {
+        lastUserScrollAtMs = nowFn();
+      }
+    }, true);
+
     addL(win, 'blur', () => {
       blurred = true;
       stopPoll();
@@ -1346,6 +1690,7 @@
         countdownActive: Boolean(countdownTimer),
         countdownRemaining,
         silentPending: Boolean(silentTimer),
+        scrollShieldActive: Boolean(activeScrollShield?.active),
         pollActive: Boolean(pollTimer),
         hibernated: coexist.isWindowHibernated(doc, win, blurred),
         lastSnapshot: lastSnapshot ? { ...lastSnapshot } : null,
@@ -1359,6 +1704,7 @@
       stopPoll();
       stopCountdown();
       stopSilent();
+      releaseActiveScrollShield();
       if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
       for (const t of slashTimers) { try { clearTimeout(t); } catch {} }
       slashTimers.clear();

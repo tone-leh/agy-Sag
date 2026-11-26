@@ -72,6 +72,42 @@
     return sc?.querySelector?.('[data-testid="conversation-view"]') || doc.querySelector?.('[data-testid="conversation-view"]') || null;
   }
 
+  function findConversationScrollViewport(doc, scopeEl = null) {
+    if (!doc) return null;
+    const cv = resolveActiveConversationView(doc, scopeEl);
+    const sc = isConnectedNode(scopeEl) ? scopeEl : doc;
+    const explicit =
+      cv?.querySelector?.('[data-testid="autoscroll-viewport"]') ||
+      sc?.querySelector?.('[data-testid="autoscroll-viewport"]') ||
+      doc.querySelector?.('[data-testid="autoscroll-viewport"]') ||
+      null;
+    if (isConnectedNode(explicit)) return explicit;
+
+    const isScrollableEl = (el) => {
+      if (!isConnectedNode(el)) return false;
+      const sh = Number(el.scrollHeight) || 0;
+      const ch = Number(el.clientHeight) || 0;
+      if (sh <= ch + 20) return false;
+      try {
+        const gcs = globalRoot?.getComputedStyle || doc?.defaultView?.getComputedStyle;
+        if (typeof gcs === 'function') {
+          const ov = String(gcs(el)?.overflowY || '');
+          if (ov && !/(auto|scroll|overlay)/.test(ov)) return false;
+        }
+      } catch {}
+      return true;
+    };
+
+    if (cv) {
+      if (isScrollableEl(cv)) return cv;
+      const children = cv.querySelectorAll?.('*') || [];
+      for (let i = 0; i < children.length; i++) {
+        if (isScrollableEl(children[i])) return children[i];
+      }
+    }
+    return null;
+  }
+
   function detectCascadeId(doc, win, scopeEl = null) {
     try {
       const cv = resolveActiveConversationView(doc, scopeEl);
@@ -347,6 +383,7 @@
     findPaneRootForNode,
     resolveActivePaneScope,
     resolveActiveConversationView,
+    findConversationScrollViewport,
     detectCascadeId,
     isConversationView,
     isTurnStreaming,
