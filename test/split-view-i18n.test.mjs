@@ -154,7 +154,7 @@ test('Split View Multi-Pane: follows active focused pane telemetry, banner ancho
   const env = createSplitViewDom();
   const submitted = [];
 
-  const guard = core.mountSessionGuard({
+  const guard = core.mountSag({
     win: env.win,
     doc: env.doc,
     storage: env.storage,

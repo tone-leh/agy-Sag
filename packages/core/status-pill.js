@@ -1,4 +1,4 @@
-// Antigravity Session Guard — Adaptive Context Control Surface (UMD, zero runtime deps)
+// agy-Sag — Adaptive Context Control Surface (UMD, zero runtime deps)
 // Seamless dual-mode architecture (Less is More):
 //   1) With Obsidian Prism (#ag-prism-pulse-bar open Shadow DOM #context-card):
 //      - ZERO extra top-level pill on the composer footer!
@@ -141,6 +141,7 @@
       watchdog: null,
       bookmarkCount: 0,
       hasDraft: false,
+      synergyConnected: false,
     };
     const listeners = [];
 
@@ -527,11 +528,22 @@
       const snap = lastState.snap;
       const tone = computeTone(snap, cfg, lastState.watchdog);
       const bmCount = Number(lastState.bookmarkCount) || 0;
+      const synergyOn = Boolean(
+        lastState.synergyConnected || (typeof options.novSynergy?.isConnected === 'function' && options.novSynergy.isConnected())
+      );
 
       pillBtn.setAttribute('data-tone', tone);
       pillBtn.setAttribute('data-compact', '0');
       pillBtn.setAttribute('aria-expanded', String(cardOpen));
-      pillBtn.title = strings.pillEntryTitle;
+      if (synergyOn) {
+        pillBtn.setAttribute('data-synergy', '1');
+        dotEl?.setAttribute?.('data-synergy', '1');
+        pillBtn.title = `${strings.pillEntryTitle} · ✦ × agy-NOV`;
+      } else {
+        pillBtn.removeAttribute?.('data-synergy');
+        dotEl?.removeAttribute?.('data-synergy');
+        pillBtn.title = strings.pillEntryTitle;
+      }
 
       const pctTxt = snap && typeof snap.usedPct === 'number' ? `${snap.usedPct}%` : strings.brandShort;
       labelEl.textContent = bmCount > 0 ? `${pctTxt} · ★${bmCount}` : pctTxt;
@@ -627,6 +639,10 @@
           prismCardEmbedded: prismEmbedded,
           mounted: prismEmbedded || Boolean(wrapEl && wrapEl.isConnected !== false),
           cardOpen,
+          synergyConnected: Boolean(
+            lastState.synergyConnected ||
+              (typeof options.novSynergy?.isConnected === 'function' && options.novSynergy.isConnected())
+          ),
           label: labelEl?.textContent || '',
         };
       },

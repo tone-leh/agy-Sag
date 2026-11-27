@@ -149,7 +149,7 @@ test('SessionWatchdog + CompactGuard + SessionRadar: detects silent streaming st
     removeEventListener() {},
   };
 
-  const guard = core.mountSessionGuard({
+  const guard = core.mountSag({
     win,
     doc,
     storage,

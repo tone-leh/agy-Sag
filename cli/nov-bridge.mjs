@@ -1,0 +1,814 @@
+/**
+ * agy-Sag × agy-NOV Dual-Star Zero-Port Bridge Core (Zero runtime npm deps, ESM)
+ *
+ * Provides read-only discovery, strict-whitelist atomic config mutation, and
+ * CDP Runtime.addBinding message dispatch for controlling agy-NOV's 9 native
+ * modules & 5 presets directly from agy-Sag without opening any extra HTTP port.
+ *
+ * Security invariants:
+ *   1. readNovState() and resolveNovPaths() are 100% read-only (zero mkdir, zero disk writes).
+ *   2. Rejects symlink escapes on plugin directory, manifests, dataDir, and config.json.
+ *   3. Atomic config writes use 0700 directory, 0600 same-dir temp file, and fs.renameSync.
+ *   4. Only whitelisted actions, module IDs, presets, locales, and fields are accepted.
+ */
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+export const NOV_MODULE_IDS = Object.freeze([
+  'review',
+  'guard',
+  'xray',
+  'turbo',
+  'radar',
+  'canvas',
+  'mem',
+  'ops',
+  'remote',
+]);
+
+export const NOV_BASE_TOOLS_COUNT = 2; // nov_open + nov_status
+
+export const NOV_MODULES_CATALOG = Object.freeze({
+  review: Object.freeze({
+    id: 'review',
+    tier: 'offline',
+    toolsCount: 2,
+    defaultEnabled: true,
+    name: 'Diff Review',
+    shortLabel: 'Review',
+    hasUiTab: true,
+  }),
+  guard: Object.freeze({
+    id: 'guard',
+    tier: 'offline',
+    toolsCount: 4,
+    defaultEnabled: true,
+    name: 'Guard & Snapshots',
+    shortLabel: 'Guard',
+    hasUiTab: true,
+  }),
+  xray: Object.freeze({
+    id: 'xray',
+    tier: 'offline',
+    toolsCount: 4,
+    defaultEnabled: true,
+    name: 'Context X-Ray',
+    shortLabel: 'X-Ray',
+    hasUiTab: true,
+  }),
+  turbo: Object.freeze({
+    id: 'turbo',
+    tier: 'offline',
+    toolsCount: 3,
+    defaultEnabled: false,
+    name: 'Turbo & Output Guard',
+    shortLabel: 'Turbo',
+    hasUiTab: true,
+  }),
+  radar: Object.freeze({
+    id: 'radar',
+    tier: 'offline',
+    toolsCount: 2,
+    defaultEnabled: false,
+    name: 'Session Radar & Chime',
+    shortLabel: 'Radar',
+    hasUiTab: true,
+  }),
+  canvas: Object.freeze({
+    id: 'canvas',
+    tier: 'offline',
+    toolsCount: 4,
+    defaultEnabled: false,
+    name: 'Visual Canvas',
+    shortLabel: 'Canvas',
+    hasUiTab: true,
+  }),
+  mem: Object.freeze({
+    id: 'mem',
+    tier: 'offline',
+    toolsCount: 3,
+    defaultEnabled: false,
+    name: 'Memory Graph',
+    shortLabel: 'Memory',
+    hasUiTab: true,
+  }),
+  ops: Object.freeze({
+    id: 'ops',
+    tier: 'offline',
+    toolsCount: 3,
+    defaultEnabled: false,
+    name: 'Prompt Vault & Doctor',
+    shortLabel: 'Ops',
+    hasUiTab: true,
+  }),
+  remote: Object.freeze({
+    id: 'remote',
+    tier: 'network',
+    toolsCount: 4,
+    defaultEnabled: false,
+    name: 'Mobile & IM Remote',
+    shortLabel: 'Remote',
+    hasUiTab: true,
+  }),
+});
+
+function buildModulesMap(enabledList) {
+  const enabledSet = new Set(enabledList);
+  const out = {};
+  for (const id of NOV_MODULE_IDS) {
+    out[id] = enabledSet.has(id);
+  }
+  return Object.freeze(out);
+}
+
+export function countNovEnabledTools(modules = {}) {
+  let count = NOV_BASE_TOOLS_COUNT;
+  for (const id of NOV_MODULE_IDS) {
+    if (modules[id]) {
+      count += NOV_MODULES_CATALOG[id].toolsCount;
+    }
+  }
+  return count;
+}
+
+function makePresetSpec(id, label, enabledModules) {
+  const modules = buildModulesMap(enabledModules);
+  return Object.freeze({
+    id,
+    label,
+    enabledModules: Object.freeze([...enabledModules]),
+    modules,
+    toolsCount: countNovEnabledTools(modules),
+  });
+}
+
+export const NOV_PRESETS = Object.freeze({
+  minimal: makePresetSpec('minimal', 'Minimal Shield', ['guard']),
+  core: makePresetSpec('core', 'Core (Default)', ['review', 'guard', 'xray']),
+  power: makePresetSpec('power', 'Power Dev (6 Offline)', ['review', 'guard', 'xray', 'turbo', 'radar', 'ops']),
+  'local-all': makePresetSpec('local-all', 'Local All (8 Offline)', [
+    'review',
+    'guard',
+    'xray',
+    'turbo',
+    'radar',
+    'canvas',
+    'mem',
+    'ops',
+  ]),
+  full: makePresetSpec('full', 'Full Suite (All 9)', [...NOV_MODULE_IDS]),
+});
+
+export const NOV_PRESET_IDS = Object.freeze(Object.keys(NOV_PRESETS));
+
+export const ALLOWED_NOV_LOCALES = Object.freeze([
+  'auto',
+  'en',
+  'zh-CN',
+  'zh-TW',
+  'ja',
+  'ko',
+  'es',
+  'fr',
+  'de',
+]);
+
+const ALLOWED_COMMAND_ACTIONS = new Set(['get_state', 'set_module', 'apply_preset', 'set_locale']);
+const ALLOWED_ACTION_KEYS = Object.freeze({
+  get_state: new Set(['action']),
+  set_module: new Set(['action', 'moduleId', 'enabled']),
+  apply_preset: new Set(['action', 'preset']),
+  set_locale: new Set(['action', 'locale']),
+});
+
+const BRIDGE_TYPE_TO_ACTION = Object.freeze(
+  Object.assign(Object.create(null), {
+    'nov:get_state': 'get_state',
+    'nov:set_module': 'set_module',
+    'nov:apply_preset': 'apply_preset',
+    'nov:set_locale': 'set_locale',
+  })
+);
+
+const MUTATING_BRIDGE_ACTIONS = new Set(['set_module', 'apply_preset', 'set_locale']);
+
+export const MAX_BRIDGE_PAYLOAD_BYTES = 64 * 1024;
+let tmpFileCounter = 0;
+
+function isPlainObject(val) {
+  if (!val || typeof val !== 'object' || Array.isArray(val)) return false;
+  const proto = Object.getPrototypeOf(val);
+  return proto === Object.prototype || proto === null;
+}
+
+function hasUnexpandedPlaceholder(str) {
+  return /\$\{?[A-Za-z_][A-Za-z0-9_]*\}?/.test(str);
+}
+
+export function sanitizePathCandidate(candidate) {
+  if (typeof candidate !== 'string') return null;
+  if (candidate.includes('\0')) return null;
+  const trimmed = candidate.trim();
+  if (!trimmed) return null;
+  if (hasUnexpandedPlaceholder(trimmed)) return null;
+  return path.resolve(trimmed);
+}
+
+function safeLstat(targetPath) {
+  try {
+    return fs.lstatSync(targetPath);
+  } catch {
+    return null;
+  }
+}
+
+function safeRealpath(targetPath) {
+  try {
+    return fs.realpathSync(targetPath);
+  } catch {
+    return null;
+  }
+}
+
+function isPathWithinBase(childReal, baseReal) {
+  if (!childReal || !baseReal) return false;
+  if (childReal === baseReal) return true;
+  const prefix = baseReal.endsWith(path.sep) ? baseReal : `${baseReal}${path.sep}`;
+  return childReal.startsWith(prefix);
+}
+
+function isPlatformSystemRootSymlink(p) {
+  return process.platform === 'darwin' && /^\/(?:var|tmp|etc)$/.test(p);
+}
+
+/**
+ * Walks targetPath and all its ancestors up to root (or baseDir if inside baseDir),
+ * ensuring no existing path segment is a symbolic link (skipping only macOS /var, /tmp, /etc).
+ */
+function findSymlinkViolation(targetPath, homeDir = null) {
+  const resolved = path.resolve(targetPath);
+  const stopAt =
+    homeDir && !path.relative(path.resolve(homeDir), resolved).startsWith('..') &&
+    !path.isAbsolute(path.relative(path.resolve(homeDir), resolved))
+      ? path.resolve(homeDir)
+      : null;
+
+  let cur = resolved;
+  const root = path.parse(cur).root;
+  while (true) {
+    if (stopAt && cur === stopAt) return null;
+    const st = safeLstat(cur);
+    if (st && st.isSymbolicLink() && !isPlatformSystemRootSymlink(cur)) {
+      return `Symbolic link is not allowed at: ${cur}`;
+    }
+    if (cur === root) return null;
+    const parent = path.dirname(cur);
+    if (parent === cur) return null;
+    cur = parent;
+  }
+}
+
+function inspectPluginDirSafe(dir, homeDir, requiredParentDir = null) {
+  if (!dir) return null;
+  if (findSymlinkViolation(dir, homeDir)) return null;
+
+  const dirStat = safeLstat(dir);
+  if (!dirStat || dirStat.isSymbolicLink() || !dirStat.isDirectory()) return null;
+
+  const realDir = safeRealpath(dir);
+  if (!realDir) return null;
+
+  if (requiredParentDir) {
+    const realParent = safeRealpath(requiredParentDir);
+    if (!realParent || !isPathWithinBase(realDir, realParent)) return null;
+  }
+
+  let version = null;
+  let hasManifest = false;
+  for (const filename of ['plugin.json', 'package.json']) {
+    const manifestPath = path.join(dir, filename);
+    const fileStat = safeLstat(manifestPath);
+    if (!fileStat || fileStat.isSymbolicLink() || !fileStat.isFile()) continue;
+
+    const realManifest = safeRealpath(manifestPath);
+    if (!realManifest || !isPathWithinBase(realManifest, realDir)) continue;
+
+    hasManifest = true;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      if (parsed && typeof parsed.version === 'string' && parsed.version.trim()) {
+        version = parsed.version.trim();
+        break;
+      }
+    } catch {
+      // Ignore malformed manifest version; still counts as present if valid file
+    }
+  }
+
+  if (!hasManifest) return null;
+  return {
+    installed: true,
+    version,
+    pluginDir: dir,
+  };
+}
+
+function statRealConfigFile(dataDir, homeDir) {
+  if (findSymlinkViolation(dataDir, homeDir)) return null;
+  const dirStat = safeLstat(dataDir);
+  if (!dirStat || dirStat.isSymbolicLink() || !dirStat.isDirectory()) return null;
+
+  const cfgPath = path.join(dataDir, 'config.json');
+  const fileStat = safeLstat(cfgPath);
+  if (!fileStat || fileStat.isSymbolicLink() || !fileStat.isFile()) return null;
+
+  const realDir = safeRealpath(dataDir);
+  const realCfg = safeRealpath(cfgPath);
+  if (!realDir || !realCfg || !isPathWithinBase(realCfg, realDir)) return null;
+
+  return { stat: fileStat, configPath: cfgPath, realCfg };
+}
+
+export function detectNovPreset(modules = {}) {
+  for (const presetId of NOV_PRESET_IDS) {
+    const target = NOV_PRESETS[presetId].modules;
+    if (NOV_MODULE_IDS.every((id) => Boolean(modules[id]) === Boolean(target[id]))) {
+      return presetId;
+    }
+  }
+  return 'custom';
+}
+
+export function createDefaultNovConfig() {
+  return {
+    schemaVersion: 1,
+    preset: 'core',
+    modules: { ...NOV_PRESETS.core.modules },
+    defaultTab: 'review',
+    locale: 'auto',
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function normalizeNovConfig(raw) {
+  const base = createDefaultNovConfig();
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return base;
+
+  const rawModules =
+    raw.modules && typeof raw.modules === 'object' && !Array.isArray(raw.modules) ? raw.modules : {};
+  const modules = { ...base.modules };
+  for (const id of NOV_MODULE_IDS) {
+    if (typeof rawModules[id] === 'boolean') {
+      modules[id] = rawModules[id];
+    }
+  }
+
+  const enabledTabs = NOV_MODULE_IDS.filter((id) => modules[id] && NOV_MODULES_CATALOG[id].hasUiTab);
+  const defaultTab =
+    typeof raw.defaultTab === 'string' &&
+    NOV_MODULE_IDS.includes(raw.defaultTab) &&
+    modules[raw.defaultTab] &&
+    NOV_MODULES_CATALOG[raw.defaultTab].hasUiTab
+      ? raw.defaultTab
+      : enabledTabs[0] || 'review';
+
+  const locale = ALLOWED_NOV_LOCALES.includes(raw.locale) ? raw.locale : 'auto';
+  const updatedAt = typeof raw.updatedAt === 'string' && raw.updatedAt.trim() ? raw.updatedAt : base.updatedAt;
+
+  return {
+    schemaVersion: 1,
+    preset: detectNovPreset(modules),
+    modules,
+    defaultTab,
+    locale,
+    updatedAt,
+  };
+}
+
+/**
+ * Resolves agy-NOV plugin installation path and config.json data directory strictly read-only.
+ */
+export function resolveNovPaths({ homeDir = os.homedir(), env = process.env, explicitDataDir = null } = {}) {
+  const resolvedHome = path.resolve(homeDir);
+  const pluginsRoot = path.join(resolvedHome, '.gemini', 'config', 'plugins');
+
+  // 1. Detect installed agy-NOV plugin directory (blocking symlink escapes)
+  const pluginCandidates = [];
+  const envNovDir = sanitizePathCandidate(env?.AGY_NOV_DIR);
+  if (envNovDir) {
+    pluginCandidates.push({ dir: envNovDir, requiredParentDir: null });
+  }
+  pluginCandidates.push({ dir: path.join(pluginsRoot, 'agy-nov'), requiredParentDir: pluginsRoot });
+  pluginCandidates.push({ dir: path.join(pluginsRoot, 'agy-NOV'), requiredParentDir: pluginsRoot });
+
+  let pluginInfo = null;
+  for (const item of pluginCandidates) {
+    const res = inspectPluginDirSafe(item.dir, resolvedHome, item.requiredParentDir);
+    if (res) {
+      pluginInfo = res;
+      break;
+    }
+  }
+
+  const installed = Boolean(pluginInfo?.installed);
+  const version = pluginInfo?.version ?? null;
+  const pluginDir = pluginInfo?.pluginDir ?? null;
+
+  // 2. Resolve config.json dataDir with priority:
+  //    (1) explicitDataDir -> (2) env.AGY_NOV_DATA_DIR -> (3) candidate probing
+  let dataDir = null;
+  let source = 'fallback';
+
+  const cleanExplicit = sanitizePathCandidate(explicitDataDir);
+  const cleanEnvDataDir = sanitizePathCandidate(env?.AGY_NOV_DATA_DIR);
+
+  if (cleanExplicit) {
+    dataDir = cleanExplicit;
+    source = 'explicit';
+  } else if (cleanEnvDataDir) {
+    dataDir = cleanEnvDataDir;
+    source = 'env';
+  } else {
+    const pluginDataRoot = path.join(resolvedHome, '.gemini', 'antigravity', 'plugin_data');
+    const dataCandidates = [
+      path.join(pluginDataRoot, 'agy-nov'),
+      path.join(pluginDataRoot, 'agy-NOV'),
+      path.join(resolvedHome, '.agy-nov-data'),
+    ];
+
+    let newest = null;
+    const seenReal = new Set();
+    for (const cand of dataCandidates) {
+      const probed = statRealConfigFile(cand, resolvedHome);
+      if (!probed) continue;
+      if (seenReal.has(probed.realCfg)) continue;
+      seenReal.add(probed.realCfg);
+      if (!newest || probed.stat.mtimeMs > newest.mtimeMs) {
+        newest = { dir: cand, mtimeMs: probed.stat.mtimeMs };
+      }
+    }
+
+    if (newest) {
+      dataDir = newest.dir;
+      source = 'existing-config';
+    } else {
+      const pluginDirLower = path.join(pluginsRoot, 'agy-nov');
+      const pluginDirUpper = path.join(pluginsRoot, 'agy-NOV');
+      const hasPluginInstall =
+        installed ||
+        Boolean(safeLstat(pluginDirLower)?.isDirectory()) ||
+        Boolean(safeLstat(pluginDirUpper)?.isDirectory());
+      const hasPluginDataRoot =
+        !findSymlinkViolation(pluginDataRoot, resolvedHome) &&
+        Boolean(safeLstat(pluginDataRoot)?.isDirectory());
+
+      if (hasPluginInstall || hasPluginDataRoot) {
+        dataDir = path.join(pluginDataRoot, 'agy-nov');
+        source = 'plugin-data-default';
+      } else {
+        dataDir = path.join(resolvedHome, '.agy-nov-data');
+        source = 'fallback';
+      }
+    }
+  }
+
+  return {
+    installed,
+    version,
+    pluginDir,
+    dataDir,
+    configPath: path.join(dataDir, 'config.json'),
+    source,
+  };
+}
+
+/**
+ * Reads agy-NOV installation and config state strictly read-only (never creates directories or files).
+ */
+export function readNovState(opts = {}) {
+  const homeDir = opts.homeDir || os.homedir();
+  const paths = resolveNovPaths(opts);
+  const probed = statRealConfigFile(paths.dataDir, homeDir);
+
+  let configExists = false;
+  let signature = null;
+  let config = createDefaultNovConfig();
+
+  if (probed) {
+    configExists = true;
+    signature = `${probed.stat.ino}:${probed.stat.mtimeMs}:${probed.stat.size}`;
+    try {
+      const raw = JSON.parse(fs.readFileSync(probed.configPath, 'utf8'));
+      config = normalizeNovConfig(raw);
+    } catch {
+      config = createDefaultNovConfig();
+    }
+  }
+
+  return {
+    installed: paths.installed,
+    version: paths.version,
+    pluginDir: paths.pluginDir,
+    dataDir: paths.dataDir,
+    configPath: paths.configPath,
+    configExists,
+    signature,
+    config,
+    enabledModules: NOV_MODULE_IDS.filter((id) => Boolean(config.modules[id])),
+    enabledToolsCount: countNovEnabledTools(config.modules),
+    catalog: NOV_MODULES_CATALOG,
+    presets: NOV_PRESETS,
+  };
+}
+
+function validateExplicitDataDirOption(explicitDataDir) {
+  if (explicitDataDir === undefined || explicitDataDir === null) return null;
+  if (typeof explicitDataDir !== 'string') return 'Invalid explicitDataDir: must be a string';
+  if (explicitDataDir.includes('\0')) return 'Invalid explicitDataDir: NUL byte not allowed';
+  const trimmed = explicitDataDir.trim();
+  if (!trimmed) return 'Invalid explicitDataDir: empty path';
+  if (hasUnexpandedPlaceholder(trimmed)) return 'Invalid explicitDataDir: unexpanded placeholder not allowed';
+  return null;
+}
+
+function assertSafeWritePaths(dataDir, configPath, homeDir) {
+  const dirViolation = findSymlinkViolation(dataDir, homeDir);
+  if (dirViolation) return dirViolation;
+
+  const existingDir = safeLstat(dataDir);
+  if (existingDir) {
+    if (existingDir.isSymbolicLink()) return `Refusing to write into symlink dataDir: ${dataDir}`;
+    if (!existingDir.isDirectory()) return `dataDir exists and is not a directory: ${dataDir}`;
+  }
+
+  const existingCfg = safeLstat(configPath);
+  if (existingCfg) {
+    if (existingCfg.isSymbolicLink()) return `Refusing to overwrite symlink config.json: ${configPath}`;
+    if (!existingCfg.isFile()) return `config.json path is not a regular file: ${configPath}`;
+  }
+
+  return null;
+}
+
+function writeNovConfigAtomic(dataDir, configPath, configObj, homeDir) {
+  const preCheckErr = assertSafeWritePaths(dataDir, configPath, homeDir);
+  if (preCheckErr) {
+    throw new Error(preCheckErr);
+  }
+
+  fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  try {
+    fs.chmodSync(dataDir, 0o700);
+  } catch {
+    // Best-effort permission hardening on platforms supporting POSIX chmod
+  }
+
+  // Re-verify after directory creation to guard against races
+  const postCheckErr = assertSafeWritePaths(dataDir, configPath, homeDir);
+  if (postCheckErr) {
+    throw new Error(postCheckErr);
+  }
+
+  const realDir = safeRealpath(dataDir);
+  if (!realDir) {
+    throw new Error(`Unable to resolve realpath for dataDir: ${dataDir}`);
+  }
+  const existingCfg = safeLstat(configPath);
+  if (existingCfg) {
+    const realCfg = safeRealpath(configPath);
+    if (!realCfg || !isPathWithinBase(realCfg, realDir)) {
+      throw new Error(`config.json resolves outside dataDir boundary: ${configPath}`);
+    }
+  }
+
+  const normalized = normalizeNovConfig({
+    ...configObj,
+    updatedAt: new Date().toISOString(),
+  });
+  const payload = `${JSON.stringify(normalized, null, 2)}\n`;
+
+  tmpFileCounter += 1;
+  const suffix = `${process.pid}.${Date.now()}${tmpFileCounter > 1 ? `.${tmpFileCounter}` : ''}`;
+  const tmpPath = `${configPath}.tmp.${suffix}`;
+
+  try {
+    fs.writeFileSync(tmpPath, payload, { mode: 0o600, flag: 'wx' });
+    try {
+      fs.chmodSync(tmpPath, 0o600);
+    } catch {
+      // Ignore on unsupported filesystems
+    }
+    fs.renameSync(tmpPath, configPath);
+  } catch (err) {
+    try {
+      fs.unlinkSync(tmpPath);
+    } catch {
+      // Ignore cleanup failure
+    }
+    throw err;
+  }
+
+  return normalized;
+}
+
+/**
+ * Applies a strictly whitelisted control command to agy-NOV's config.json atomically.
+ */
+export function applyNovCommand(cmd, opts = {}) {
+  if (!isPlainObject(cmd)) {
+    return { ok: false, error: 'Command must be a plain object' };
+  }
+
+  const action = typeof cmd.action === 'string' ? cmd.action.trim() : '';
+  if (!ALLOWED_COMMAND_ACTIONS.has(action)) {
+    return {
+      ok: false,
+      error: `Invalid action "${cmd.action ?? ''}" (allowed: get_state | set_module | apply_preset | set_locale)`,
+    };
+  }
+
+  const allowedKeys = ALLOWED_ACTION_KEYS[action];
+  const unexpectedKeys = Object.keys(cmd).filter((k) => !allowedKeys.has(k));
+  if (unexpectedKeys.length > 0) {
+    return { ok: false, error: `Unexpected field(s) for ${action}: ${unexpectedKeys.join(', ')}` };
+  }
+
+  const explicitErr = validateExplicitDataDirOption(opts.explicitDataDir);
+  if (explicitErr) {
+    return { ok: false, error: explicitErr };
+  }
+
+  if (action === 'get_state') {
+    return { ok: true, state: readNovState(opts) };
+  }
+
+  // Validate action-specific arguments before touching filesystem
+  if (action === 'set_module') {
+    if (typeof cmd.moduleId !== 'string' || !NOV_MODULE_IDS.includes(cmd.moduleId)) {
+      return {
+        ok: false,
+        error: `Invalid moduleId "${cmd.moduleId ?? ''}" (allowed: ${NOV_MODULE_IDS.join(', ')})`,
+      };
+    }
+    if (typeof cmd.enabled !== 'boolean') {
+      return { ok: false, error: 'Invalid enabled value: expected boolean' };
+    }
+  } else if (action === 'apply_preset') {
+    if (typeof cmd.preset !== 'string' || !Object.prototype.hasOwnProperty.call(NOV_PRESETS, cmd.preset)) {
+      return {
+        ok: false,
+        error: `Invalid preset "${cmd.preset ?? ''}" (allowed: ${NOV_PRESET_IDS.join(', ')})`,
+      };
+    }
+  } else if (action === 'set_locale') {
+    if (typeof cmd.locale !== 'string' || !ALLOWED_NOV_LOCALES.includes(cmd.locale)) {
+      return {
+        ok: false,
+        error: `Invalid locale "${cmd.locale ?? ''}" (allowed: ${ALLOWED_NOV_LOCALES.join(', ')})`,
+      };
+    }
+  }
+
+  const homeDir = opts.homeDir || os.homedir();
+  const currentState = readNovState(opts);
+  const current = currentState.config;
+
+  let nextConfig;
+  if (action === 'set_module') {
+    const nextModules = {
+      ...current.modules,
+      [cmd.moduleId]: cmd.enabled,
+    };
+    nextConfig = {
+      ...current,
+      modules: nextModules,
+      defaultTab:
+        cmd.enabled && NOV_MODULES_CATALOG[cmd.moduleId].hasUiTab ? cmd.moduleId : current.defaultTab,
+    };
+  } else if (action === 'apply_preset') {
+    const presetSpec = NOV_PRESETS[cmd.preset];
+    nextConfig = {
+      ...current,
+      preset: cmd.preset,
+      modules: { ...presetSpec.modules },
+      defaultTab: NOV_MODULE_IDS.find((id) => presetSpec.modules[id] && NOV_MODULES_CATALOG[id].hasUiTab) || 'review',
+    };
+  } else if (action === 'set_locale') {
+    nextConfig = {
+      ...current,
+      locale: cmd.locale,
+    };
+  }
+
+  try {
+    writeNovConfigAtomic(currentState.dataDir, currentState.configPath, nextConfig, homeDir);
+    return { ok: true, state: readNovState(opts) };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+function attachBridgeMeta(result, meta) {
+  Object.defineProperty(result, '_meta', {
+    value: Object.freeze(meta),
+    enumerable: false,
+    configurable: true,
+  });
+  return result;
+}
+
+/**
+ * Dispatches JSON payloads received over CDP Runtime.bindingCalled (__agSagHostBridge).
+ * Never throws on malformed payloads.
+ */
+export function handleBridgePayload(rawPayload, opts = {}) {
+  let msg;
+  if (typeof rawPayload === 'string') {
+    if (
+      rawPayload.length > MAX_BRIDGE_PAYLOAD_BYTES ||
+      Buffer.byteLength(rawPayload, 'utf8') > MAX_BRIDGE_PAYLOAD_BYTES
+    ) {
+      return attachBridgeMeta(
+        { reqId: null, ok: false, error: 'Bridge payload exceeds maximum size limit' },
+        { type: null, action: null, mutated: false }
+      );
+    }
+    try {
+      msg = JSON.parse(rawPayload);
+    } catch {
+      return attachBridgeMeta(
+        { reqId: null, ok: false, error: 'Malformed JSON bridge payload' },
+        { type: null, action: null, mutated: false }
+      );
+    }
+  } else if (isPlainObject(rawPayload)) {
+    msg = rawPayload;
+  } else {
+    return attachBridgeMeta(
+      { reqId: null, ok: false, error: 'Bridge payload must be a JSON string or object' },
+      { type: null, action: null, mutated: false }
+    );
+  }
+
+  if (!isPlainObject(msg)) {
+    return attachBridgeMeta(
+      { reqId: null, ok: false, error: 'Bridge payload must decode to a plain object' },
+      { type: null, action: null, mutated: false }
+    );
+  }
+
+  const reqId =
+    typeof msg.reqId === 'string' || (typeof msg.reqId === 'number' && Number.isFinite(msg.reqId))
+      ? String(msg.reqId)
+      : null;
+
+  const type = typeof msg.type === 'string' ? msg.type.trim() : '';
+  const payload = msg.payload === undefined || msg.payload === null ? {} : msg.payload;
+
+  if (!isPlainObject(payload)) {
+    return attachBridgeMeta(
+      { reqId, ok: false, error: 'Bridge message payload must be a plain object' },
+      { type, action: null, mutated: false }
+    );
+  }
+
+  if (type === 'sag:ping') {
+    return attachBridgeMeta(
+      {
+        reqId,
+        ok: true,
+        data: {
+          pong: true,
+          ts: new Date().toISOString(),
+          protocol: 'agy-sag-nov-bridge/1',
+        },
+      },
+      { type, action: null, mutated: false }
+    );
+  }
+
+  const action = BRIDGE_TYPE_TO_ACTION[type];
+  if (!action) {
+    return attachBridgeMeta(
+      { reqId, ok: false, error: `Unsupported bridge message type: "${type}"` },
+      { type, action: null, mutated: false }
+    );
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'action')) {
+    return attachBridgeMeta(
+      { reqId, ok: false, error: 'Bridge payload must not contain reserved field "action"' },
+      { type, action, mutated: false }
+    );
+  }
+
+  const res = applyNovCommand({ ...payload, action }, opts);
+  if (!res.ok) {
+    return attachBridgeMeta({ reqId, ok: false, error: res.error }, { type, action, mutated: false });
+  }
+  return attachBridgeMeta(
+    { reqId, ok: true, data: res.state },
+    { type, action, mutated: MUTATING_BRIDGE_ACTIONS.has(action) }
+  );
+}

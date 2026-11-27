@@ -142,7 +142,7 @@ test('Cross-Session Bookmark Vault: aggregates & redacts multi-session stars, se
   exporter.saveBookmarks(env.storage, cidLegacy, [5]);
 
   let downloaded = null;
-  const guard = core.mountSessionGuard({
+  const guard = core.mountSag({
     win: env.win,
     doc: env.doc,
     storage: env.storage,

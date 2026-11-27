@@ -153,7 +153,7 @@ test('Watchdog +5m Snooze: postpones stall alert for 5 minutes and re-alerts if 
     removeEventListener() {},
   };
 
-  const guard = core.mountSessionGuard({
+  const guard = core.mountSag({
     win,
     doc,
     storage,

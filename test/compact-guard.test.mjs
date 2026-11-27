@@ -209,7 +209,7 @@ test('CompactGuard: surfaces confirmation banner at threshold & overflow severit
   let pct = 72;
   const submitted = [];
 
-  const guard = core.mountSessionGuard({
+  const guard = core.mountSag({
     win: env.win,
     doc: env.doc,
     storage: env.storage,
@@ -252,7 +252,7 @@ test('CompactGuard: triple safety guard protects unsent drafts, blocks during st
   let streaming = false;
   const submitted = [];
 
-  const guard = core.mountSessionGuard({
+  const guard = core.mountSag({
     win: env.win,
     doc: env.doc,
     storage: env.storage,
@@ -319,7 +319,7 @@ test('CompactGuard: auto-countdown mode aborts immediately if user types draft o
   const env = createMockDom({ lang: 'en', draft: '' });
   const submitted = [];
 
-  const guard = core.mountSessionGuard({
+  const guard = core.mountSag({
     win: env.win,
     doc: env.doc,
     storage: env.storage,
@@ -346,7 +346,7 @@ test('CompactGuard: minimal banner has max 2 actions (no export clutter), quick 
   let exported = null;
   let downloaded = null;
 
-  const guard = core.mountSessionGuard({
+  const guard = core.mountSag({
     win: env.win,
     doc: env.doc,
     storage: env.storage,
@@ -407,7 +407,7 @@ test('CompactGuard anti-flicker, scoped bridge telemetry & Lexical v2.35 two-ste
 
   let pct = 92;
   let now = 1_000_000;
-  const guard = core.mountSessionGuard({
+  const guard = core.mountSag({
     win: env.win,
     doc: env.doc,
     storage: env.storage,
@@ -513,7 +513,7 @@ test('CompactGuard auto-silent (default): zero popup banner, aborts silently on 
   env.doc.body.appendChild(portal);
 
   let streaming = true;
-  const guard = core.mountSessionGuard({
+  const guard = core.mountSag({
     win: env.win,
     doc: env.doc,
     storage: env.storage,
@@ -550,7 +550,7 @@ test('CompactGuard auto-silent (default): zero popup banner, aborts silently on 
   // New session: when truly idle and empty, auto-silent fires cleanly with ZERO popup banner!
   guard.destroy();
   env.textarea.value = '';
-  const guard2 = core.mountSessionGuard({
+  const guard2 = core.mountSag({
     win: env.win,
     doc: env.doc,
     storage: env.storage,
@@ -636,7 +636,7 @@ test('auto-silent viewport scroll shield blocks host jump-to-bottom, honors user
   conv.appendChild(toBottomBtn);
 
   let fakeNow = 10_000;
-  const guard = core.mountSessionGuard({
+  const guard = core.mountSag({
     win: env.win,
     doc: env.doc,
     storage: env.storage,
@@ -697,7 +697,7 @@ test('auto-silent defers while user is actively scrolling and releases viewport 
     vp.scrollTop = 2300;
   });
 
-  const guard = core.mountSessionGuard({
+  const guard = core.mountSag({
     win: env.win,
     doc: env.doc,
     storage: env.storage,

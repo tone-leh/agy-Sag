@@ -1,4 +1,4 @@
-// Antigravity Session Guard — Post-Compact Lossless Recovery & New-Session Handoff Builder (UMD)
+// agy-Sag — Post-Compact Lossless Recovery & New-Session Handoff Builder (UMD)
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory(root);
@@ -8,7 +8,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this, function (globalRoot) {
   'use strict';
 
-  const HANDOFF_STORAGE_PREFIX = 'agSessionGuard.handoff.v1:';
+  const HANDOFF_STORAGE_PREFIX = 'agSag.handoff.v1:';
   const MAX_PROMPT_CHARS = 1800;
   const MAX_NEW_SESSION_HANDOFF_CHARS = 2400;
 

@@ -1,4 +1,4 @@
-// Antigravity Session Guard — Session Radar Module (Module B: Sidebar Attention Filter + Blurred OS Alert, UMD)
+// agy-Sag — Session Radar Module (Module B: Sidebar Attention Filter + Blurred OS Alert, UMD)
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory(root);

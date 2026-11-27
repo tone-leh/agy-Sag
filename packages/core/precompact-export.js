@@ -1,4 +1,4 @@
-// Antigravity Session Guard — Pre-Compact Structured Markdown Exporter & Secret Redactor (UMD)
+// agy-Sag — Pre-Compact Structured Markdown Exporter & Secret Redactor (UMD)
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory(root);
@@ -8,7 +8,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this, function (globalRoot) {
   'use strict';
 
-  const BOOKMARK_STORAGE_PREFIX = 'agSessionGuard.bookmarks.v1:';
+  const BOOKMARK_STORAGE_PREFIX = 'agSag.bookmarks.v1:';
 
   function redactSecrets(text) {
     return String(text || '')

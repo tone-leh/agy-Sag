@@ -1,28 +1,38 @@
 {
-  "name": "agy-session-guard",
-  "version": "0.4.0",
-  "description": "Antigravity Session Guard (领航哨) — Configurable context compaction threshold guard, native turn bookmarks, pre-compact Markdown export & Zero-ASAR watch daemon for Antigravity. Zero runtime dependencies, MIT licensed.",
+  "name": "agy-sag",
+  "version": "1.0.0",
+  "description": "agy-Sag (Antigravity Superpower & Agent Guard) — Modular Zero-ASAR CDP deep-enhancement suite for Google Antigravity 2.0: 10-language native UI translation, auto /compact guard, prompt queue, draft vault, turn bookmarks, policy-gated auto-accept, optical theme studio, read-only quota pulse & storage doctor. Zero runtime dependencies, MIT licensed.",
   "license": "MIT",
   "type": "module",
+  "bin": {
+    "agy-sag": "./cli/sag-cli.mjs"
+  },
   "engines": {
     "node": ">=22.0.0"
   },
   "keywords": [
     "antigravity",
+    "agy-sag",
+    "agy-nov",
+    "antigravity-i18n",
+    "antigravity-localization",
     "context-compaction",
-    "compact-guard",
-    "markdown-export",
-    "session-copilot",
-    "watch-daemon",
+    "prompt-queue",
+    "safe-auto-accept",
+    "theme-studio",
+    "quota-pulse",
     "zero-asar",
-    "obsidian-prism-compatible"
+    "cdp-suite"
   ],
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "workbench": "node workbench/server.mjs",
+    "workbench:smoke": "node workbench/server.mjs --smoke",
     "attach": "node cli/cdp-attach.mjs --attach",
     "watch": "node cli/watch-daemon.mjs",
     "doctor": "node cli/doctor.mjs",
+    "storage": "node cli/storage-doctor.mjs audit",
+    "i18n:validate": "node cli/sag-cli.mjs i18n validate",
     "install:plugin": "node cli/install-plugin.mjs",
     "remove": "node cli/cdp-attach.mjs --remove",
     "status": "node cli/cdp-attach.mjs --status"

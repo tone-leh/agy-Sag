@@ -165,7 +165,7 @@ test('Smart /compact Focus Presets build redacted commands across default, code-
   const env = createDom({ lang: 'en' });
   const submitted = [];
 
-  const guard = core.mountSessionGuard({
+  const guard = core.mountSag({
     win: env.win,
     doc: env.doc,
     storage: env.storage,
@@ -220,7 +220,7 @@ test('Post-Compact Recovery Card: silently snapshots starred turns before /compa
   let pct = 85;
   let compactedCount = 0;
 
-  const guard = core.mountSessionGuard({
+  const guard = core.mountSag({
     win: env.win,
     doc: env.doc,
     storage: env.storage,

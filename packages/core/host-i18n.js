@@ -1,0 +1,1299 @@
+// agy-Sag — Host UI Multi-Language Translation Engine (UMD)
+// Zero-dependency, lossless WeakMap-reversible DOM & Shadow DOM translator with conflict arbitration.
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) {
+    module.exports = factory(root);
+  } else {
+    root.__agSagHostI18n = factory(root);
+  }
+})(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this, function (globalRoot) {
+  'use strict';
+
+  const ATTR_WHITELIST = Object.freeze(['placeholder', 'title', 'aria-label']);
+
+  const HARD_SKIP_SELECTORS = Object.freeze([
+    'code',
+    'pre',
+    'kbd',
+    'samp',
+    'script',
+    'style',
+    'noscript',
+    'textarea',
+    'input',
+    'select',
+    'option',
+    '[contenteditable=""]',
+    '[contenteditable="true"]',
+    '[contenteditable="plaintext-only"]',
+    '[data-lexical-editor="true"]',
+    '.monaco-editor',
+    '.monaco-diff-editor',
+    '.xterm',
+    '[data-testid="user-message-bubble"]',
+    '[data-testid="user-message-content"]',
+    '[data-testid="planner-response-text"]',
+    '[data-testid="agent-response"]',
+    '[data-testid="branch-pill-trigger"]',
+    '[data-testid="workspace-name"]',
+    '[data-ag-no-i18n="1"]',
+    '[data-ag-sg-owned="1"]',
+    '[data-ag-sag-owned="1"]',
+    '[translate="no"]',
+    '[data-no-translate="true"]',
+    '[dir="rtl"]',
+  ]);
+
+  const HARD_SKIP_SUBTREE_TAGS = new Set([
+    'CODE',
+    'PRE',
+    'KBD',
+    'SAMP',
+    'SCRIPT',
+    'STYLE',
+    'NOSCRIPT',
+    'SELECT',
+    'OPTION',
+  ]);
+
+  const INPUT_CONTENT_SKIP_TAGS = new Set(['TEXTAREA', 'INPUT']);
+
+  const HARD_SKIP_CLASSES = ['monaco-editor', 'monaco-diff-editor', 'xterm'];
+
+  const HARD_SKIP_TESTIDS = new Set([
+    'user-message-bubble',
+    'user-message-content',
+    'planner-response-text',
+    'agent-response',
+    'branch-pill-trigger',
+    'workspace-name',
+  ]);
+
+  const SLASH_COMMAND_RE = /^\/[a-z0-9_-]+$/i;
+  const WHITESPACE_SPLIT_RE = /^(\s*)([\s\S]*?)(\s*)$/;
+  const CACHE_MISS = Symbol('agSagHostI18n.cacheMiss');
+  const DEFAULT_MAX_CACHE_SIZE = 8000;
+  const MAX_MISSING_PHRASES = 500;
+  const MIN_LOWERCASE_LOOKUP_LEN = 4;
+  const SWEEP_FLUSH_INTERVAL = 100;
+  const SWEEP_REF_THRESHOLD = 500;
+
+  // Missing-phrase safety filters (exclude secrets, paths, URLs, emails, non-ASCII, UUIDs, pure numbers)
+  const NON_ENGLISH_CHAR_RE = /[^\x20-\x7E\u2018-\u201F\u2013-\u2014\u2026\u00B7]/;
+  const HAS_LATIN_LETTER_RE = /[A-Za-z]/;
+  const PURE_NUM_OR_PUNCT_RE = /^[\d\s.,:;!?+\-*/%=()[\]{}<>|\\~`@#$^&_'"·…]+$/;
+  const URL_RE = /(?:https?|wss?|ftp|file):\/\/|\bwww\.[a-z0-9-]+/i;
+  const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
+  const FILE_PATH_RE = /(?:^[.~]?\/|^[A-Za-z]:\\|(?:^|\s)[a-zA-Z0-9._-]+\/[a-zA-Z0-9._/-]+\.[a-zA-Z0-9]{1,8}\b|(?:^|\s)\/?(?:[a-zA-Z0-9._-]+\/){2,}[a-zA-Z0-9._-]+)/;
+  const UUID_RE = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
+  const SECRET_PATTERNS = [
+    /\bsk-(?:proj-|ant-|live-|test-)?[A-Za-z0-9_-]{8,}/,
+    /\bAIza[0-9A-Za-z_-]{10,}/,
+    /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/i,
+    /\beyJ[A-Za-z0-9_-]{6,}\.eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}/,
+    /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{12,}/,
+    /\bgithub_pat_[A-Za-z0-9_]{12,}/,
+    /\bxox[baprs]-[A-Za-z0-9-]{10,}/,
+    /\bAKIA[0-9A-Z]{16}\b/,
+    /\bnpm_[A-Za-z0-9]{12,}/,
+    /-----BEGIN\s+[A-Z0-9 ]*KEY-----/,
+    /[A-Za-z0-9+/=_-]{36,}/,
+  ];
+
+  function resolveDep(globalKey, relPath) {
+    if (globalRoot && globalRoot[globalKey]) return globalRoot[globalKey];
+    if (typeof require === 'function') return require(relPath);
+    return null;
+  }
+
+  // Safe placeholder substitution that NEVER passes replacement strings to String.prototype.replace,
+  // completely preventing $&, $$, $1, $`, $' expansion bugs.
+  function applyPatternTemplate(template, match) {
+    const tpl = String(template || '');
+    let out = '';
+    let lastIdx = 0;
+    const placeholderRe = /\{(\d+)\}/g;
+    let m;
+    while ((m = placeholderRe.exec(tpl)) !== null) {
+      out += tpl.slice(lastIdx, m.index);
+      const groupIdx = Number(m[1]);
+      if (groupIdx >= 1 && groupIdx < match.length && match[groupIdx] !== undefined) {
+        out += String(match[groupIdx]);
+      } else {
+        out += m[0];
+      }
+      lastIdx = placeholderRe.lastIndex;
+    }
+    out += tpl.slice(lastIdx);
+    return out;
+  }
+
+  function hasClass(el, clsName) {
+    if (!el) return false;
+    if (el.classList && typeof el.classList.contains === 'function') {
+      return el.classList.contains(clsName);
+    }
+    const raw = typeof el.className === 'string' ? el.className : '';
+    if (!raw) return false;
+    return raw.split(/\s+/).includes(clsName);
+  }
+
+  function getAttr(el, name) {
+    if (!el || typeof el.getAttribute !== 'function') return null;
+    try {
+      return el.getAttribute(name);
+    } catch {
+      return null;
+    }
+  }
+
+  // Elements whose entire subtree AND attributes must be physically skipped.
+  function isHardSkipAllElement(el) {
+    if (!el || el.nodeType !== 1) return false;
+    const tag = String(el.tagName || '').toUpperCase();
+    if (HARD_SKIP_SUBTREE_TAGS.has(tag)) return true;
+
+    for (let i = 0; i < HARD_SKIP_CLASSES.length; i++) {
+      if (hasClass(el, HARD_SKIP_CLASSES[i])) return true;
+    }
+
+    const testId = getAttr(el, 'data-testid');
+    if (testId && HARD_SKIP_TESTIDS.has(testId)) return true;
+
+    if (
+      getAttr(el, 'data-ag-no-i18n') === '1' ||
+      getAttr(el, 'data-ag-sg-owned') === '1' ||
+      getAttr(el, 'data-ag-sag-owned') === '1' ||
+      getAttr(el, 'translate') === 'no' ||
+      getAttr(el, 'data-no-translate') === 'true' ||
+      getAttr(el, 'dir') === 'rtl'
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  // Editable / form controls: their own whitelisted UI attributes (placeholder/title/aria-label)
+  // can be translated when not inside a hard-skip container, while their value & child text nodes are strictly skipped.
+  function isEditableContentSkipElement(el) {
+    if (!el || el.nodeType !== 1) return false;
+    const tag = String(el.tagName || '').toUpperCase();
+    if (INPUT_CONTENT_SKIP_TAGS.has(tag)) return true;
+    const ce = getAttr(el, 'contenteditable');
+    if (
+      ce === '' ||
+      (ce !== null && (String(ce).toLowerCase() === 'true' || String(ce).toLowerCase() === 'plaintext-only')) ||
+      el.isContentEditable === true
+    ) {
+      return true;
+    }
+    if (getAttr(el, 'data-lexical-editor') === 'true') return true;
+    return false;
+  }
+
+  function isShadowHostSkipped(el) {
+    if (!el || el.nodeType !== 1) return true;
+    if (el.id === 'ag-prism-pulse-bar' || getAttr(el, 'id') === 'ag-prism-pulse-bar') return true;
+    if (getAttr(el, 'data-ag-prism-pulse-bar') === 'true') return true;
+    if (
+      getAttr(el, 'data-ag-sg-owned') === '1' ||
+      getAttr(el, 'data-ag-sag-owned') === '1' ||
+      getAttr(el, 'data-ag-no-i18n') === '1'
+    ) {
+      return true;
+    }
+    return isHardSkipAllElement(el);
+  }
+
+  // Checks strict ancestor chain of `node` (including across Shadow DOM host boundaries).
+  // When forContent=true, also treats editable/form ancestors (textarea/input/contenteditable/lexical-editor) as skipped.
+  function hasSkippedAncestor(node, forContent) {
+    let cur = node;
+    while (cur) {
+      const pn = cur.parentNode;
+      if (pn && pn.host && pn.host.nodeType === 1) {
+        if (isShadowHostSkipped(pn.host)) return true;
+        cur = pn.host;
+      } else {
+        cur = cur.parentElement || (pn && pn.nodeType === 1 ? pn : null);
+      }
+      if (!cur || cur.nodeType !== 1) break;
+      if (isHardSkipAllElement(cur)) return true;
+      if (forContent && isEditableContentSkipElement(cur)) return true;
+    }
+    return false;
+  }
+
+  function getChildList(node) {
+    if (!node) return [];
+    if (node.childNodes && typeof node.childNodes.length === 'number') {
+      return node.childNodes;
+    }
+    if (node.children && typeof node.children.length === 'number') {
+      return node.children;
+    }
+    return [];
+  }
+
+  function isSafeMissingPhraseCandidate(core, keepSet) {
+    if (!core || core.length < 2 || core.length > 120) return false;
+    if (SLASH_COMMAND_RE.test(core)) return false;
+    if (keepSet.has(core)) return false;
+    if (NON_ENGLISH_CHAR_RE.test(core)) return false;
+    if (!HAS_LATIN_LETTER_RE.test(core)) return false;
+    if (PURE_NUM_OR_PUNCT_RE.test(core)) return false;
+    if (URL_RE.test(core)) return false;
+    if (EMAIL_RE.test(core)) return false;
+    if (FILE_PATH_RE.test(core)) return false;
+    if (UUID_RE.test(core)) return false;
+    for (let i = 0; i < SECRET_PATTERNS.length; i++) {
+      if (SECRET_PATTERNS[i].test(core)) return false;
+    }
+    return true;
+  }
+
+  function makeWeakRef(target) {
+    if (typeof WeakRef === 'function') {
+      return new WeakRef(target);
+    }
+    return { deref: () => target };
+  }
+
+  function createHostI18nController(options = {}) {
+    const win = options.win || globalRoot;
+    const doc = options.doc !== undefined ? options.doc : win?.document || null;
+    const packsMod = options.packsMod || resolveDep('__agSagHostI18nPacks', './host-i18n-packs.js');
+    const coexist = options.coexist || resolveDep('__agSgCoexist', './coexist.js');
+
+    if (!packsMod || typeof packsMod.getPack !== 'function') {
+      throw new Error('host-i18n requires host-i18n-packs module');
+    }
+
+    const keepExactSet = new Set(packsMod.KEEP_UNTRANSLATED_EXACT || []);
+    const keepLowerSet = new Set(Array.from(keepExactSet).map((s) => s.toLowerCase()));
+
+    function readLocaleHint(raw) {
+      if (typeof raw !== 'string') return '';
+      const trimmed = raw.trim();
+      if (!trimmed || trimmed.toLowerCase() === 'auto') return '';
+      return trimmed;
+    }
+
+    function resolveAutoLocale() {
+      const html = doc?.documentElement;
+      const detected =
+        readLocaleHint(getAttr(html, 'data-ag-cs-lang')) ||
+        readLocaleHint(getAttr(html, 'lang')) ||
+        readLocaleHint(win?.navigator?.language) ||
+        'en';
+      return packsMod.normalizeHostLocale(detected);
+    }
+
+    function resolveLocaleConfig(rawLocale) {
+      const trimmed = typeof rawLocale === 'string' ? rawLocale.trim() : '';
+      if (!trimmed || trimmed.toLowerCase() === 'auto') {
+        return {
+          configured: 'auto',
+          resolved: resolveAutoLocale(),
+        };
+      }
+      const norm = packsMod.normalizeHostLocale(trimmed);
+      return {
+        configured: norm,
+        resolved: norm,
+      };
+    }
+
+    let enabled = options.enabled !== undefined ? Boolean(options.enabled) : true;
+    const initialLocale = resolveLocaleConfig(options.locale);
+    let configuredLocale = initialLocale.configured;
+    let currentLocale = initialLocale.resolved;
+    let conflictPolicy = options.conflictPolicy === 'takeover' ? 'takeover' : 'yield';
+    let collectMissing = Boolean(options.collectMissing);
+    const respectHibernation = options.respectHibernation !== false;
+    const autoObserve = options.autoObserve !== false;
+    const maxCacheSize =
+      Number.isFinite(Number(options.maxCacheSize)) && Number(options.maxCacheSize) > 0
+        ? Math.floor(Number(options.maxCacheSize))
+        : DEFAULT_MAX_CACHE_SIZE;
+
+    let destroyed = false;
+    let yieldedTo = null;
+    let isApplying = false;
+
+    // Custom pack overlays keyed by normalized locale
+    const customPacks = new Map();
+    if (options.customPacks && typeof options.customPacks === 'object') {
+      for (const [loc, pack] of Object.entries(options.customPacks)) {
+        const norm = packsMod.normalizeHostLocale(loc);
+        if (pack && typeof pack === 'object') {
+          customPacks.set(norm, pack);
+        }
+      }
+    }
+
+    // Active compiled lookup tables for currentLocale
+    let exactMap = new Map();
+    let lowerMap = new Map();
+    let compiledPatterns = [];
+    const lookupCache = new Map();
+
+    // Missing UI phrases collector (opt-in, deduped, capped at 500)
+    const missingSet = new Set();
+
+    // Reversible DOM tracking via WeakMap + WeakRef registries
+    const textRecords = new WeakMap(); // TextNode -> { orig, translated }
+    let trackedTextSet = new WeakSet();
+    const textRefMap = new WeakMap(); // TextNode -> WeakRef<TextNode>
+    const trackedTextRefs = new Set();
+
+    const attrRecords = new WeakMap(); // Element -> Map<attr, { orig, translated }>
+    let trackedAttrSet = new WeakSet();
+    const attrRefMap = new WeakMap(); // Element -> WeakRef<Element>
+    const trackedAttrRefs = new Set();
+    let flushesSinceSweep = 0;
+    let sweepCount = 0;
+
+    // MutationObserver & batched scheduling state
+    const observers = [];
+    let observedRoots = new WeakSet();
+    let observersStarted = false;
+    const pendingNodes = new Set();
+    let pendingFullScan = false;
+    let flushScheduled = false;
+    let flushHandle = null;
+    let flushHandleType = 'none'; // 'none' | 'raf' | 'microtask'
+    let hibernatedDirty = false;
+    const eventCleanups = [];
+
+    function emitStateChange() {
+      if (typeof options.onStateChange === 'function') {
+        try {
+          options.onStateChange(getDebugState());
+        } catch {}
+      }
+    }
+
+    function compileActivePack() {
+      exactMap = new Map();
+      lowerMap = new Map();
+      compiledPatterns = [];
+      lookupCache.clear();
+
+      if (currentLocale === 'en') return;
+
+      const custom = customPacks.get(currentLocale);
+      const pack = custom ? packsMod.mergeCustomPack(currentLocale, custom) : packsMod.getPack(currentLocale);
+
+      if (pack && pack.exact && typeof pack.exact === 'object') {
+        for (const [k, v] of Object.entries(pack.exact)) {
+          if (typeof k !== 'string' || !k || typeof v !== 'string' || !v) continue;
+          if (keepExactSet.has(k)) continue;
+          exactMap.set(k, v);
+          // Tier 2: lowercase fallback only for non-ambiguous terms (length >= 4) and never conflicting with KEEP_UNTRANSLATED_EXACT
+          if (k.length >= MIN_LOWERCASE_LOOKUP_LEN) {
+            const lk = k.toLowerCase();
+            if (!keepLowerSet.has(lk) && !lowerMap.has(lk)) {
+              lowerMap.set(lk, v);
+            }
+          }
+        }
+      }
+
+      if (pack && Array.isArray(pack.patterns)) {
+        for (let i = 0; i < pack.patterns.length; i++) {
+          const item = pack.patterns[i];
+          if (!item || typeof item.replace !== 'string') continue;
+          try {
+            const src = item.source instanceof RegExp ? item.source.source : String(item.source);
+            const flg = (item.source instanceof RegExp ? item.source.flags : String(item.flags || '')).replace(/[gy]/g, '');
+            compiledPatterns.push({
+              regex: new RegExp(src, flg),
+              replace: item.replace,
+            });
+          } catch {}
+        }
+      }
+    }
+
+    function cacheSet(key, val) {
+      if (!lookupCache.has(key) && lookupCache.size >= maxCacheSize) {
+        const oldestKey = lookupCache.keys().next().value;
+        if (oldestKey !== undefined) {
+          lookupCache.delete(oldestKey);
+        }
+      }
+      lookupCache.set(key, val);
+    }
+
+    function maybeCollectMissing(core) {
+      if (!collectMissing) return;
+      if (missingSet.size >= MAX_MISSING_PHRASES) return;
+      if (missingSet.has(core)) return;
+      if (!isSafeMissingPhraseCandidate(core, keepExactSet)) return;
+      missingSet.add(core);
+    }
+
+    // Core 3-tier lookup for a trimmed non-empty string. Returns translated string or null on miss.
+    function lookupCore(core) {
+      if (!core || currentLocale === 'en') return null;
+      if (SLASH_COMMAND_RE.test(core)) return null;
+      if (keepExactSet.has(core)) return null;
+
+      if (lookupCache.has(core)) {
+        const cached = lookupCache.get(core);
+        if (cached === CACHE_MISS) {
+          maybeCollectMissing(core);
+          return null;
+        }
+        return cached;
+      }
+
+      // Tier 1: exact O(1)
+      let hit = exactMap.get(core);
+
+      // Tier 2: lowercase O(1) (excluding short ambiguous words)
+      if (hit === undefined && core.length >= MIN_LOWERCASE_LOOKUP_LEN) {
+        const lc = core.toLowerCase();
+        if (!keepLowerSet.has(lc)) {
+          hit = lowerMap.get(lc);
+        }
+      }
+
+      // Tier 3: compiled regex patterns with safe placeholder substitution
+      if (hit === undefined && compiledPatterns.length > 0) {
+        for (let i = 0; i < compiledPatterns.length; i++) {
+          const entry = compiledPatterns[i];
+          const match = entry.regex.exec(core);
+          if (match) {
+            hit = applyPatternTemplate(entry.replace, match);
+            break;
+          }
+        }
+      }
+
+      if (hit === undefined || hit === core) {
+        cacheSet(core, CACHE_MISS);
+        if (hit === undefined) maybeCollectMissing(core);
+        return null;
+      }
+
+      cacheSet(core, hit);
+      return hit;
+    }
+
+    // Translates a raw string preserving exact leading/trailing whitespace.
+    // Returns translated string when matched, or null if untranslated/skipped.
+    function translateIfMatched(raw) {
+      if (typeof raw !== 'string' || !raw) return null;
+      const m = WHITESPACE_SPLIT_RE.exec(raw);
+      const lead = m ? m[1] : '';
+      const core = m ? m[2] : raw;
+      const trail = m ? m[3] : '';
+      if (!core) return null;
+      const translatedCore = lookupCore(core);
+      if (translatedCore === null) return null;
+      // Direct concatenation preserves whitespace & avoids String.prototype.replace $&/$1 pitfalls
+      return lead + translatedCore + trail;
+    }
+
+    function translateText(raw) {
+      if (typeof raw !== 'string') return raw;
+      if (!enabled || currentLocale === 'en') return raw;
+      const res = translateIfMatched(raw);
+      return res !== null ? res : raw;
+    }
+
+    function detectExternalConflict() {
+      const htmlAttr = doc?.documentElement?.getAttribute?.('data-ag-prism-host-i18n') === 'active';
+      const winGlobal = Boolean(win && win.__agPrismHostI18n);
+      return htmlAttr || winGlobal;
+    }
+
+    function syncHostMarkers(active) {
+      const html = doc?.documentElement;
+      if (!html) return;
+      try {
+        if (active) {
+          if (html.getAttribute?.('data-ag-sag-host-i18n') !== 'active') {
+            html.setAttribute?.('data-ag-sag-host-i18n', 'active');
+          }
+          if (html.getAttribute?.('data-ag-sag-lang') !== currentLocale) {
+            html.setAttribute?.('data-ag-sag-lang', currentLocale);
+          }
+        } else {
+          html.removeAttribute?.('data-ag-sag-host-i18n');
+          html.removeAttribute?.('data-ag-sag-lang');
+        }
+      } catch {}
+    }
+
+    function trackTextNode(node, orig, translated) {
+      textRecords.set(node, { orig, translated });
+      if (!trackedTextSet.has(node)) {
+        trackedTextSet.add(node);
+        let ref = textRefMap.get(node);
+        if (!ref) {
+          ref = makeWeakRef(node);
+          textRefMap.set(node, ref);
+        }
+        trackedTextRefs.add(ref);
+      }
+    }
+
+    function untrackTextNode(node) {
+      if (!node) return;
+      textRecords.delete(node);
+      trackedTextSet.delete(node);
+      const ref = textRefMap.get(node);
+      if (ref) {
+        trackedTextRefs.delete(ref);
+        textRefMap.delete(node);
+      }
+    }
+
+    function trackAttrNode(el, attr, orig, translated) {
+      let map = attrRecords.get(el);
+      if (!map) {
+        map = new Map();
+        attrRecords.set(el, map);
+      }
+      map.set(attr, { orig, translated });
+      if (!trackedAttrSet.has(el)) {
+        trackedAttrSet.add(el);
+        let ref = attrRefMap.get(el);
+        if (!ref) {
+          ref = makeWeakRef(el);
+          attrRefMap.set(el, ref);
+        }
+        trackedAttrRefs.add(ref);
+      }
+    }
+
+    function untrackAttrNode(el) {
+      if (!el) return;
+      attrRecords.delete(el);
+      trackedAttrSet.delete(el);
+      const ref = attrRefMap.get(el);
+      if (ref) {
+        trackedAttrRefs.delete(ref);
+        attrRefMap.delete(el);
+      }
+    }
+
+    function sweepDeadRefs() {
+      for (const ref of trackedTextRefs) {
+        const node = ref.deref();
+        if (!node || !textRecords.has(node)) {
+          trackedTextRefs.delete(ref);
+          if (node) {
+            trackedTextSet.delete(node);
+            textRefMap.delete(node);
+          }
+        }
+      }
+      for (const ref of trackedAttrRefs) {
+        const el = ref.deref();
+        if (!el || !attrRecords.has(el)) {
+          trackedAttrRefs.delete(ref);
+          if (el) {
+            trackedAttrSet.delete(el);
+            attrRefMap.delete(el);
+          }
+        }
+      }
+      flushesSinceSweep = 0;
+      sweepCount += 1;
+    }
+
+    function restoreAll() {
+      const prevApplying = isApplying;
+      isApplying = true;
+      try {
+        for (const ref of trackedTextRefs) {
+          const node = ref.deref();
+          if (node) {
+            const rec = textRecords.get(node);
+            if (rec) {
+              try {
+                if (node.nodeValue === rec.translated) {
+                  node.nodeValue = rec.orig;
+                }
+              } catch {}
+              textRecords.delete(node);
+            }
+            textRefMap.delete(node);
+          }
+        }
+        trackedTextRefs.clear();
+        trackedTextSet = new WeakSet();
+
+        for (const ref of trackedAttrRefs) {
+          const el = ref.deref();
+          if (el) {
+            const map = attrRecords.get(el);
+            if (map) {
+              for (const [attr, rec] of map.entries()) {
+                try {
+                  if (el.getAttribute?.(attr) === rec.translated) {
+                    el.setAttribute?.(attr, rec.orig);
+                  }
+                } catch {}
+              }
+              attrRecords.delete(el);
+            }
+            attrRefMap.delete(el);
+          }
+        }
+        trackedAttrRefs.clear();
+        trackedAttrSet = new WeakSet();
+        flushesSinceSweep = 0;
+      } finally {
+        isApplying = prevApplying;
+      }
+      syncHostMarkers(false);
+    }
+
+    function processTextNode(node) {
+      if (!node || node.nodeType !== 3) return;
+      const cur = node.nodeValue;
+      if (typeof cur !== 'string' || !cur) return;
+
+      const rec = textRecords.get(node);
+      if (rec) {
+        if (cur === rec.translated) {
+          // Host did not change text since our last translation; re-translate from original source
+          const next = translateIfMatched(rec.orig);
+          if (next === null) {
+            // New locale has no match for this original text -> restore original cleanly
+            node.nodeValue = rec.orig;
+            untrackTextNode(node);
+          } else if (next !== cur) {
+            node.nodeValue = next;
+            rec.translated = next;
+          }
+          return;
+        }
+        // Host (e.g. React) updated nodeValue to a fresh source string -> re-translate with new orig
+        const nextFromNew = translateIfMatched(cur);
+        if (nextFromNew !== null) {
+          node.nodeValue = nextFromNew;
+          trackTextNode(node, cur, nextFromNew);
+        } else {
+          // New text is untranslatable -> drop stale tracking record so restoreAll never reverts to old text
+          untrackTextNode(node);
+        }
+        return;
+      }
+
+      const translated = translateIfMatched(cur);
+      if (translated !== null && translated !== cur) {
+        node.nodeValue = translated;
+        trackTextNode(node, cur, translated);
+      }
+    }
+
+    function processElementAttributes(el) {
+      if (!el || el.nodeType !== 1 || typeof el.getAttribute !== 'function') return;
+      const attrMap = attrRecords.get(el);
+
+      for (let i = 0; i < ATTR_WHITELIST.length; i++) {
+        const attr = ATTR_WHITELIST[i];
+        const cur = getAttr(el, attr);
+        const rec = attrMap ? attrMap.get(attr) : undefined;
+
+        if (cur === null || cur === '') {
+          if (rec && attrMap) {
+            attrMap.delete(attr);
+            if (attrMap.size === 0) untrackAttrNode(el);
+          }
+          continue;
+        }
+
+        if (rec) {
+          if (cur === rec.translated) {
+            const next = translateIfMatched(rec.orig);
+            if (next === null) {
+              el.setAttribute(attr, rec.orig);
+              attrMap.delete(attr);
+              if (attrMap.size === 0) untrackAttrNode(el);
+            } else if (next !== cur) {
+              el.setAttribute(attr, next);
+              rec.translated = next;
+            }
+          } else {
+            // Host updated attribute to a new value
+            const nextFromNew = translateIfMatched(cur);
+            if (nextFromNew !== null) {
+              el.setAttribute(attr, nextFromNew);
+              trackAttrNode(el, attr, cur, nextFromNew);
+            } else {
+              attrMap.delete(attr);
+              if (attrMap.size === 0) untrackAttrNode(el);
+            }
+          }
+          continue;
+        }
+
+        const translated = translateIfMatched(cur);
+        if (translated !== null && translated !== cur) {
+          el.setAttribute(attr, translated);
+          trackAttrNode(el, attr, cur, translated);
+        }
+      }
+    }
+
+    function attachRootObserver(rootNode) {
+      if (!autoObserve || !enabled || destroyed || !rootNode || observedRoots.has(rootNode)) return;
+      const MO = win?.MutationObserver || globalRoot?.MutationObserver;
+      if (typeof MO !== 'function') return;
+      try {
+        const mo = new MO(handleMutations);
+        mo.observe(rootNode, {
+          childList: true,
+          subtree: true,
+          characterData: true,
+          attributes: true,
+          attributeFilter: ATTR_WHITELIST,
+        });
+        observedRoots.add(rootNode);
+        observers.push(mo);
+      } catch {}
+    }
+
+    function walkSubtree(node) {
+      if (!node) return;
+      const nt = node.nodeType;
+
+      if (nt === 3) {
+        if (!hasSkippedAncestor(node, true)) {
+          processTextNode(node);
+        }
+        return;
+      }
+
+      if (nt === 1) {
+        if (isHardSkipAllElement(node)) return;
+
+        // Translate whitelisted UI attributes on this element
+        processElementAttributes(node);
+
+        // Skip internal text & descendants for form controls and editable regions
+        if (isEditableContentSkipElement(node)) return;
+
+        // Recurse into open Shadow DOM when host is not excluded
+        if (node.shadowRoot && !isShadowHostSkipped(node)) {
+          attachRootObserver(node.shadowRoot);
+          walkSubtree(node.shadowRoot);
+        }
+
+        const children = getChildList(node);
+        for (let i = 0; i < children.length; i++) {
+          walkSubtree(children[i]);
+        }
+        return;
+      }
+
+      // Document (9) or DocumentFragment / ShadowRoot (11)
+      if (nt === 9 || nt === 11 || node.childNodes || node.children) {
+        if (node.host && isShadowHostSkipped(node.host)) return;
+        const children = getChildList(node);
+        for (let i = 0; i < children.length; i++) {
+          walkSubtree(children[i]);
+        }
+      }
+    }
+
+    function evaluateConflictAndActivation() {
+      if (configuredLocale === 'auto') {
+        const nextAuto = resolveAutoLocale();
+        if (nextAuto !== currentLocale) {
+          restoreAll();
+          currentLocale = nextAuto;
+          compileActivePack();
+          emitStateChange();
+        }
+      }
+      const conflictDetected = detectExternalConflict();
+      if (conflictDetected && conflictPolicy === 'yield') {
+        const changed = yieldedTo !== 'obsidian-prism';
+        yieldedTo = 'obsidian-prism';
+        restoreAll();
+        if (changed) emitStateChange();
+        return false;
+      }
+
+      const wasYielded = yieldedTo !== null;
+      yieldedTo = null;
+      if (wasYielded) emitStateChange();
+
+      if (!enabled || destroyed || currentLocale === 'en') {
+        restoreAll();
+        return false;
+      }
+
+      return true;
+    }
+
+    function isHibernated() {
+      if (!respectHibernation) return false;
+      if (coexist && typeof coexist.isWindowHibernated === 'function') {
+        return Boolean(coexist.isWindowHibernated(doc, win));
+      }
+      return Boolean(doc?.hidden || doc?.documentElement?.getAttribute?.('data-ag-cs-win-blur') === '1');
+    }
+
+    function scanNow(rootNode) {
+      if (destroyed) return false;
+      if (!evaluateConflictAndActivation()) return false;
+      const target = rootNode || doc?.body || doc?.documentElement;
+      if (!target) return false;
+
+      const prevApplying = isApplying;
+      isApplying = true;
+      try {
+        if (target.nodeType === 1 && hasSkippedAncestor(target, true)) {
+          // Target is already inside a skipped container
+        } else if (target.nodeType === 3) {
+          if (!hasSkippedAncestor(target, true)) processTextNode(target);
+        } else {
+          walkSubtree(target);
+        }
+        syncHostMarkers(true);
+      } finally {
+        isApplying = prevApplying;
+      }
+      sweepDeadRefs();
+      return true;
+    }
+
+    function cancelScheduledFlush() {
+      if (!flushScheduled) return;
+      if (flushHandleType === 'raf' && flushHandle !== null && typeof win?.cancelAnimationFrame === 'function') {
+        try { win.cancelAnimationFrame(flushHandle); } catch {}
+      }
+      flushScheduled = false;
+      flushHandle = null;
+      flushHandleType = 'none';
+    }
+
+    function flushPending() {
+      flushScheduled = false;
+      flushHandle = null;
+      flushHandleType = 'none';
+      if (destroyed) return;
+
+      if (isHibernated()) {
+        hibernatedDirty = true;
+        return;
+      }
+      hibernatedDirty = false;
+
+      if (!evaluateConflictAndActivation()) {
+        pendingNodes.clear();
+        pendingFullScan = false;
+        return;
+      }
+
+      if (pendingFullScan) {
+        pendingFullScan = false;
+        pendingNodes.clear();
+        scanNow();
+        return;
+      }
+
+      const batch = Array.from(pendingNodes);
+      pendingNodes.clear();
+      if (batch.length === 0) return;
+
+      const prevApplying = isApplying;
+      isApplying = true;
+      try {
+        for (let i = 0; i < batch.length; i++) {
+          const n = batch[i];
+          if (!n) continue;
+          if (n.nodeType === 3) {
+            if (!hasSkippedAncestor(n, true)) {
+              processTextNode(n);
+            }
+          } else if (n.nodeType === 1) {
+            if (!hasSkippedAncestor(n, true)) {
+              walkSubtree(n);
+            }
+          } else {
+            walkSubtree(n);
+          }
+        }
+        syncHostMarkers(true);
+      } finally {
+        isApplying = prevApplying;
+      }
+
+      flushesSinceSweep += 1;
+      if (
+        flushesSinceSweep >= SWEEP_FLUSH_INTERVAL ||
+        trackedTextRefs.size > SWEEP_REF_THRESHOLD ||
+        trackedAttrRefs.size > SWEEP_REF_THRESHOLD
+      ) {
+        sweepDeadRefs();
+      }
+    }
+
+    function scheduleFlush() {
+      if (flushScheduled || destroyed || !enabled) return;
+      flushScheduled = true;
+      if (typeof win?.requestAnimationFrame === 'function') {
+        flushHandleType = 'raf';
+        flushHandle = win.requestAnimationFrame(() => flushPending());
+      } else {
+        flushHandleType = 'microtask';
+        flushHandle = null;
+        Promise.resolve().then(() => {
+          if (flushScheduled && flushHandleType === 'microtask') {
+            flushPending();
+          }
+        });
+      }
+    }
+
+    function handleMutations(records) {
+      if (destroyed || !enabled || isApplying || !Array.isArray(records) || records.length === 0) return;
+      for (let i = 0; i < records.length; i++) {
+        const rec = records[i];
+        if (!rec) continue;
+        if (rec.type === 'characterData' && rec.target) {
+          pendingNodes.add(rec.target);
+        } else if (rec.type === 'attributes' && rec.target) {
+          pendingNodes.add(rec.target);
+        } else if (rec.type === 'childList') {
+          const added = rec.addedNodes;
+          if (added && added.length) {
+            for (let j = 0; j < added.length; j++) {
+              pendingNodes.add(added[j]);
+            }
+          }
+        }
+        if (pendingNodes.size > 200) {
+          pendingFullScan = true;
+          pendingNodes.clear();
+          break;
+        }
+      }
+      scheduleFlush();
+    }
+
+    function handleHtmlAttrMutations(records) {
+      if (destroyed || !enabled || isApplying || !Array.isArray(records)) return;
+      for (let i = 0; i < records.length; i++) {
+        const attr = records[i]?.attributeName;
+        if (attr === 'data-ag-prism-host-i18n') {
+          pendingFullScan = true;
+          scheduleFlush();
+          return;
+        }
+        if (configuredLocale === 'auto' && (attr === 'data-ag-cs-lang' || attr === 'lang')) {
+          pendingFullScan = true;
+          scheduleFlush();
+          return;
+        }
+        if (attr === 'data-ag-cs-win-blur' && !isHibernated() && hibernatedDirty) {
+          pendingFullScan = true;
+          scheduleFlush();
+          return;
+        }
+      }
+    }
+
+    function handleWakeup() {
+      if (destroyed || !enabled || isHibernated()) return;
+      if (hibernatedDirty || pendingFullScan || pendingNodes.size > 0) {
+        hibernatedDirty = false;
+        scheduleFlush();
+      }
+    }
+
+    function stopObservers() {
+      cancelScheduledFlush();
+      pendingNodes.clear();
+      pendingFullScan = false;
+      hibernatedDirty = false;
+
+      while (observers.length > 0) {
+        const mo = observers.pop();
+        try { mo.disconnect(); } catch {}
+      }
+      while (eventCleanups.length > 0) {
+        const fn = eventCleanups.pop();
+        try { fn(); } catch {}
+      }
+      observedRoots = new WeakSet();
+      observersStarted = false;
+    }
+
+    function startObservers() {
+      if (!autoObserve || !enabled || destroyed || !doc || observersStarted) return;
+      observersStarted = true;
+
+      const bodyTarget = doc.body || doc.documentElement;
+      if (bodyTarget) {
+        attachRootObserver(bodyTarget);
+      }
+
+      const MO = win?.MutationObserver || globalRoot?.MutationObserver;
+      if (typeof MO === 'function' && doc.documentElement) {
+        try {
+          const htmlMo = new MO(handleHtmlAttrMutations);
+          htmlMo.observe(doc.documentElement, {
+            attributes: true,
+            attributeFilter: ['data-ag-prism-host-i18n', 'data-ag-cs-win-blur', 'data-ag-cs-lang', 'lang'],
+          });
+          observers.push(htmlMo);
+        } catch {}
+      }
+
+      if (typeof doc.addEventListener === 'function') {
+        doc.addEventListener('visibilitychange', handleWakeup);
+        eventCleanups.push(() => {
+          try { doc.removeEventListener('visibilitychange', handleWakeup); } catch {}
+        });
+      }
+      if (win && typeof win.addEventListener === 'function') {
+        win.addEventListener('focus', handleWakeup);
+        eventCleanups.push(() => {
+          try { win.removeEventListener('focus', handleWakeup); } catch {}
+        });
+      }
+    }
+
+    function setLocale(nextLocale) {
+      if (destroyed) return currentLocale;
+      const resolved = resolveLocaleConfig(nextLocale);
+      configuredLocale = resolved.configured;
+      currentLocale = resolved.resolved;
+      compileActivePack();
+
+      if (currentLocale === 'en') {
+        restoreAll();
+      } else if (enabled) {
+        startObservers();
+        scanNow();
+      }
+      emitStateChange();
+      return currentLocale;
+    }
+
+    function setEnabled(nextEnabled) {
+      if (destroyed) return enabled;
+      const flag = Boolean(nextEnabled);
+      enabled = flag;
+      if (!enabled) {
+        stopObservers();
+        restoreAll();
+      } else {
+        startObservers();
+        if (currentLocale !== 'en') {
+          scanNow();
+        } else {
+          evaluateConflictAndActivation();
+        }
+      }
+      emitStateChange();
+      return enabled;
+    }
+
+    function setConflictPolicy(nextPolicy) {
+      if (destroyed) return conflictPolicy;
+      conflictPolicy = nextPolicy === 'takeover' ? 'takeover' : 'yield';
+      if (enabled && currentLocale !== 'en') {
+        scanNow();
+      } else {
+        evaluateConflictAndActivation();
+      }
+      emitStateChange();
+      return conflictPolicy;
+    }
+
+    function mergeCustomPack(customPack, targetLocale) {
+      if (destroyed || !customPack || typeof customPack !== 'object') return false;
+      const trimmedTarget = typeof targetLocale === 'string' ? targetLocale.trim() : '';
+      const norm =
+        trimmedTarget && trimmedTarget.toLowerCase() !== 'auto'
+          ? packsMod.normalizeHostLocale(trimmedTarget)
+          : currentLocale;
+      const prev = customPacks.get(norm);
+      const merged = {
+        exact: {
+          ...(prev && prev.exact ? prev.exact : {}),
+          ...(customPack.exact && typeof customPack.exact === 'object' ? customPack.exact : {}),
+        },
+        patterns: [
+          ...(Array.isArray(customPack.patterns) ? customPack.patterns : []),
+          ...(prev && Array.isArray(prev.patterns) ? prev.patterns : []),
+        ],
+      };
+      customPacks.set(norm, merged);
+
+      if (norm === currentLocale) {
+        compileActivePack();
+        if (enabled && currentLocale !== 'en') {
+          scanNow();
+        }
+      }
+      return true;
+    }
+
+    function clearCustomPacks(targetLocale) {
+      if (destroyed) return;
+      if (targetLocale) {
+        const trimmedTarget = typeof targetLocale === 'string' ? targetLocale.trim() : '';
+        const norm =
+          trimmedTarget && trimmedTarget.toLowerCase() !== 'auto'
+            ? packsMod.normalizeHostLocale(trimmedTarget)
+            : currentLocale;
+        customPacks.delete(norm);
+      } else {
+        customPacks.clear();
+      }
+      compileActivePack();
+      if (enabled && currentLocale !== 'en') {
+        scanNow();
+      }
+    }
+
+    function setCollectMissing(flag) {
+      collectMissing = Boolean(flag);
+      return collectMissing;
+    }
+
+    function getMissingPhrases() {
+      return Array.from(missingSet);
+    }
+
+    function clearMissingPhrases() {
+      missingSet.clear();
+    }
+
+    function exportMissingTemplate(locale) {
+      const trimmedTarget = typeof locale === 'string' ? locale.trim() : '';
+      const targetLoc =
+        trimmedTarget && trimmedTarget.toLowerCase() !== 'auto'
+          ? packsMod.normalizeHostLocale(trimmedTarget)
+          : currentLocale;
+      const exact = {};
+      for (const phrase of missingSet) {
+        exact[phrase] = '';
+      }
+      return {
+        meta: {
+          locale: targetLoc,
+          schemaVersion: 2,
+          count: missingSet.size,
+        },
+        exact,
+        patterns: [],
+      };
+    }
+
+    function countLiveTracked(refs, map) {
+      let n = 0;
+      for (const ref of refs) {
+        const obj = ref.deref();
+        if (obj && map.has(obj)) n += 1;
+      }
+      return n;
+    }
+
+    function getConflictState() {
+      return {
+        detected: detectExternalConflict(),
+        yieldedTo,
+        policy: conflictPolicy,
+      };
+    }
+
+    function getDebugState() {
+      const active = Boolean(enabled && !destroyed && !yieldedTo && currentLocale !== 'en');
+      return {
+        enabled,
+        active,
+        destroyed,
+        locale: currentLocale,
+        configuredLocale,
+        conflictPolicy,
+        yieldedTo,
+        conflictDetected: detectExternalConflict(),
+        cacheSize: lookupCache.size,
+        maxCacheSize,
+        exactCount: exactMap.size,
+        lowerCount: lowerMap.size,
+        patternCount: compiledPatterns.length,
+        trackedTextCount: countLiveTracked(trackedTextRefs, textRecords),
+        trackedAttrCount: countLiveTracked(trackedAttrRefs, attrRecords),
+        trackedTextRefCount: trackedTextRefs.size,
+        trackedAttrRefCount: trackedAttrRefs.size,
+        sweepCount,
+        collectMissing,
+        missingCount: missingSet.size,
+        observerCount: observers.length,
+        hibernatedDirty,
+      };
+    }
+
+    function destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      stopObservers();
+      restoreAll();
+      lookupCache.clear();
+      exactMap.clear();
+      lowerMap.clear();
+      compiledPatterns = [];
+      customPacks.clear();
+      missingSet.clear();
+      yieldedTo = null;
+    }
+
+    // Initialize
+    compileActivePack();
+    if (enabled) {
+      startObservers();
+    }
+    if (options.autoScan !== false && doc) {
+      if (enabled && currentLocale !== 'en') {
+        scanNow();
+      } else {
+        evaluateConflictAndActivation();
+      }
+    }
+
+    return {
+      scanNow,
+      translateSubtree: scanNow,
+      translateText,
+      setLocale,
+      getLocale: () => currentLocale,
+      getConfiguredLocale: () => configuredLocale,
+      setEnabled,
+      isEnabled: () => enabled,
+      setConflictPolicy,
+      getConflictState,
+      mergeCustomPack,
+      clearCustomPacks,
+      setCollectMissing,
+      getMissingPhrases,
+      exportMissingTemplate,
+      clearMissingPhrases,
+      restoreAll,
+      getStats: getDebugState,
+      getDebugState,
+      destroy,
+    };
+  }
+
+  return {
+    HARD_SKIP_SELECTORS,
+    ATTR_WHITELIST,
+    applyPatternTemplate,
+    createHostI18nController,
+  };
+});

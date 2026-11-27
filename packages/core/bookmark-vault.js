@@ -1,4 +1,4 @@
-// Antigravity Session Guard — Cross-Session Bookmark & Recap Vault (UMD, zero runtime deps)
+// agy-Sag — Cross-Session Bookmark & Recap Vault (UMD, zero runtime deps)
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory(root);
@@ -8,7 +8,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this, function (globalRoot) {
   'use strict';
 
-  const META_STORAGE_PREFIX = 'agSessionGuard.bookmarkMeta.v1:';
+  const META_STORAGE_PREFIX = 'agSag.bookmarkMeta.v1:';
 
   function resolveDep(globalKey, relPath) {
     if (globalRoot && globalRoot[globalKey]) return globalRoot[globalKey];
@@ -130,7 +130,7 @@
   function listAllSessions(storage) {
     if (!storage) return [];
     const exporter = resolveDep('__agSgPrecompactExport', './precompact-export.js');
-    const bmPrefix = exporter?.BOOKMARK_STORAGE_PREFIX || 'agSessionGuard.bookmarks.v1:';
+    const bmPrefix = exporter?.BOOKMARK_STORAGE_PREFIX || 'agSag.bookmarks.v1:';
     const keys = storageKeys(storage);
     const cids = new Set();
 

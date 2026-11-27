@@ -1,19 +1,21 @@
 #!/usr/bin/env node
 /**
- * Antigravity Session Guard — Zero-Dependency Environment & Prism Coexistence Doctor CLI
+ * agy-Sag — Zero-Dependency Environment, Prism Coexistence & Dual-Star Doctor CLI
  *
  * 100% Read-Only Diagnostics:
  *   1. Validates Node.js >= 22 + native WebSocket support.
  *   2. Checks Obsidian Prism installation / local beta checkout & unified-settings hooks.
- *   3. Discovers Antigravity CDP port across macOS / Windows / Linux and probes host windows.
- *   4. Reports Session Guard mount/yield status, Prism coexistence, context %, bookmarks & drafts.
- *   5. Prints platform-specific remediation steps when anything needs setup.
+ *   3. Checks companion plugin agy-NOV installation for dual-star synergy.
+ *   4. Discovers Antigravity CDP port across macOS / Windows / Linux and probes host windows.
+ *   5. Reports agy-Sag mount/yield status, Prism coexistence, sagModules state, context %, bookmarks & drafts.
+ *   6. Prints platform-specific remediation steps when anything needs setup.
  */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { discoverCdpPort, evalViaCdp, httpGetJson, isAntigravityHostTarget } from './cdp-attach.mjs';
+import { NOV_MODULE_IDS, readNovState } from './nov-bridge.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -22,9 +24,9 @@ export const DOCTOR_PROBE_EXPRESSION = `(() => {
   const html = document.documentElement;
   const settingsSec = document.getElementById('ag-cs-settings-sec');
   const modulesGroup = settingsSec?.querySelector?.('[data-ag-cs-group="modules"]') || null;
-  const sgApi = window.__agSessionGuard || null;
+  const sgApi = window.__agSag || window.__agSessionGuard || null;
   const sgState = sgApi?.getDebugState?.() || null;
-  const owner = window.__agSessionGuardOwner || null;
+  const owner = window.__agSagOwner || window.__agSessionGuardOwner || null;
 
   let versionHint = '';
   try {
@@ -38,10 +40,10 @@ export const DOCTOR_PROBE_EXPRESSION = `(() => {
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i) || '';
-      if (k.startsWith('agSessionGuard.bookmarks.v1:')) {
+      if (k.startsWith('agSag.bookmarks.v1:') || k.startsWith('agSessionGuard.bookmarks.v1:')) {
         const arr = JSON.parse(localStorage.getItem(k) || '[]');
         if (Array.isArray(arr)) bookmarkCount += arr.length;
-      } else if (k.startsWith('agSessionGuard.draft.v1:')) {
+      } else if (k.startsWith('agSag.draft.v1:') || k.startsWith('agSessionGuard.draft.v1:')) {
         draftCount += 1;
       }
     }
@@ -60,6 +62,11 @@ export const DOCTOR_PROBE_EXPRESSION = `(() => {
     } catch {}
   }
 
+  let quotaSummary = null;
+  try {
+    quotaSummary = sgApi?.quotaPulse?.getSummary?.() || null;
+  } catch {}
+
   const state =
     owner && owner !== 'standalone'
       ? 'yielded'
@@ -68,9 +75,9 @@ export const DOCTOR_PROBE_EXPRESSION = `(() => {
         : 'missing';
 
   return {
-    lang: html?.getAttribute?.('data-ag-cs-lang') || html?.getAttribute?.('lang') || navigator.language || '',
-    theme: html?.getAttribute?.('data-ag-cs-theme') || '',
-    sessionGuard: {
+    lang: html?.getAttribute?.('data-ag-sag-lang') || html?.getAttribute?.('data-ag-cs-lang') || html?.getAttribute?.('lang') || navigator.language || '',
+    theme: html?.getAttribute?.('data-ag-sag-theme-preset') || html?.getAttribute?.('data-ag-cs-theme') || '',
+    sag: {
       state,
       owner: owner || (state === 'mounted' ? 'standalone' : null),
       version: sgApi?.version || null,
@@ -80,6 +87,14 @@ export const DOCTOR_PROBE_EXPRESSION = `(() => {
       prismSettingsEmbedded: Boolean(sgState?.prismBridge?.embedded),
       bookmarkCount,
       draftCount,
+    },
+    sagModules: {
+      hostI18nLocale: sgState?.hostI18n?.locale || sgState?.compactGuard?.config?.hostI18nLocale || null,
+      hostI18nActive: Boolean(sgState?.hostI18n?.active),
+      queueCount: Number(sgState?.promptQueue?.itemCount || 0),
+      autoAcceptEnabled: Boolean(sgState?.safeAutoAccept?.enabled),
+      themePreset: sgState?.themeStudio?.settings?.preset || sgState?.compactGuard?.config?.themePreset || 'native',
+      quotaHealth: quotaSummary?.health || (sgState?.quotaPulse?.observed?.rateLimited ? 'limited' : 'ok'),
     },
     obsidianPrism: {
       active: Boolean(
@@ -205,8 +220,40 @@ export function inspectPrismInstall({
   };
 }
 
+export function inspectNovInstall({ homeDir = os.homedir(), env = process.env, explicitDataDir = null } = {}) {
+  const defaultDir = path.join(homeDir, '.gemini', 'config', 'plugins', 'agy-nov');
+  const state = readNovState({ homeDir, env, explicitDataDir });
+  const enabledModules = Array.isArray(state.enabledModules)
+    ? state.enabledModules
+    : NOV_MODULE_IDS.filter((id) => Boolean(state.config?.modules?.[id]));
+
+  return {
+    found: Boolean(state.installed),
+    dir: state.pluginDir || defaultDir,
+    version: state.version ?? null,
+    dataDir: state.dataDir,
+    configPath: state.configPath,
+    configExists: Boolean(state.configExists),
+    preset: state.config?.preset || 'core',
+    locale: state.config?.locale || 'auto',
+    enabledModules,
+    enabledCount: enabledModules.length,
+    totalModules: NOV_MODULE_IDS.length,
+    enabledToolsCount: state.enabledToolsCount ?? 0,
+    bridgeReady: Boolean(state.installed),
+  };
+}
+
 export function buildRemediationHints(report, platform = process.platform) {
   const hints = [];
+  const appendNovCompanionHint = () => {
+    if (report.novInstall && !report.novInstall.found) {
+      hints.push(
+        '推荐搭配安装 agy-NOV（零 CDP 原生协议工作台：PR Diff 审阅、PreToolUse 安全护盾、Token 透视与手机远程审批），与 agy-Sag 组成双星协同工作台。'
+      );
+    }
+  };
+
   if (!report.node?.ok) {
     hints.push('Upgrade to Node.js >= 22.0.0 so built-in global WebSocket is available without npm dependencies.');
   }
@@ -219,26 +266,28 @@ export function buildRemediationHints(report, platform = process.platform) {
       hints.push('Launch Antigravity with --remote-debugging-port=0 and re-run: npm run doctor');
     }
     hints.push('If Antigravity uses a custom port, run: npm run doctor -- --port=<PORT>');
+    appendNovCompanionHint();
     return hints;
   }
 
   const pages = Array.isArray(report.windows) ? report.windows : [];
   if (pages.length === 0) {
     hints.push('CDP is reachable, but no Antigravity conversation host window was found. Open an Antigravity window and re-run.');
+    appendNovCompanionHint();
     return hints;
   }
 
-  const missingCount = pages.filter((w) => w.probe?.sessionGuard?.state === 'missing').length;
+  const missingCount = pages.filter((w) => (w.probe?.sag || w.probe?.sessionGuard)?.state === 'missing').length;
   if (missingCount > 0) {
-    hints.push(`Attach Session Guard to ${missingCount} unmounted window(s): npm run attach (or keep auto-attached with: npm run watch)`);
+    hints.push(`Attach agy-Sag to ${missingCount} unmounted window(s): npm run attach (or keep auto-attached with: npm run watch)`);
   }
 
   const prismActive = pages.some((w) => w.probe?.obsidianPrism?.active);
-  const yieldedCount = pages.filter((w) => w.probe?.sessionGuard?.state === 'yielded').length;
+  const yieldedCount = pages.filter((w) => (w.probe?.sag || w.probe?.sessionGuard)?.state === 'yielded').length;
   if (yieldedCount > 0) {
-    hints.push('Obsidian Prism natively owns Session Guard on yielded window(s); standalone auto-yielded cleanly with zero duplicates.');
+    hints.push('Obsidian Prism natively owns agy-Sag on yielded window(s); standalone auto-yielded cleanly with zero duplicates.');
   } else if (prismActive && missingCount === 0) {
-    hints.push('Obsidian Prism + Session Guard are coexisting smoothly: open Prism Settings -> Modules tab to configure both in one place.');
+    hints.push('Obsidian Prism + agy-Sag are coexisting smoothly: open Prism Settings -> Modules tab to configure both in one place.');
   }
 
   if (
@@ -250,6 +299,7 @@ export function buildRemediationHints(report, platform = process.platform) {
       `Local Prism dev repo is v${report.prismInstall.devCheckout.version} while installed plugin is v${report.prismInstall.installed.version}; run npm test to validate latest beta compatibility.`
     );
   }
+  appendNovCompanionHint();
   return hints;
 }
 
@@ -263,6 +313,12 @@ export async function runDoctor(options = {}) {
       homeDir,
       repoRoot: options.repoRoot || REPO_ROOT,
       explicitPrismDir: options.prismDir || null,
+      env: options.env || process.env,
+    });
+  const novInstall =
+    options.novInstall ||
+    inspectNovInstall({
+      homeDir,
       env: options.env || process.env,
     });
 
@@ -307,8 +363,8 @@ export async function runDoctor(options = {}) {
     }
   }
 
-  const mountedCount = windows.filter((w) => w.probe?.sessionGuard?.state === 'mounted').length;
-  const yieldedCount = windows.filter((w) => w.probe?.sessionGuard?.state === 'yielded').length;
+  const mountedCount = windows.filter((w) => (w.probe?.sag || w.probe?.sessionGuard)?.state === 'mounted').length;
+  const yieldedCount = windows.filter((w) => (w.probe?.sag || w.probe?.sessionGuard)?.state === 'yielded').length;
   const ok = Boolean(nodeInfo.ok && cdp.reachable && cdp.hostWindowCount > 0 && mountedCount + yieldedCount > 0);
 
   const report = {
@@ -317,6 +373,7 @@ export async function runDoctor(options = {}) {
     platform,
     node: nodeInfo,
     prismInstall,
+    novInstall,
     cdp,
     windows,
     hints: [],
@@ -327,8 +384,8 @@ export async function runDoctor(options = {}) {
 
 export function formatDoctorHuman(report) {
   const lines = [];
-  lines.push('Antigravity Session Guard · Environment Doctor');
-  lines.push('==============================================');
+  lines.push('agy-Sag · Environment Doctor');
+  lines.push('============================');
 
   const n = report.node;
   lines.push(`${n.ok ? '✔' : '✖'} Node.js: ${n.version} (WebSocket: ${n.hasWebSocket ? 'available' : 'missing'})`);
@@ -344,6 +401,22 @@ export function formatDoctorHuman(report) {
   if (pd?.found) {
     const hook = pd.unifiedSettingsHookReady ? 'unified settings hook OK' : 'settings hook unknown';
     lines.push(`ℹ Obsidian Prism (dev checkout): v${pd.version} [${pd.channel}] · ${hook}`);
+  }
+
+  if (report.novInstall?.found) {
+    const verPart = report.novInstall.version ? ` v${report.novInstall.version}` : '';
+    lines.push(`✔ 双星协同：agy-NOV${verPart} + agy-Sag`);
+    if (report.novInstall.preset) {
+      const enabledCount = report.novInstall.enabledCount ?? 0;
+      const totalModules = report.novInstall.totalModules ?? NOV_MODULE_IDS.length;
+      const cfgPart = report.novInstall.configPath ? ` · config: ${report.novInstall.configPath}` : '';
+      const bridgePart = report.novInstall.bridgeReady ? ' · 双星协同桥就绪' : '';
+      lines.push(
+        `  ↳ preset=${report.novInstall.preset} (${enabledCount}/${totalModules} modules, locale=${report.novInstall.locale || 'auto'})${cfgPart}${bridgePart}`
+      );
+    }
+  } else if (report.novInstall) {
+    lines.push('ℹ agy-NOV (companion): not installed (optional zero-CDP native MCP Apps workbench)');
   }
 
   if (report.cdp.port && report.cdp.reachable) {
@@ -364,16 +437,27 @@ export function formatDoctorHuman(report) {
         lines.push(`  ✖ ${w.title || w.url}: probe failed (${w.error || 'unknown'})`);
         continue;
       }
-      const sg = w.probe.sessionGuard;
+      const sg = w.probe.sag || w.probe.sessionGuard;
+      if (!sg) {
+        lines.push(`  ✖ ${w.title || w.url}: probe missing agy-Sag payload`);
+        continue;
+      }
       const pr = w.probe.obsidianPrism;
+      const sm = w.probe.sagModules;
       const icon = sg.state === 'mounted' || sg.state === 'yielded' ? '✔' : '⚠';
       const ctxTxt = w.probe.context?.usedPct !== null ? `${w.probe.context.usedPct}%` : 'n/a';
       const prismTxt = pr.active
         ? `Prism ${pr.versionHint ? `v${pr.versionHint}` : 'active'}${sg.prismSettingsEmbedded ? ' (settings unified)' : ''}`
         : 'no Prism';
       lines.push(
-        `  ${icon} ${w.title || '(untitled)'} — SG: ${sg.state}${sg.threshold ? ` (${sg.threshold}%/${sg.mode})` : ''} | ${prismTxt} | ctx: ${ctxTxt} | ★ ${sg.bookmarkCount} | drafts: ${sg.draftCount}`
+        `  ${icon} ${w.title || '(untitled)'} — agy-Sag: ${sg.state}${sg.threshold ? ` (${sg.threshold}%/${sg.mode})` : ''} | ${prismTxt} | ctx: ${ctxTxt} | ★ ${sg.bookmarkCount} | drafts: ${sg.draftCount}`
       );
+      if (sm && typeof sm === 'object') {
+        const i18nTxt = sm.hostI18nActive ? `${sm.hostI18nLocale || 'active'}` : `off (${sm.hostI18nLocale || 'en'})`;
+        lines.push(
+          `    Modules: hostI18n=${i18nTxt} | queue=${sm.queueCount ?? 0} | autoAccept=${sm.autoAcceptEnabled ? 'on' : 'off'} | theme=${sm.themePreset || 'native'} | quota=${sm.quotaHealth || 'ok'}`
+        );
+      }
     }
   }
 
@@ -388,8 +472,8 @@ export function formatDoctorHuman(report) {
   return lines.join('\n');
 }
 
-async function runCli() {
-  const opts = parseDoctorArgs(process.argv.slice(2));
+export async function runDoctorCli(argv = process.argv.slice(2)) {
+  const opts = parseDoctorArgs(argv);
   const report = await runDoctor(opts);
   if (opts.json) {
     console.log(JSON.stringify(report, null, 2));
@@ -399,12 +483,13 @@ async function runCli() {
   if (!report.node.ok || (report.cdp.port && !report.cdp.reachable)) {
     process.exitCode = 1;
   }
+  return report;
 }
 
 const isEntry = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 if (isEntry) {
-  runCli().catch((err) => {
-    console.error('[agy-session-guard:doctor]', err?.message || err);
+  runDoctorCli(process.argv.slice(2)).catch((err) => {
+    console.error('[agy-Sag:doctor]', err?.message || err);
     process.exitCode = 1;
   });
 }

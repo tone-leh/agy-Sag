@@ -1,4 +1,4 @@
-// Antigravity Session Guard — Context Telemetry & Multi-Pane Split View Host DOM Adapter (UMD)
+// agy-Sag — Context Telemetry & Multi-Pane Split View Host DOM Adapter (UMD)
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory(root);

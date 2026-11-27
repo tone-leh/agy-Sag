@@ -36,7 +36,7 @@ test('Doctor CLI: inspects installed Obsidian Prism beta & unified settings hook
       "const SETTINGS_SEC_ID = 'ag-cs-settings-sec'; sa(el, 'data-ag-cs-group', 'modules');"
     );
 
-    const res = inspectPrismInstall({ homeDir: tmp, repoRoot: path.join(tmp, 'agy-session-guard'), env: {} });
+    const res = inspectPrismInstall({ homeDir: tmp, repoRoot: path.join(tmp, 'agy-Sag'), env: {} });
     assert.equal(res.installed.found, true);
     assert.equal(res.installed.version, '1.0.8-beta.3');
     assert.equal(res.installed.channel, 'beta');
@@ -46,7 +46,7 @@ test('Doctor CLI: inspects installed Obsidian Prism beta & unified settings hook
   }
 });
 
-test('Doctor CLI: reports healthy Obsidian Prism + Session Guard coexistence and formats readable summary', async () => {
+test('Doctor CLI: reports healthy Obsidian Prism + agy-Sag coexistence and formats readable summary', async () => {
   const report = await runDoctor({
     platform: 'darwin',
     nodeInfo: { ok: true, version: 'v22.15.0', major: 22, hasWebSocket: true },
@@ -62,10 +62,10 @@ test('Doctor CLI: reports healthy Obsidian Prism + Session Guard coexistence and
     evalTarget: async () => ({
       lang: 'zh-CN',
       theme: 'light',
-      sessionGuard: {
+      sag: {
         state: 'mounted',
         owner: 'standalone',
-        version: '0.4.0',
+        version: '1.0.0',
         codeHash: 'abcd1234',
         threshold: 80,
         mode: 'confirm',
@@ -87,7 +87,7 @@ test('Doctor CLI: reports healthy Obsidian Prism + Session Guard coexistence and
 
   assert.equal(report.ok, true);
   assert.equal(report.cdp.hostWindowCount, 1);
-  assert.equal(report.windows[0].probe.sessionGuard.prismSettingsEmbedded, true);
+  assert.equal(report.windows[0].probe.sag.prismSettingsEmbedded, true);
 
   const text = formatDoctorHuman(report);
   assert.ok(text.includes('Obsidian Prism (installed): v1.0.8-beta.3 [beta]'));
@@ -107,7 +107,7 @@ test('Doctor CLI: emits platform-specific remediation hints when CDP port is mis
 test('Plugin installer: copies plugin.json, sidecar manifest, core modules & CLI cleanly into target dir', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-sg-plg-'));
   try {
-    const target = path.join(tmp, 'agy-session-guard');
+    const target = path.join(tmp, 'agy-sag');
     const res = installLocalPlugin({ targetDir: target });
     assert.equal(res.ok, true);
     assert.ok(res.filesCopied >= 18);

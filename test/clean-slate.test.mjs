@@ -183,7 +183,7 @@ test('CleanSlate controller: intercepts /clear on Enter, clicks exact same-proje
     removeEventListener() {},
   };
 
-  const guard1 = core.mountSessionGuard({
+  const guard1 = core.mountSag({
     win: win1,
     doc: dom1.doc,
     storage,
@@ -243,7 +243,7 @@ test('CleanSlate controller: intercepts /clear on Enter, clicks exact same-proje
     addEventListener() {},
     removeEventListener() {},
   };
-  const guard2 = core.mountSessionGuard({
+  const guard2 = core.mountSag({
     win: win2,
     doc: dom2.doc,
     storage,

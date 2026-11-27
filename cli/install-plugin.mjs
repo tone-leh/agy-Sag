@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Antigravity Session Guard — Native Antigravity Plugin Installer (Zero runtime deps)
+ * agy-Sag — Native Antigravity Plugin Installer (Zero runtime deps)
  *
  * Installs the runtime plugin bundle (plugin.json + sidecars/daemon + packages/core + cli + assets)
- * into ~/.gemini/config/plugins/agy-session-guard/ so Antigravity manages the Zero-ASAR watch sidecar
- * alongside Obsidian Prism with zero app.asar modification.
+ * into ~/.gemini/config/plugins/agy-sag/ so Antigravity manages the Zero-ASAR watch sidecar
+ * alongside Obsidian Prism & agy-NOV with zero app.asar modification.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,12 +14,12 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
 
-export const PLUGIN_ROOT_FILES = ['plugin.json', 'package.json', 'README.md', 'README.zh-CN.md', 'LICENSE'];
+export const PLUGIN_ROOT_FILES = ['plugin.json', 'package.json', 'README.md', 'README.zh-CN.md', 'AGENTS.md', 'LICENSE'];
 export const PLUGIN_SUBDIRS = ['assets', 'packages/core', 'cli', 'sidecars/daemon'];
 
 export function parseInstallArgs(argv) {
   const opts = {
-    targetDir: path.join(os.homedir(), '.gemini', 'config', 'plugins', 'agy-session-guard'),
+    targetDir: path.join(os.homedir(), '.gemini', 'config', 'plugins', 'agy-sag'),
     dryRun: false,
   };
   for (const a of argv || []) {
@@ -74,16 +74,21 @@ export function installLocalPlugin({ repoRoot = REPO_ROOT, targetDir, dryRun = f
   };
 }
 
+export function runInstallPluginCli(argv = process.argv.slice(2)) {
+  const opts = parseInstallArgs(argv);
+  const res = installLocalPlugin(opts);
+  console.log(
+    `[agy-Sag:install] ${res.dryRun ? 'Dry-run' : 'Installed'} ${res.filesCopied} files -> ${res.targetDir}`
+  );
+  return res;
+}
+
 const isEntry = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 if (isEntry) {
   try {
-    const opts = parseInstallArgs(process.argv.slice(2));
-    const res = installLocalPlugin(opts);
-    console.log(
-      `[agy-session-guard:install] ${res.dryRun ? 'Dry-run' : 'Installed'} ${res.filesCopied} files -> ${res.targetDir}`
-    );
+    runInstallPluginCli(process.argv.slice(2));
   } catch (err) {
-    console.error('[agy-session-guard:install]', err?.message || err);
+    console.error('[agy-Sag:install]', err?.message || err);
     process.exitCode = 1;
   }
 }

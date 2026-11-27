@@ -1,4 +1,4 @@
-// Antigravity Session Guard — Clean Slate (/clear & Same-Project Fresh Restart, UMD, zero runtime deps)
+// agy-Sag — Clean Slate (/clear & Same-Project Fresh Restart, UMD, zero runtime deps)
 // Since Antigravity trajectories are append-only per cascadeId, a true zero-bloat /clear opens a fresh
 // conversation in the SAME project (0% context, 0 old images, 0 tool logs, minimal token cache) and
 // optionally carries over an ultra-compact pure-text brief (<= 1200 chars, secrets & code blocks stripped).
@@ -11,7 +11,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this, function (globalRoot) {
   'use strict';
 
-  const PENDING_CLEAR_KEY = 'agSessionGuard.pendingClear.v1';
+  const PENDING_CLEAR_KEY = 'agSag.pendingClear.v1';
   const PENDING_TTL_MS = 45 * 1000;
   const MAX_BRIEF_CHARS = 1200;
 

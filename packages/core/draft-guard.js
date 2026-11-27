@@ -1,4 +1,4 @@
-// Antigravity Session Guard — Composer Draft Auto-Save & Crash/Switch Recovery (UMD, zero runtime deps)
+// agy-Sag — Composer Draft Auto-Save & Crash/Switch Recovery (UMD, zero runtime deps)
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory(root);
@@ -8,7 +8,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this, function (globalRoot) {
   'use strict';
 
-  const DRAFT_STORAGE_PREFIX = 'agSessionGuard.draft.v1:';
+  const DRAFT_STORAGE_PREFIX = 'agSag.draft.v1:';
   const DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
   const MAX_DRAFT_CHARS = 16000;
   const MIN_DRAFT_CHARS = 2;

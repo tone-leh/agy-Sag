@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PROBE_EXPRESSION, SessionGuardWatchDaemon, parseWatchArgs } from '../cli/watch-daemon.mjs';
+import { PROBE_EXPRESSION, SagWatchDaemon, parseWatchArgs } from '../cli/watch-daemon.mjs';
 
 test('parseWatchArgs validates flags and rejects invalid ranges', () => {
   const parsed = parseWatchArgs([
@@ -33,7 +33,7 @@ test('parseWatchArgs validates flags and rejects invalid ranges', () => {
   assert.throws(() => parseWatchArgs(['--mode=invalid']));
 });
 
-test('SessionGuardWatchDaemon: adaptive backoff on missing/unreachable port, auto-attach, reload recovery, host yield & clean stop', async () => {
+test('SagWatchDaemon: adaptive backoff on missing/unreachable port, auto-attach, reload recovery, host yield & clean stop', async () => {
   let port = null;
   let targets = [];
   let listThrows = false;
@@ -42,7 +42,7 @@ test('SessionGuardWatchDaemon: adaptive backoff on missing/unreachable port, aut
   let mountedHashes = new Map();
   let yieldedTargets = new Set();
 
-  const daemon = new SessionGuardWatchDaemon({
+  const daemon = new SagWatchDaemon({
     intervalMs: 1000,
     maxBackoffMs: 4000,
     discoverPort: () => port,

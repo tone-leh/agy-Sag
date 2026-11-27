@@ -1,4 +1,4 @@
-// Antigravity Session Guard — Compact Guard Controller (Module G + Smart Focus + Post-Compact Recovery + Watchdog, UMD)
+// agy-Sag — Compact Guard Controller (Module G + Smart Focus + Post-Compact Recovery + Watchdog, UMD)
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory(root);

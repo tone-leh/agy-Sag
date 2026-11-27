@@ -1,4 +1,4 @@
-// Antigravity Session Guard — Turn Stall Watchdog (+5m Snooze & Elapsed Duration) & Context Burn-Rate Estimator (UMD, zero runtime deps)
+// agy-Sag — Turn Stall Watchdog (+5m Snooze & Elapsed Duration) & Context Burn-Rate Estimator (UMD, zero runtime deps)
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory(root);

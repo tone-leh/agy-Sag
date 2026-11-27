@@ -1,4 +1,4 @@
-// Antigravity Session Guard — Outline & Turn Bookmarks Controller + Native Jump Drawer (Module D, UMD)
+// agy-Sag — Outline & Turn Bookmarks Controller + Native Jump Drawer (Module D, UMD)
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory(root);

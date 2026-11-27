@@ -4,7 +4,7 @@
     "main.mjs"
   ],
   "restart_policy": "always",
-  "display_name": "Session Guard Watch Daemon",
-  "description": "Zero-ASAR adaptive-backoff CDP watcher that auto-attaches Session Guard to Antigravity windows and coexists cleanly with Obsidian Prism.",
+  "display_name": "agy-Sag Watch Daemon",
+  "description": "Zero-ASAR adaptive-backoff CDP watcher that auto-attaches agy-Sag (10-language UI translation, compact guard, prompt queue, themes & power modules) to Antigravity windows.",
   "has_web_ui": false
 }

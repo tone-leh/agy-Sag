@@ -142,7 +142,7 @@ test('DraftGuard controller: auto-saves unsent draft, recovers after reload with
   // Session 1: user types a long draft with a secret token and window reloads/crashes before send
   const dom1 = createDraftDom(cid);
   const win1 = { document: dom1.doc, localStorage: storage, Event, navigator: { language: 'zh-CN' }, addEventListener() {}, removeEventListener() {} };
-  const guard1 = core.mountSessionGuard({
+  const guard1 = core.mountSag({
     win: win1,
     doc: dom1.doc,
     storage,
@@ -163,7 +163,7 @@ test('DraftGuard controller: auto-saves unsent draft, recovers after reload with
   const dom2 = createDraftDom(cid);
   const restoredEvents = [];
   const win2 = { document: dom2.doc, localStorage: storage, Event, navigator: { language: 'zh-CN' }, addEventListener() {}, removeEventListener() {} };
-  const guard2 = core.mountSessionGuard({
+  const guard2 = core.mountSag({
     win: win2,
     doc: dom2.doc,
     storage,

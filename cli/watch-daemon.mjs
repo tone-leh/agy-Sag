@@ -1,26 +1,515 @@
 #!/usr/bin/env node
 /**
- * Antigravity Session Guard — Zero-ASAR Standalone Watch Daemon (Zero runtime npm deps)
+ * agy-Sag — Zero-ASAR Standalone Watch Daemon (Zero runtime npm deps)
  *
  * Continuously watches an existing localhost Antigravity CDP port and automatically
- * attaches Session Guard to newly opened or reloaded Antigravity host windows.
+ * attaches agy-Sag to newly opened or reloaded Antigravity host windows.
  *
  * Safety rules:
  *   1. Never modifies app.asar or any application binary/bundle.
  *   2. Never restarts, spawns, or kills Antigravity.
  *   3. Adaptive backoff (default 3s active -> up to 30s steady-state / waiting-port) for near-zero idle overhead.
  *   4. Uses a lightweight probe on already-attached targets to detect Cmd+R reloads without re-evaluating the bundle.
- *   5. Honors host integrator ownership (window.__agSessionGuardOwner) and never overrides yielded windows.
+ *   5. Honors host integrator ownership (window.__agSagOwner / legacy __agSessionGuardOwner) and never overrides yielded windows.
  */
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildInjectExpression, computeCoreHash } from './bundle.mjs';
-import { discoverCdpPort, evalViaCdp, httpGetJson, isAntigravityHostTarget } from './cdp-attach.mjs';
+import {
+  buildConfigPatchFromOpts,
+  discoverCdpPort,
+  evalViaCdp,
+  httpGetJson,
+  isAntigravityHostTarget,
+  validateHostLang,
+  validatePresetName,
+} from './cdp-attach.mjs';
+import { handleBridgePayload, readNovState } from './nov-bridge.mjs';
+
+export const HOST_BRIDGE_BINDING_NAME = '__agSagHostBridge';
+
+export function serializeInlineJson(value) {
+  return (JSON.stringify(value) ?? 'null').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+}
+
+function collectChildFrameIds(frameTree, outSet) {
+  if (!frameTree || typeof frameTree !== 'object') return;
+  const children = Array.isArray(frameTree.childFrames) ? frameTree.childFrames : [];
+  for (const child of children) {
+    const id = typeof child?.frame?.id === 'string' && child.frame.id ? child.frame.id : null;
+    if (id) outSet.add(id);
+    collectChildFrameIds(child, outSet);
+  }
+}
+
+function decodeWsMessageData(data) {
+  if (typeof data === 'string') return data;
+  if (Buffer.isBuffer(data)) return data.toString('utf8');
+  if (data instanceof ArrayBuffer) return Buffer.from(data).toString('utf8');
+  if (ArrayBuffer.isView(data)) return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString('utf8');
+  return String(data ?? '');
+}
+
+/**
+ * Read-only check for whether an Obsidian Prism background daemon is currently alive.
+ * Helps agy-Sag coexist politely without prompting redundant restarts.
+ */
+export function isPrismDaemonActive(homeDir = os.homedir()) {
+  try {
+    const pidFile = path.join(path.resolve(homeDir), '.gemini', 'config', 'plugins', 'obsidian-prism', '.daemon.pid');
+    const st = fs.lstatSync(pidFile);
+    if (st.isSymbolicLink() || !st.isFile()) return false;
+    const raw = fs.readFileSync(pidFile, 'utf8').trim();
+    const firstLine = raw.split(/\r?\n/)[0]?.trim() || '';
+    if (!/^\d+$/.test(firstLine)) return false;
+    const pid = Number(firstLine);
+    if (!Number.isInteger(pid) || pid <= 0) return false;
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (err) {
+      return err?.code === 'EPERM';
+    }
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Lightweight persistent CDP session providing zero-port bidirectional communication
+ * via main-context-scoped Runtime.addBinding('__agSagHostBridge') and Runtime.evaluate push/response callbacks.
+ */
+export class HostBridgeSession {
+  constructor({
+    targetId,
+    wsUrl,
+    WebSocketImpl = globalThis.WebSocket,
+    onPayload,
+    onOpen = () => {},
+    onReady = () => {},
+    onClose = () => {},
+    onEvent = () => {},
+  }) {
+    const rawTargetId = targetId !== undefined && targetId !== null ? String(targetId).trim() : '';
+    this.pageTargetId = rawTargetId && !/^wss?:\/\//i.test(rawTargetId) ? rawTargetId : null;
+    this.targetId = rawTargetId || String(wsUrl || '');
+    this.wsUrl = wsUrl;
+    this.WebSocketImpl = WebSocketImpl;
+    this.onPayload = typeof onPayload === 'function' ? onPayload : () => ({ reqId: null, ok: false, error: 'No handler' });
+    this.onOpen = typeof onOpen === 'function' ? onOpen : () => {};
+    this.onReady = typeof onReady === 'function' ? onReady : () => {};
+    this.onClose = typeof onClose === 'function' ? onClose : () => {};
+    this.onEvent = typeof onEvent === 'function' ? onEvent : () => {};
+
+    this.ws = null;
+    this.nextId = 1;
+    this.ready = false;
+    this.closed = false;
+    this.mainFrameId = null;
+    this.mainContextId = null;
+    this._authoritativeMainFrameId = null;
+    this._boundContextId = null;
+    this._frameTreeReqId = null;
+    this._frameTreeResolved = false;
+    this._frameTreeSupported = true;
+    this._executionContexts = new Map(); // ctxId -> { id, frameId, isDefault, type }
+    this._knownChildFrameIds = new Set();
+  }
+
+  isOpen() {
+    if (this.closed || !this.ws) return false;
+    const openState = typeof this.ws.OPEN === 'number' ? this.ws.OPEN : 1;
+    return this.ready && this.ws.readyState === openState;
+  }
+
+  isMainContextReady() {
+    return this.isOpen() && typeof this.mainContextId === 'number';
+  }
+
+  _sendCdpWithId(method, params) {
+    if (this.closed || !this.ws) return null;
+    const openState = typeof this.ws.OPEN === 'number' ? this.ws.OPEN : 1;
+    if (this.ws.readyState !== openState) return null;
+    const id = this.nextId++;
+    const msg = params === undefined ? { id, method } : { id, method, params };
+    try {
+      this.ws.send(JSON.stringify(msg));
+      return id;
+    } catch {
+      return null;
+    }
+  }
+
+  _sendCdp(method, params) {
+    return this._sendCdpWithId(method, params) !== null;
+  }
+
+  _requestFrameTree() {
+    const reqId = this._sendCdpWithId('Page.getFrameTree');
+    if (reqId !== null) {
+      this._frameTreeReqId = reqId;
+      this._frameTreeResolved = false;
+    }
+    return reqId;
+  }
+
+  _findLatestDefaultContextForFrame(frameId) {
+    if (!frameId) return null;
+    let matched = null;
+    for (const ctx of this._executionContexts.values()) {
+      if (ctx.isDefault && ctx.frameId === frameId) {
+        matched = ctx;
+      }
+    }
+    return matched;
+  }
+
+  _bindMainContext(ctxId) {
+    if (!this.isOpen() || typeof ctxId !== 'number') return false;
+    const alreadyBound = this.mainContextId === ctxId && this._boundContextId === ctxId;
+    this.mainContextId = ctxId;
+    if (alreadyBound) return true;
+    const sent = this._sendCdp('Runtime.addBinding', {
+      name: HOST_BRIDGE_BINDING_NAME,
+      executionContextId: ctxId,
+    });
+    if (!sent) return false;
+    this._boundContextId = ctxId;
+    this.onEvent('bridge-ready', {
+      targetId: this.targetId,
+      mainFrameId: this.mainFrameId,
+      mainContextId: ctxId,
+    });
+    try {
+      this.onReady(this);
+    } catch {}
+    return true;
+  }
+
+  _reconcileMainContext() {
+    // 1. Authoritative top-level frame ID locked by Page.getFrameTree / top-level Page.frameNavigated
+    if (this._authoritativeMainFrameId) {
+      this.mainFrameId = this._authoritativeMainFrameId;
+      const matched = this._findLatestDefaultContextForFrame(this._authoritativeMainFrameId);
+      if (matched) {
+        return this._bindMainContext(matched.id);
+      }
+      // Fail-closed: drop any non-authoritative context until the real top frame context arrives
+      this.mainContextId = null;
+      this._boundContextId = null;
+      return false;
+    }
+
+    // 2. Before Page.getFrameTree returns, only allow an exact match against CDP targetId (page.id)
+    //    and never allow an arbitrary child iframe to preempt mainFrameId/mainContextId.
+    if (this.pageTargetId && !this._knownChildFrameIds.has(this.pageTargetId)) {
+      const targetMatched = this._findLatestDefaultContextForFrame(this.pageTargetId);
+      if (targetMatched) {
+        this.mainFrameId = this.pageTargetId;
+        return this._bindMainContext(targetMatched.id);
+      }
+    }
+
+    // 3. Fallback only when Page.getFrameTree is explicitly unsupported by the host/mock:
+    //    accept only an explicit type='default' context whose frameId is not a known child frame.
+    if (!this._frameTreeSupported) {
+      if (this.mainFrameId && !this._knownChildFrameIds.has(this.mainFrameId)) {
+        const existingMatched = this._findLatestDefaultContextForFrame(this.mainFrameId);
+        if (existingMatched) {
+          return this._bindMainContext(existingMatched.id);
+        }
+        this.mainContextId = null;
+        this._boundContextId = null;
+        return false;
+      }
+      for (const ctx of this._executionContexts.values()) {
+        if (!ctx.isDefault || ctx.type !== 'default') continue;
+        if (ctx.frameId && this._knownChildFrameIds.has(ctx.frameId)) continue;
+        if (ctx.frameId) this.mainFrameId = ctx.frameId;
+        return this._bindMainContext(ctx.id);
+      }
+    }
+
+    return false;
+  }
+
+  ensureBinding() {
+    if (!this.isOpen()) return false;
+    if (typeof this.mainContextId !== 'number') {
+      if (this._frameTreeReqId === null && !this._authoritativeMainFrameId) {
+        this._requestFrameTree();
+      }
+      return false;
+    }
+    const sent = this._sendCdp('Runtime.addBinding', {
+      name: HOST_BRIDGE_BINDING_NAME,
+      executionContextId: this.mainContextId,
+    });
+    if (sent) {
+      this._boundContextId = this.mainContextId;
+    }
+    return sent;
+  }
+
+  open() {
+    if (this.closed || this.ws || typeof this.WebSocketImpl !== 'function' || !this.wsUrl) return false;
+    let ws;
+    try {
+      ws = new this.WebSocketImpl(this.wsUrl);
+    } catch (err) {
+      this.closed = true;
+      this.onEvent('bridge-error', { targetId: this.targetId, error: err?.message || String(err) });
+      this.onClose(this);
+      return false;
+    }
+    this.ws = ws;
+
+    const handleOpen = () => {
+      if (this.closed || this.ws !== ws) {
+        try { ws.close(); } catch {}
+        return;
+      }
+      this.ready = true;
+      this._sendCdp('Page.enable');
+      this._requestFrameTree();
+      this._sendCdp('Runtime.enable');
+      this.onEvent('bridge-open', { targetId: this.targetId });
+      try {
+        this.onOpen(this);
+      } catch {}
+    };
+
+    const handleMessage = (ev) => {
+      if (this.closed || this.ws !== ws) return;
+      let msg;
+      try {
+        msg = JSON.parse(decodeWsMessageData(ev?.data));
+      } catch {
+        return;
+      }
+      if (!msg || typeof msg !== 'object') return;
+
+      // Response to Page.getFrameTree: authoritatively lock the top-level frame ID
+      if (this._frameTreeReqId !== null && msg.id === this._frameTreeReqId) {
+        this._frameTreeReqId = null;
+        this._frameTreeResolved = true;
+        const topFrameId =
+          typeof msg.result?.frameTree?.frame?.id === 'string' && msg.result.frameTree.frame.id
+            ? msg.result.frameTree.frame.id
+            : null;
+        if (topFrameId) {
+          this._frameTreeSupported = true;
+          this._knownChildFrameIds.clear();
+          collectChildFrameIds(msg.result.frameTree, this._knownChildFrameIds);
+          this._knownChildFrameIds.delete(topFrameId);
+          this._authoritativeMainFrameId = topFrameId;
+          this.mainFrameId = topFrameId;
+          this._reconcileMainContext();
+        } else if (msg.error) {
+          this._frameTreeSupported = false;
+          this._reconcileMainContext();
+        }
+        return;
+      }
+
+      if (msg.method === 'Page.frameAttached') {
+        const childId = typeof msg.params?.frameId === 'string' && msg.params.frameId ? msg.params.frameId : null;
+        const parentId =
+          typeof msg.params?.parentFrameId === 'string' && msg.params.parentFrameId ? msg.params.parentFrameId : null;
+        if (childId && parentId) {
+          this._knownChildFrameIds.add(childId);
+          if (this.mainFrameId === childId && this._authoritativeMainFrameId !== childId) {
+            this.mainFrameId = null;
+            this.mainContextId = null;
+            this._boundContextId = null;
+            this._reconcileMainContext();
+          }
+        }
+        return;
+      }
+
+      if (msg.method === 'Page.frameNavigated') {
+        const frame = msg.params?.frame;
+        const frameId = typeof frame?.id === 'string' && frame.id ? frame.id : null;
+        if (frameId) {
+          if (frame.parentId) {
+            this._knownChildFrameIds.add(frameId);
+            if (this.mainFrameId === frameId && this._authoritativeMainFrameId !== frameId) {
+              this.mainFrameId = null;
+              this.mainContextId = null;
+              this._boundContextId = null;
+              this._reconcileMainContext();
+            }
+          } else {
+            this._knownChildFrameIds.delete(frameId);
+            this._authoritativeMainFrameId = frameId;
+            this.mainFrameId = frameId;
+            this._reconcileMainContext();
+          }
+        }
+        return;
+      }
+
+      if (msg.method === 'Runtime.executionContextCreated') {
+        const ctx = msg.params?.context;
+        if (ctx && typeof ctx.id === 'number') {
+          const aux = ctx.auxData && typeof ctx.auxData === 'object' ? ctx.auxData : {};
+          const type = typeof aux.type === 'string' ? aux.type : null;
+          const isDefault = aux.isDefault === true && (type === null || type === 'default');
+          const frameId = typeof aux.frameId === 'string' && aux.frameId ? aux.frameId : null;
+          this._executionContexts.set(ctx.id, {
+            id: ctx.id,
+            frameId,
+            isDefault,
+            type,
+          });
+          if (isDefault) {
+            this._reconcileMainContext();
+          }
+        }
+        return;
+      }
+
+      if (msg.method === 'Runtime.executionContextDestroyed') {
+        const destroyedId = msg.params?.executionContextId;
+        if (typeof destroyedId === 'number') {
+          this._executionContexts.delete(destroyedId);
+          if (destroyedId === this.mainContextId) {
+            this.mainContextId = null;
+            if (this._boundContextId === destroyedId) {
+              this._boundContextId = null;
+            }
+            this._reconcileMainContext();
+          }
+        }
+        return;
+      }
+
+      if (msg.method === 'Runtime.executionContextsCleared') {
+        this._executionContexts.clear();
+        this._knownChildFrameIds.clear();
+        this.mainContextId = null;
+        this._boundContextId = null;
+        if (this.isOpen()) {
+          this._requestFrameTree();
+        }
+        return;
+      }
+
+      if (msg.method === 'Runtime.bindingCalled') {
+        const params = msg.params || {};
+        if (params.name !== HOST_BRIDGE_BINDING_NAME) return;
+        // Fail-closed: never dispatch until mainContextId is locked and strictly matches executionContextId
+        if (this.mainContextId === null) {
+          this.onEvent('bridge-ignored', {
+            targetId: this.targetId,
+            reason: 'main-context-unready',
+            executionContextId: typeof params.executionContextId === 'number' ? params.executionContextId : null,
+          });
+          return;
+        }
+        if (typeof params.executionContextId !== 'number' || params.executionContextId !== this.mainContextId) {
+          this.onEvent('bridge-ignored', {
+            targetId: this.targetId,
+            reason: 'non-main-context',
+            executionContextId: typeof params.executionContextId === 'number' ? params.executionContextId : null,
+            expectedContextId: this.mainContextId,
+          });
+          return;
+        }
+        void this._dispatchBindingCall(params.payload, this.mainContextId);
+      }
+    };
+
+    const handleCloseOrError = (kind, err) => {
+      if (this.ws !== ws) return;
+      const wasClosed = this.closed;
+      this.ready = false;
+      this.closed = true;
+      this.ws = null;
+      this.mainContextId = null;
+      this._boundContextId = null;
+      this._frameTreeReqId = null;
+      this._executionContexts.clear();
+      this._knownChildFrameIds.clear();
+      if (kind === 'error') {
+        this.onEvent('bridge-error', {
+          targetId: this.targetId,
+          error: err?.message || (typeof err === 'string' ? err : 'WebSocket error'),
+        });
+      }
+      if (!wasClosed) {
+        try { ws.close?.(); } catch {}
+        this.onEvent('bridge-closed', { targetId: this.targetId });
+        this.onClose(this);
+      }
+    };
+
+    ws.addEventListener('open', handleOpen);
+    ws.addEventListener('message', handleMessage);
+    ws.addEventListener('close', () => handleCloseOrError('close'));
+    ws.addEventListener('error', (err) => handleCloseOrError('error', err));
+    return true;
+  }
+
+  async _dispatchBindingCall(rawPayload, callContextId = this.mainContextId) {
+    let response;
+    try {
+      response = await this.onPayload(rawPayload, { targetId: this.targetId });
+    } catch (err) {
+      response = { reqId: null, ok: false, error: err?.message || String(err) };
+    }
+    if (this.mainContextId !== callContextId) return;
+    this.sendResponse(response);
+  }
+
+  evaluate(expression, { silent = true } = {}) {
+    if (!this.isOpen()) return false;
+    const params = { expression: String(expression), silent: Boolean(silent) };
+    if (typeof this.mainContextId === 'number') {
+      params.contextId = this.mainContextId;
+    }
+    return this._sendCdp('Runtime.evaluate', params);
+  }
+
+  sendResponse(response) {
+    if (!this.isMainContextReady()) return false;
+    const serialized = serializeInlineJson(response);
+    const expression = `(() => { try { window.__agSagBridgeReceiver?.onResponse?.(${serialized}); } catch {} })()`;
+    return this.evaluate(expression, { silent: true });
+  }
+
+  push(eventName, data = {}) {
+    if (!this.isMainContextReady()) return false;
+    const payload = { event: String(eventName || ''), ...data };
+    const serialized = serializeInlineJson(payload);
+    const expression = `(() => { try { window.__agSagBridgeReceiver?.onPush?.(${serialized}); } catch {} })()`;
+    return this.evaluate(expression, { silent: true });
+  }
+
+  close() {
+    if (this.closed && !this.ws) return;
+    const ws = this.ws;
+    this.closed = true;
+    this.ready = false;
+    this.ws = null;
+    this.mainContextId = null;
+    this._boundContextId = null;
+    this._frameTreeReqId = null;
+    this._executionContexts.clear();
+    this._knownChildFrameIds.clear();
+    if (ws) {
+      try { ws.close?.(); } catch {}
+    }
+  }
+}
 
 export const PROBE_EXPRESSION = `(() => {
-  const owner = window.__agSessionGuardOwner;
+  const owner = window.__agSagOwner || window.__agSessionGuardOwner;
   if (owner && owner !== 'standalone') return { state: 'yielded', owner };
-  const api = window.__agSessionGuard;
+  const api = window.__agSag || window.__agSessionGuard;
   if (api && !api.getDebugState?.()?.destroyed) {
     return { state: 'mounted', codeHash: api.__agSgHash || '' };
   }
@@ -61,6 +550,10 @@ export function parseWatchArgs(argv) {
         throw new Error(`Invalid --mode (expected auto-silent|confirm|fill-only|auto-countdown): ${a}`);
       }
       opts.mode = raw;
+    } else if (a.startsWith('--preset=')) {
+      opts.preset = validatePresetName(a.slice('--preset='.length), a);
+    } else if (a.startsWith('--lang=')) {
+      opts.lang = validateHostLang(a.slice('--lang='.length), a);
     } else if (a.startsWith('--interval=')) {
       const n = Number(a.slice('--interval='.length));
       if (!Number.isFinite(n) || n < 500 || n > 60000) {
@@ -81,7 +574,7 @@ export function parseWatchArgs(argv) {
   return opts;
 }
 
-export class SessionGuardWatchDaemon {
+export class SagWatchDaemon {
   constructor(options = {}) {
     this.explicitPort = options.port ?? null;
     this.config = options.config && Object.keys(options.config).length ? options.config : null;
@@ -89,6 +582,7 @@ export class SessionGuardWatchDaemon {
     this.maxBackoffMs = Math.max(this.intervalMs, Number(options.maxBackoffMs) || 30000);
     this.discoverPort = options.discoverPort || ((p) => discoverCdpPort(p));
     this.listTargets = options.listTargets || ((port) => httpGetJson(`http://127.0.0.1:${port}/json/list`));
+    const hasCustomEval = typeof options.evalTarget === 'function';
     this.evalTarget = options.evalTarget || ((wsUrl, expr) => evalViaCdp(wsUrl, expr));
     this.buildInject =
       options.buildInject ||
@@ -101,12 +595,24 @@ export class SessionGuardWatchDaemon {
     this.setTimer = options.setTimer || ((fn, ms) => setTimeout(fn, ms));
     this.clearTimer = options.clearTimer || ((t) => clearTimeout(t));
 
+    this.WebSocketImpl = options.WebSocketImpl || globalThis.WebSocket;
+    this.enableHostBridge =
+      typeof options.enableHostBridge === 'boolean'
+        ? options.enableHostBridge
+        : !hasCustomEval && typeof this.WebSocketImpl === 'function';
+    this.novBridgeOpts = options.novBridgeOpts || {};
+    this.createBridgeSession = typeof options.createBridgeSession === 'function' ? options.createBridgeSession : null;
+
     this.running = false;
+    this._stopped = false;
     this.timer = null;
     this.currentDelayMs = this.intervalMs;
     this.lastPort = null;
     this.cycleCount = 0;
     this.attachedTargets = new Map(); // targetKey -> { codeHash, url, wsUrl, status, updatedAt }
+    this.bridgeSessions = new Map(); // targetKey -> HostBridgeSession
+    this.lastNovSignature = null;
+    this._novSignatureInitialized = false;
   }
 
   emit(type, data = {}) {
@@ -125,11 +631,188 @@ export class SessionGuardWatchDaemon {
     return this.currentDelayMs;
   }
 
+  _computeNovSignature(state) {
+    if (!state) return 'none';
+    return `${state.installed ? '1' : '0'}:${state.version || ''}:${state.configPath || ''}:${state.signature || 'none'}`;
+  }
+
+  _pushInitialNovState(session, key) {
+    if (this._stopped || !this.enableHostBridge || !session) return false;
+    if (this.bridgeSessions.get(key) !== session) return false;
+    let state;
+    try {
+      state = readNovState(this.novBridgeOpts);
+    } catch {
+      return false;
+    }
+    this.lastNovSignature = this._computeNovSignature(state);
+    this._novSignatureInitialized = true;
+    if (session.push?.('nov:state', { state })) {
+      this.emit('nov-state-pushed', {
+        signature: state.signature,
+        preset: state.config?.preset || null,
+        targets: 1,
+        reason: 'initial',
+      });
+      return true;
+    }
+    return false;
+  }
+
+  _handleHostBridgePayload(rawPayload, meta = {}) {
+    if (this._stopped) {
+      return { reqId: null, ok: false, error: 'Watch daemon is stopped' };
+    }
+    // Delegate size check (64KB) and JSON parsing exclusively to handleBridgePayload
+    const res = handleBridgePayload(rawPayload, this.novBridgeOpts);
+    if (res.ok && res._meta?.mutated && res.data) {
+      this.lastNovSignature = this._computeNovSignature(res.data);
+      this._novSignatureInitialized = true;
+      let peersPushed = 0;
+      for (const [key, session] of this.bridgeSessions.entries()) {
+        if (key === meta.targetId) continue;
+        if (session?.push?.('nov:state', { state: res.data })) {
+          peersPushed += 1;
+        }
+      }
+      if (peersPushed > 0) {
+        this.emit('nov-state-pushed', {
+          signature: res.data.signature,
+          preset: res.data.config?.preset || null,
+          targets: peersPushed,
+        });
+      }
+    }
+    return res;
+  }
+
+  _ensureBridgeSession(key, wsUrl, reInjected = false, pageId = null) {
+    if (this._stopped || !this.enableHostBridge || !wsUrl) return null;
+    const existing = this.bridgeSessions.get(key);
+    if (existing && !existing.closed && existing.wsUrl === wsUrl) {
+      if (reInjected) {
+        existing.ensureBinding?.();
+        const isReady =
+          typeof existing.isMainContextReady === 'function'
+            ? existing.isMainContextReady()
+            : Boolean(existing.isOpen?.());
+        if (isReady) {
+          this._pushInitialNovState(existing, key);
+        }
+      }
+      return existing;
+    }
+    if (existing) {
+      try { existing.close?.(); } catch {}
+      this.bridgeSessions.delete(key);
+    }
+
+    const sessionArgs = {
+      targetId: pageId || key,
+      wsUrl,
+      WebSocketImpl: this.WebSocketImpl,
+      onPayload: (rawPayload, meta) => this._handleHostBridgePayload(rawPayload, meta),
+      onReady: (sess) => {
+        this._pushInitialNovState(sess, key);
+      },
+      onClose: (sess) => {
+        if (this.bridgeSessions.get(key) === sess) {
+          this.bridgeSessions.delete(key);
+        }
+      },
+      onEvent: (eventName, data) => this.emit(eventName, data),
+    };
+
+    const session = this.createBridgeSession
+      ? this.createBridgeSession(sessionArgs)
+      : new HostBridgeSession(sessionArgs);
+    this.bridgeSessions.set(key, session);
+    session.open?.();
+    if (this._stopped) {
+      this._closeBridgeSession(key);
+      return null;
+    }
+    return session;
+  }
+
+  _closeBridgeSession(key) {
+    const existing = this.bridgeSessions.get(key);
+    if (!existing) return;
+    this.bridgeSessions.delete(key);
+    try { existing.close?.(); } catch {}
+  }
+
+  _closeAllBridgeSessions() {
+    for (const [key, session] of [...this.bridgeSessions.entries()]) {
+      this.bridgeSessions.delete(key);
+      try { session.close?.(); } catch {}
+    }
+  }
+
+  syncNovStateToBridges({ forcePush = false } = {}) {
+    if (this._stopped || !this.enableHostBridge || this.bridgeSessions.size === 0) {
+      return { pushed: 0, changed: false };
+    }
+    let state;
+    try {
+      state = readNovState(this.novBridgeOpts);
+    } catch {
+      return { pushed: 0, changed: false };
+    }
+    const sig = this._computeNovSignature(state);
+    if (!this._novSignatureInitialized) {
+      const hasReadySession = [...this.bridgeSessions.values()].some((s) =>
+        typeof s?.isMainContextReady === 'function' ? s.isMainContextReady() : Boolean(s?.isOpen?.())
+      );
+      if (!hasReadySession && !forcePush) {
+        return { pushed: 0, changed: false, signature: sig };
+      }
+      this.lastNovSignature = sig;
+      this._novSignatureInitialized = true;
+      if (!forcePush) {
+        return { pushed: 0, changed: false, signature: sig };
+      }
+    }
+    if (!forcePush && sig === this.lastNovSignature) {
+      return { pushed: 0, changed: false, signature: sig };
+    }
+
+    let pushed = 0;
+    for (const session of this.bridgeSessions.values()) {
+      if (session?.push?.('nov:state', { state })) {
+        pushed += 1;
+      }
+    }
+    if (pushed > 0 || forcePush) {
+      this.lastNovSignature = sig;
+    }
+    if (pushed > 0) {
+      this.emit('nov-state-pushed', {
+        signature: state.signature,
+        preset: state.config?.preset || null,
+        targets: pushed,
+      });
+    }
+    return { pushed, changed: pushed > 0 || forcePush, signature: sig, state };
+  }
+
   async reconcileOnce() {
+    if (this._stopped) {
+      return {
+        status: 'stopped',
+        port: null,
+        attached: 0,
+        reused: 0,
+        yielded: 0,
+        errors: 0,
+        nextDelayMs: this.currentDelayMs,
+      };
+    }
     this.cycleCount += 1;
     const port = this.discoverPort(this.explicitPort);
     if (!port) {
       this.attachedTargets.clear();
+      this._closeAllBridgeSessions();
       this.lastPort = null;
       const nextDelayMs = this.cycleCount === 1 ? this.currentDelayMs : this._bumpBackoff(2);
       const out = { status: 'no-port', port: null, attached: 0, reused: 0, yielded: 0, errors: 0, nextDelayMs };
@@ -141,7 +824,20 @@ export class SessionGuardWatchDaemon {
     try {
       targets = await this.listTargets(port);
     } catch (err) {
+      if (this._stopped) {
+        this._closeAllBridgeSessions();
+        return {
+          status: 'stopped',
+          port,
+          attached: 0,
+          reused: 0,
+          yielded: 0,
+          errors: 0,
+          nextDelayMs: this.currentDelayMs,
+        };
+      }
       this.attachedTargets.clear();
+      this._closeAllBridgeSessions();
       this.lastPort = null;
       const nextDelayMs = this._bumpBackoff(2);
       const out = {
@@ -158,8 +854,24 @@ export class SessionGuardWatchDaemon {
       return out;
     }
 
+    if (this._stopped) {
+      this._closeAllBridgeSessions();
+      return {
+        status: 'stopped',
+        port,
+        attached: 0,
+        reused: 0,
+        yielded: 0,
+        errors: 0,
+        nextDelayMs: this.currentDelayMs,
+      };
+    }
+
     const portChanged = this.lastPort !== null && this.lastPort !== port;
-    if (portChanged) this.attachedTargets.clear();
+    if (portChanged) {
+      this.attachedTargets.clear();
+      this._closeAllBridgeSessions();
+    }
     this.lastPort = port;
 
     const hostPages = (Array.isArray(targets) ? targets : []).filter(isAntigravityHostTarget);
@@ -178,6 +890,7 @@ export class SessionGuardWatchDaemon {
     };
 
     for (const page of hostPages) {
+      if (this._stopped) break;
       const key = String(page.id || page.webSocketDebuggerUrl);
       activeKeys.add(key);
       const prev = this.attachedTargets.get(key);
@@ -185,22 +898,26 @@ export class SessionGuardWatchDaemon {
       try {
         if (prev && prev.wsUrl === page.webSocketDebuggerUrl && prev.url === page.url) {
           const probe = await this.evalTarget(page.webSocketDebuggerUrl, PROBE_EXPRESSION);
+          if (this._stopped) break;
           if (probe?.state === 'yielded') {
             yielded += 1;
             prev.status = 'yielded';
             prev.updatedAt = this.now();
+            this._closeBridgeSession(key);
             continue;
           }
           if (probe?.state === 'mounted' && probe.codeHash && probe.codeHash === prev.codeHash) {
             reused += 1;
             prev.updatedAt = this.now();
+            this._ensureBridgeSession(key, page.webSocketDebuggerUrl, false, page.id || null);
             continue;
           }
-          // Window reloaded or Session Guard was cleared -> re-inject cleanly below
+          // Window reloaded or agy-Sag was cleared -> re-inject cleanly below
         }
 
         const bundle = getBundle();
         const res = await this.evalTarget(page.webSocketDebuggerUrl, bundle.expression);
+        if (this._stopped) break;
         changed = true;
         if (res?.yielded) {
           yielded += 1;
@@ -211,6 +928,7 @@ export class SessionGuardWatchDaemon {
             status: 'yielded',
             updatedAt: this.now(),
           });
+          this._closeBridgeSession(key);
           this.emit('target-yielded', { port, targetId: key, title: page.title || '', url: page.url });
         } else if (res?.ok) {
           attached += 1;
@@ -221,6 +939,7 @@ export class SessionGuardWatchDaemon {
             status: 'attached',
             updatedAt: this.now(),
           });
+          this._ensureBridgeSession(key, page.webSocketDebuggerUrl, true, page.id || null);
           this.emit('target-attached', {
             port,
             targetId: key,
@@ -231,22 +950,49 @@ export class SessionGuardWatchDaemon {
         } else {
           errors += 1;
           this.attachedTargets.delete(key);
+          this._closeBridgeSession(key);
           this.emit('target-skipped', { port, targetId: key, title: page.title || '', result: res });
         }
       } catch (err) {
+        if (this._stopped) break;
         errors += 1;
         this.attachedTargets.delete(key);
+        this._closeBridgeSession(key);
         this.emit('target-error', { port, targetId: key, title: page.title || '', error: err?.message || String(err) });
       }
+    }
+
+    if (this._stopped) {
+      this._closeAllBridgeSessions();
+      return {
+        status: 'stopped',
+        port,
+        hostPages: hostPages.length,
+        attached,
+        reused,
+        yielded,
+        errors,
+        nextDelayMs: this.currentDelayMs,
+      };
     }
 
     // Prune closed windows
     for (const key of [...this.attachedTargets.keys()]) {
       if (!activeKeys.has(key)) {
         this.attachedTargets.delete(key);
+        this._closeBridgeSession(key);
         changed = true;
         this.emit('target-closed', { port, targetId: key });
       }
+    }
+    for (const key of [...this.bridgeSessions.keys()]) {
+      if (!activeKeys.has(key)) {
+        this._closeBridgeSession(key);
+      }
+    }
+
+    if (this.enableHostBridge && this.bridgeSessions.size > 0) {
+      this.syncNovStateToBridges();
     }
 
     const nextDelayMs = changed ? this._resetBackoff() : this._bumpBackoff(1.5);
@@ -266,11 +1012,12 @@ export class SessionGuardWatchDaemon {
 
   start() {
     if (this.running) return;
+    this._stopped = false;
     this.running = true;
     const tick = async () => {
-      if (!this.running) return;
+      if (!this.running || this._stopped) return;
       const res = await this.reconcileOnce();
-      if (!this.running) return;
+      if (!this.running || this._stopped) return;
       this.timer = this.setTimer(tick, res.nextDelayMs);
       this.timer?.unref?.();
     };
@@ -278,11 +1025,13 @@ export class SessionGuardWatchDaemon {
   }
 
   stop() {
+    this._stopped = true;
     this.running = false;
     if (this.timer) {
       this.clearTimer(this.timer);
       this.timer = null;
     }
+    this._closeAllBridgeSessions();
     this.emit('stopped', { trackedTargets: this.attachedTargets.size });
   }
 
@@ -292,16 +1041,17 @@ export class SessionGuardWatchDaemon {
       lastPort: this.lastPort,
       currentDelayMs: this.currentDelayMs,
       cycleCount: this.cycleCount,
+      bridgeSessions: this.bridgeSessions.size,
       trackedTargets: [...this.attachedTargets.entries()].map(([id, info]) => ({ id, ...info })),
     };
   }
 }
 
+export const SessionGuardWatchDaemon = SagWatchDaemon; // legacy alias
+
 export async function startWatchDaemonCli(argv = process.argv.slice(2)) {
   const opts = parseWatchArgs(argv);
-  const cfgPatch = {};
-  if (opts.threshold !== null) cfgPatch.compactThreshold = opts.threshold;
-  if (opts.mode !== null) cfgPatch.compactTriggerMode = opts.mode;
+  const cfgPatch = buildConfigPatchFromOpts(opts);
 
   const formatLog = (ev) => {
     if (opts.json) {
@@ -309,27 +1059,30 @@ export async function startWatchDaemonCli(argv = process.argv.slice(2)) {
       return;
     }
     if (ev.event === 'waiting-port') {
-      console.log(`[agy-session-guard:watch] Waiting for Antigravity CDP port... (retry in ${Math.round(ev.nextDelayMs / 1000)}s)`);
+      console.log(`[agy-Sag:watch] Waiting for Antigravity CDP port... (retry in ${Math.round(ev.nextDelayMs / 1000)}s)`);
     } else if (ev.event === 'port-unreachable') {
-      console.log(`[agy-session-guard:watch] Port ${ev.port} unreachable (${ev.error}); retrying in ${Math.round(ev.nextDelayMs / 1000)}s`);
+      console.log(`[agy-Sag:watch] Port ${ev.port} unreachable (${ev.error}); retrying in ${Math.round(ev.nextDelayMs / 1000)}s`);
     } else if (ev.event === 'target-attached') {
-      console.log(`[agy-session-guard:watch] Attached -> "${ev.title || ev.targetId}" (port ${ev.port}, hash ${ev.codeHash})`);
+      console.log(`[agy-Sag:watch] Attached -> "${ev.title || ev.targetId}" (port ${ev.port}, hash ${ev.codeHash})`);
     } else if (ev.event === 'target-yielded') {
-      console.log(`[agy-session-guard:watch] Yielded to host integrator on "${ev.title || ev.targetId}"`);
+      console.log(`[agy-Sag:watch] Yielded to host integrator on "${ev.title || ev.targetId}"`);
     } else if (ev.event === 'target-closed') {
-      console.log(`[agy-session-guard:watch] Target closed -> ${ev.targetId}`);
+      console.log(`[agy-Sag:watch] Target closed -> ${ev.targetId}`);
+    } else if (ev.event === 'nov-state-pushed') {
+      console.log(`[agy-Sag:watch] Synced agy-NOV state (preset=${ev.preset || 'custom'}) -> ${ev.targets} window(s)`);
     } else if (ev.event === 'target-error') {
-      console.error(`[agy-session-guard:watch] Target error (${ev.targetId}): ${ev.error}`);
+      console.error(`[agy-Sag:watch] Target error (${ev.targetId}): ${ev.error}`);
     } else if (ev.event === 'stopped') {
-      console.log('[agy-session-guard:watch] Watch daemon stopped cleanly.');
+      console.log('[agy-Sag:watch] Watch daemon stopped cleanly.');
     }
   };
 
-  const daemon = new SessionGuardWatchDaemon({
+  const daemon = new SagWatchDaemon({
     port: opts.port,
     config: cfgPatch,
     intervalMs: opts.intervalMs,
     maxBackoffMs: opts.maxBackoffMs,
+    enableHostBridge: opts.once ? false : undefined,
     onEvent: formatLog,
   });
 
@@ -337,7 +1090,7 @@ export async function startWatchDaemonCli(argv = process.argv.slice(2)) {
     const res = await daemon.reconcileOnce();
     if (opts.json) console.log(JSON.stringify(res));
     if (res.status !== 'ok') process.exitCode = 1;
-    return;
+    return res;
   }
 
   const shutdown = () => {
@@ -349,7 +1102,7 @@ export async function startWatchDaemonCli(argv = process.argv.slice(2)) {
 
   if (!opts.json) {
     console.log(
-      `[agy-session-guard:watch] Starting Zero-ASAR watch daemon (interval=${opts.intervalMs}ms, maxBackoff=${opts.maxBackoffMs}ms). Press Ctrl+C to stop.`
+      `[agy-Sag:watch] Starting Zero-ASAR watch daemon (interval=${opts.intervalMs}ms, maxBackoff=${opts.maxBackoffMs}ms). Press Ctrl+C to stop.`
     );
   }
   daemon.start();
@@ -360,7 +1113,7 @@ export async function startWatchDaemonCli(argv = process.argv.slice(2)) {
 const isEntry = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 if (isEntry) {
   startWatchDaemonCli(process.argv.slice(2)).catch((err) => {
-    console.error('[agy-session-guard:watch]', err?.message || err);
+    console.error('[agy-Sag:watch]', err?.message || err);
     process.exitCode = 1;
   });
 }

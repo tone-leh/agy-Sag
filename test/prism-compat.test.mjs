@@ -162,7 +162,7 @@ test('Obsidian Prism Side-by-Side Coexistence: embeds unified settings in Prism 
     removeEventListener() {},
   };
 
-  const guard = core.mountSessionGuard({
+  const guard = core.mountSag({
     win,
     doc,
     storage,
@@ -172,12 +172,12 @@ test('Obsidian Prism Side-by-Side Coexistence: embeds unified settings in Prism 
   });
 
   await guard.evaluateNow();
-  assert.equal(guard.yielded, false, 'Must run alongside Obsidian Prism when Prism does not claim __agSessionGuardOwner');
+  assert.equal(guard.yielded, false, 'Must run alongside Obsidian Prism when Prism does not claim __agSagOwner / __agSessionGuardOwner');
   assert.ok(bridgeCalls >= 1, 'Must reuse Obsidian Prism metrics bridge without duplicate backend polling');
 
   // Unified Settings Section mounted inside Prism's Modules tab
   const embedded = modulesGrp.querySelector(`[data-testid="${prismBridge.EMBED_SECTION_TESTID}"]`);
-  assert.ok(embedded, 'Session Guard settings section must mount inside Prism Modules group');
+  assert.ok(embedded, 'agy-Sag settings section must mount inside Prism Modules group');
   assert.equal(embedded.getAttribute('data-ag-sg-owned'), '1');
   assert.equal(embedded.getAttribute('data-ag-no-i18n'), '1');
   assert.equal(embedded.getAttribute('data-ag-localization-skip'), 'true');
@@ -185,16 +185,16 @@ test('Obsidian Prism Side-by-Side Coexistence: embeds unified settings in Prism 
   // Consumer-grade UI rule: ZERO version strings or defensive Prism badges shown to end-users
   assert.equal(embedded.textContent.includes('1.0.8-beta.3'), false, 'End-user settings UI must not show internal version badges');
   assert.equal(embedded.querySelector('[data-testid="ag-sg-prism-badge"]'), null, 'No defensive Prism badge in consumer UI');
-  assert.ok(embedded.textContent.includes('领航哨'));
+  assert.ok(embedded.textContent.includes('agy-Sag'));
 
-  // Prism -> Session Guard bidirectional config sync (click 75% threshold inside Prism settings panel)
+  // Prism -> agy-Sag bidirectional config sync (click 75% threshold inside Prism settings panel)
   const th75 = embedded.querySelector('[data-ag-sg-prism-th="75"]');
   assert.ok(th75);
   th75.click();
   assert.equal(guard.getConfig().compactThreshold, 75);
   assert.equal(embedded.querySelector('[data-ag-sg-prism-th="75"]').getAttribute('aria-pressed'), 'true');
 
-  // Session Guard inline popover -> Prism bidirectional sync
+  // agy-Sag inline popover -> Prism bidirectional sync
   guard.openSettingsPopover();
   const pop = doc.querySelector('[data-testid="ag-sg-settings-popover"]');
   assert.equal(pop.querySelector('[data-testid="ag-sg-pop-prism-badge"]'), null, 'Inline popover must stay clean without Prism badges');
@@ -205,9 +205,9 @@ test('Obsidian Prism Side-by-Side Coexistence: embeds unified settings in Prism 
   // Live language switch driven by Obsidian Prism (zh-CN -> en)
   doc.documentElement.setAttribute('data-ag-cs-lang', 'en');
   guard.prismBridge.sync();
-  assert.ok(embedded.textContent.includes('Session Guard'), 'Embedded Prism section must follow Prism live language switch');
+  assert.ok(embedded.textContent.includes('agy-Sag'), 'Embedded Prism section must follow Prism live language switch');
 
-  // Destroy cleanly leaves Prism's own settings DOM intact with 0 Session Guard nodes
+  // Destroy cleanly leaves Prism's own settings DOM intact with 0 agy-Sag nodes
   guard.destroy();
   assert.equal(doc.querySelectorAll('[data-ag-sg-owned="1"]').length, 0);
   assert.ok(doc.getElementById('ag-cs-settings-sec') === settingsSec, 'Obsidian Prism settings container must remain untouched');
@@ -243,16 +243,16 @@ test('Obsidian Prism Latest Beta Checkout Compatibility Contract (auto-runs when
   assert.ok(uiRuntimeSrc.includes('ag-cs-nav-outline-popover'), 'Prism outline popover hook must exist');
   assert.ok(pulseSrc.includes('agPulseHost') || pulseSrc.includes('Metrics'), 'Prism pulse/metrics bridge hook must exist');
 
-  // 3) All 8 official Obsidian Prism locales have 100% key parity in agy-session-guard
+  // 3) All 8 official Obsidian Prism locales have 100% key parity in agy-Sag
   const prismLocales = ['zh-CN', 'zh-TW', 'en', 'ja', 'ko', 'es', 'fr', 'de'];
   const baseKeys = Object.keys(i18n.PACKS['zh-CN']).sort();
   for (const loc of prismLocales) {
-    assert.ok(i18n.PACKS[loc], `Locale ${loc} must exist in agy-session-guard`);
+    assert.ok(i18n.PACKS[loc], `Locale ${loc} must exist in agy-Sag`);
     assert.deepEqual(Object.keys(i18n.PACKS[loc]).sort(), baseKeys, `100% i18n key parity required for Prism locale ${loc}`);
   }
 
-  // 4) Zero CSS namespace collision (Session Guard never defines .ag-cs-* rules, and Prism never defines .ag-sg-*)
-  assert.equal(/\.ag-cs-/.test(styles.CORE_CSS), false, 'Session Guard CSS must never redefine .ag-cs-* rules');
+  // 4) Zero CSS namespace collision (agy-Sag never defines .ag-cs-* rules, and Prism never defines .ag-sg-*)
+  assert.equal(/\.ag-cs-/.test(styles.CORE_CSS), false, 'agy-Sag CSS must never redefine .ag-cs-* rules');
   assert.equal(/\.ag-sg-/.test(settingsSrc), false, 'Obsidian Prism must not collide with .ag-sg-* namespace');
-  assert.equal(/:has\(/.test(styles.CORE_CSS), false, 'Session Guard CSS must maintain 0 :has() invariant');
+  assert.equal(/:has\(/.test(styles.CORE_CSS), false, 'agy-Sag CSS must maintain 0 :has() invariant');
 });

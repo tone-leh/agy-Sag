@@ -178,7 +178,7 @@ test('Standalone user (NO Obsidian Prism): sees calm composer % pill, floating q
     removeEventListener() {},
   };
 
-  const guard = core.mountSessionGuard({
+  const guard = core.mountSag({
     win,
     doc,
     storage,
@@ -238,7 +238,7 @@ test('Combined user (WITH Obsidian Prism Pulse bar): embeds directly inside Pris
     removeEventListener() {},
   };
 
-  const guard = core.mountSessionGuard({
+  const guard = core.mountSag({
     win,
     doc,
     autoPoll: false,

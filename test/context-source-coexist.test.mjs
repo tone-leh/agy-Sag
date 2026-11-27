@@ -43,12 +43,18 @@ test('context-source: reuses __agPrismMetricsBridge without duplicate polling an
   assert.equal(ctxSrc.detectCascadeId(mockDoc, win), 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
 });
 
-test('coexistence: standalone auto-yields when __agSessionGuardOwner is owned by a host integrator (e.g. Obsidian Prism)', () => {
+test('coexistence: standalone auto-yields when __agSagOwner or legacy __agSessionGuardOwner is owned by a host integrator (e.g. Obsidian Prism)', () => {
   const win = { __agSessionGuardOwner: 'obsidian-prism' };
-  const api = core.mountSessionGuard({ win, doc: null, source: 'standalone' });
+  const api = core.mountSag({ win, doc: null, source: 'standalone' });
   assert.equal(api.yielded, true);
   assert.equal(api.owner, 'obsidian-prism');
   assert.equal(win.__agSessionGuard, undefined, 'Yielded standalone must not overwrite host global');
+  assert.equal(win.__agSag, undefined, 'Yielded standalone must not overwrite host __agSag global');
+
+  const win2 = { __agSagOwner: 'obsidian-prism' };
+  const api2 = core.mountSag({ win: win2, doc: null, source: 'standalone' });
+  assert.equal(api2.yielded, true);
+  assert.equal(api2.owner, 'obsidian-prism');
 });
 
 test('CSS hygiene & bundle builder: zero :has(), zero eval(), idempotent injection, and lossless REMOVE_EXPRESSION', () => {
@@ -94,6 +100,7 @@ test('CSS hygiene & bundle builder: zero :has(), zero eval(), idempotent injecti
 
   const r3 = vm.runInNewContext(REMOVE_EXPRESSION, sandbox);
   assert.equal(r3.ok, true);
+  assert.equal(sandbox.__agSag, undefined, 'REMOVE_EXPRESSION must clean __agSag global');
   assert.equal(sandbox.__agSessionGuard, undefined, 'REMOVE_EXPRESSION must clean all globals');
 });
 
