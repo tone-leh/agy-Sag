@@ -6,8 +6,8 @@
 
 两个项目共同构成完整的 Antigravity 2.0 生态组合，目标为互相引荐、共同安装、功能零重叠：
 
-- **`agy-NOV`（合规原生工作台）**：坚持零 ASAR 魔改、零 CDP 注入、100% 官方 MCP Apps (SEP-1865) 与 Lifecycle Hooks，升级不失效。负责 `review`（PR 级 Diff 审阅）、`guard`（PreToolUse 后端安全护盾与改前文件快照）、`xray`（跨会话只读 Token 透视）、`canvas`（视觉产物画布）、`mem`（代码锚定记忆图谱）、`remote`（手机 PWA / IM 远程审批与通知）。
-- **`agy-Sag`（激进深度增强套件）**：深入 Antigravity 渲染层 DOM、主对话流、输入区、外观与本地数据目录，承接纯原生 MCP 协议无法触及的深度能力。负责 `hostI18n`（10 国语言原生界面实时翻译）、`compactGuard`（自定义 `/compact` 自动防爆与滚动盾）、`draftGuard`（未发送草稿保险箱）、`promptQueue`（运行中提示词排队发送）、`outlineBookmarks`（单轮书签与跨会话档案库）、`sessionWatchdog`（燃尽率与流式卡死监测）、`safeAutoAccept`（铁壁黑名单保护的前端规则自动审批）、`themeStudio`（零 `:has()` 光学主题与中文字体排版）、`quotaPulse`（只读双桶配额与限流监测）、`sessionRadar`（侧栏聚光）与 `storage-doctor`（本地存储体检与脱敏备份）。
+- **`agy-NOV`（合规原生工作台）**：坚持零 ASAR 魔改、零 CDP 注入、100% 官方 MCP Apps (SEP-1865) 与 Lifecycle Hooks，升级不失效。负责 `review`（PR 级 Diff 审阅）、`guard`（PreToolUse 后端安全护盾与改前文件快照）、`xray`（跨会话只读 Token 透视）、`turbo`（批量搜索与日志压缩）、`radar`（多会话与 Swarm 状态看板）、`canvas`（视觉产物画布）、`mem`（代码锚定记忆图谱）、`ops`（模板库与工作区预算体检）、`remote`（手机 PWA / IM 远程审批与通知）、`verify`（Stop 校验门）、`worktree`（并行工作树编排）、`spec`（Spec-DAG 与草稿写锁）与 `studio`（只读本地库/文档工具）。
+- **`agy-Sag`（界面与对话驾驶舱 / 激进深度增强套件）**：深入 Antigravity 渲染层 DOM、主对话流、输入区、外观与本地数据目录，承接纯原生 MCP 协议无法触及的交互与可视化能力。负责 `hostI18n`（10 国语言原生界面实时翻译）、`compactGuard`（自定义 `/compact` 自动防爆、滚动盾与压缩前导出）、`draftGuard`（未发送草稿保险箱）、`promptQueue`（运行中提示词排队发送）、`promptLibrary`（规划中：斜杠速填与变量提示词库）、`outlineBookmarks`（单轮书签与跨会话档案库）、`readingNav`（规划中：长代码块折叠与键盘轮次导轨）、`sessionWatchdog`（燃尽率与流式卡死监测）、`sessionRadar`（侧栏聚光与非视觉提醒）、`safeAutoAccept`（铁壁黑名单保护的前端规则自动审批）、`themeStudio`（零 `:has()` 光学主题与中文字体排版）、`quotaPulse`（只读双桶配额与限流监测）、统一状态胶囊 HUD 与 `storage-doctor`（本地存储体检与脱敏备份）。详细架构与分层见 [docs/ROADMAP.md](./docs/ROADMAP.md) 与 [docs/PRODUCT-IA.md](./docs/PRODUCT-IA.md)。
 
 ## 架构基线与安全红线
 
