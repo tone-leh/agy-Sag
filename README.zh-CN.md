@@ -19,7 +19,7 @@
 | **技术路线** | 100% 官方原生 MCP Apps (SEP-1865) + Lifecycle Hooks，**零 ASAR、零 CDP** | Zero-ASAR Electron CDP 渲染层引擎 + Watch Sidecar + 离线存储体检 CLI |
 | **升级与安全特性** | 严格走官方插件协议，客户端任意升级稳定生效 | 零改动 `app.asar` 与 Apple 公证签名，Watch 守护进程自动重挂，卸载 0 残留 |
 | **主攻场景** | 侧边栏/全局工程工作台、改前安全拦截与快照、Stop 校验门、工作树与 Spec 写锁、长期记忆与远程遥控 | 统一 6-Tab 控制中心与全局抽屉、底栏分段 HUD、10 国界面多语言、提示词命令面板与排队、外观排版与本地数据治理 |
-| **核心模块矩阵** | **13 大零 CDP 纯原生模块**，分 5 大分类（5 档预设，6–47 工具）：`review`、`guard`、`xray`、`turbo`、`radar`、`verify`、`worktree`、`spec`、`studio`、`canvas`、`mem`、`ops`、`remote` | **12 大渲染模块 + 离线存储 CLI**（4 档预设）：`hostI18n`、`themeStudio`、`compactGuard`、`precompactExport`、`draftGuard`、`promptQueue`、`promptLibrary`、`outlineBookmarks`、`sessionWatchdog`、`sessionRadar`、`safeAutoAccept`、`quotaPulse`、`storage-doctor` |
+| **核心模块矩阵** | **13 大零 CDP 纯原生模块**，分 5 大分类（5 档预设，6–47 工具）：`review`、`guard`、`xray`、`turbo`、`radar`、`verify`、`worktree`、`spec`、`studio`、`canvas`、`mem`、`ops`、`remote` | **13 大渲染模块 + 离线存储 CLI**（4 档预设）：`hostI18n`、`themeStudio`、`readingNav`、`compactGuard`、`precompactExport`、`draftGuard`、`promptQueue`、`promptLibrary`、`outlineBookmarks`、`sessionWatchdog`、`sessionRadar`、`safeAutoAccept`、`quotaPulse`、`storage-doctor` |
 
 ### 双星联动化学反应（零额外网络端口）
 
@@ -44,12 +44,12 @@
 
 ## 统一控制中心与分段状态胶囊 HUD
 
-- **单一真源 6-Tab 控制中心（`概览 | 界面 | 对话 | 守护 | 双星 NOV | 高级`）**：支持从 Antigravity 原生 **Settings → Appearance**、全局快捷键 **`Ctrl/Cmd+Alt+,`**（`420px` 右侧滑出抽屉，`Esc` 关闭）或状态卡底部「完整设置 →」直达。全部 12 个模块总开关集中在 `概览` 页（杜绝重复开关），低频高级项收纳在 `<details>` 折叠区，顶部搜索框支持跨全 Tab 即时过滤，`高级` 页提供完整配置 JSON 导出、校验导入、内联二次确认重置（零 `window.confirm`）与运行态诊断快照。
+- **单一真源 6-Tab 控制中心（`概览 | 界面 | 对话 | 守护 | 双星 NOV | 高级`）**：支持从 Antigravity 原生 **Settings → Appearance**、全局快捷键 **`Ctrl/Cmd+Alt+,`**（`420px` 右侧滑出抽屉，`Esc` 关闭）或状态卡底部「完整设置 →」直达。全部 13 个模块总开关集中在 `概览` 页（杜绝重复开关），低频高级项收纳在 `<details>` 折叠区，顶部搜索框支持跨全 Tab 即时过滤，`高级` 页提供完整配置 JSON 导出、校验导入、内联二次确认重置（零 `window.confirm`）与运行态诊断快照。
 - **统一分段式状态胶囊 HUD**：输入框底栏以单枚紧凑胶囊汇总实时指标，各分段严格跟随对应模块开关增删（`ctx` 12px 环形进度与百分比、`eta` 剩余轮数或 `m:ss` 停滞计时、`quota` 5h 配额、`queue` 排队数/暂停标志、`bookmarks` 书签数、`autoAccept` 自动审批/演练、`NOV` 双星连接标识）。检测到 Obsidian Prism 上下文卡片时自动无痕内嵌其 Shadow DOM，底栏零多余胶囊。
 
 ---
 
-## 12 大独立开关渲染模块 + 离线存储体检（按需开关）
+## 13 大独立开关渲染模块 + 离线存储体检（按需开关）
 
 所有模块均可在 `概览` 页或命令行单独开关。关闭的模块零 DOM 观察器、零事件监听、零定时器开销。
 
@@ -57,6 +57,7 @@
 | :---: | :--- | :---: | :--- | :--- |
 | **L1** | **原生界面翻译**（`hostI18n`） | **开启** | 100% 离线 · 无损热切 | 实时翻译 Antigravity 2.x 原生桌面界面，内置 **10 国语言**（简中、繁中、日、韩、西、法、德、俄、葡、英文还原）。每语种覆盖约 5,400 词条（465 核心 + 分层扩展词库 + 424 正则模板），物理豁免代码块/输入框/对话正文/斜杠命令名，穿透 Shadow DOM，支持自定义 JSON 词典热导入。 |
 | **L1** | **光学主题与排版**（`themeStudio`） | 关闭 | 100% 离线 | 零 `:has()` 轻量主题变量覆写层，内置 5 套精选皮肤（原生 / 午夜墨 / 北欧灰 / 暖纸浅 / 纯黑 OLED）、CJK 中文字体与等宽代码字体调优、排版密度、紧凑侧栏、宽屏阅读宽度及净化后的自定义 CSS 注入。 |
+| **L1** | **阅读导航**（`readingNav`） | 关闭 | 100% 离线 | 自动折叠超长代码块（默认 `>= 40` 行，可在设置中调为 `20/40/60/80` 行）并附加吸顶行数/展开/复制条，支持 `Alt+↑/↓` 键盘轮次跳转及联动星标的右侧迷你导轨（检测到 Prism 导航条时自动礼让）。 |
 | **L2** | **自动压缩保护**（`compactGuard`） | **开启** | 100% 离线 | 自定义预警与触发阈值（`关闭` 或 `50%–98%`，默认 `80%`），默认静默自动压缩并启用视口滚动盾（阅读历史消息时不跳屏）；兼容 Lexical 两步斜杠选择、`/clear` 轻量重开与压缩后锚点续接条。 |
 | **L2** | **压缩前导出**（`precompactExport`） | **开启** | 100% 离线 | 内嵌于 `compactGuard` 卡片下的子开关：压缩前一键复制或下载 `.md` 复盘档案，自动脱敏 PEM 私钥、API Key、Bearer Token 与 JWT。 |
 | **L2** | **草稿防丢**（`draftGuard`） | **开启** | 100% 离线 | 按会话自动防抖暂存输入框内未发送的长提示词（7 天有效期、16 KB 上限），切会话或意外重载后空框单行一键恢复。 |
@@ -75,8 +76,8 @@
 
 - **`essential`（默认推荐）**：`hostI18n` + `compactGuard` + `precompactExport` + `draftGuard` + `promptQueue` + `sessionWatchdog`
 - **`i18n-only`（仅多语言）**：仅开启 `hostI18n`，其余增强全部关闭，零打扰体验原生界面多语言
-- **`power`（极客全能）**：`essential` + `promptLibrary` + `outlineBookmarks` + `themeStudio` + `quotaPulse`
-- **`full-auto`（全开自动）**：开启全部 12 个模块（`safeAutoAccept` 默认锁定最保守的 `readonly-safe` 档位）
+- **`power`（极客全能）**：`essential` + `readingNav` + `promptLibrary` + `outlineBookmarks` + `themeStudio` + `quotaPulse`
+- **`full-auto`（全开自动）**：开启全部 13 个模块（`safeAutoAccept` 默认锁定最保守的 `readonly-safe` 档位）
 
 ---
 
@@ -171,12 +172,13 @@ Antigravity 2.0 宿主（Electron 44 + language_server 本地渲染界面）
  │    ├── cli/bundle.mjs         — 零构建 UMD 拼接器（SHA-256 幂等附着、<=1.6MB 扩展包预注入与一键全清）
  │    └── cli/storage-doctor.mjs — 只读存储诊断、WAL 活跃锁防护与密钥脱敏导出
  └── 渲染层模块化 UMD 核心（packages/core/，全部支持 100% 无损 destroy()）
-      ├── coexist.js             — 配置校验、4 档预设、12 模块目录、宿主礼让与失焦休眠
+      ├── coexist.js             — 配置校验、4 档预设、13 模块目录、宿主礼让与失焦休眠
       ├── host-i18n*.js          — 10 国语言 WeakMap DOM 翻译引擎 + 465 核心 + ~5k 分层扩展词库（locales/ext/）
       ├── compact-guard.js       — 静默 /compact、视口滚动盾、/clear 轻重开与锚点续接
       ├── draft-guard.js         — 按会话未发送草稿自动保护
       ├── prompt-queue.js        — 流式排队预写与三重安全熔断出队
       ├── prompt-library.js      — Ctrl/Cmd+Alt+P 提示词命令面板、{{变量}} 片段库与只读 NOV 模板
+      ├── reading-nav.js         — 长代码块自动折叠、吸顶复制条与 Alt+↑/↓ 迷你轮次导轨
       ├── safe-auto-accept.js    — 策略门控自动审批 + 不可绕过铁壁高危黑名单
       ├── theme-studio.js        — 零 :has() 光学主题、CJK 字体与净化自定义 CSS
       ├── quota-pulse.js         — 100% 只读 5h/7d 配额估算与限流信号解析
@@ -196,9 +198,9 @@ Antigravity 2.0 宿主（Electron 44 + language_server 本地渲染界面）
 ## 本地开发与验证
 
 ```bash
-npm test                 # 运行全量原生 node:test 单测套件（176/176 通过，零外部依赖）
+npm test                 # 运行全量原生 node:test 单测套件（180/180 通过，零外部依赖）
 npm run i18n:validate    # 校验全部 10 国内置 + 9 扩展界面翻译词典与正则模板（0 错误）
-npm run workbench:smoke  # 对离线沙盒执行自动化 HTTP 烟雾校验（16 markers）
+npm run workbench:smoke  # 对离线沙盒执行自动化 HTTP 烟雾校验（17 markers）
 npm run doctor           # 只读本机环境与双星共存诊断
 ```
 

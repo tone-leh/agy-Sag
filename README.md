@@ -19,7 +19,7 @@ We maintain **two complementary, zero-overlap plugins** built specifically for G
 | **Architecture** | 100% official MCP Apps (SEP-1865) + Lifecycle Hooks; **zero ASAR, zero CDP** | Zero-ASAR Electron CDP renderer layer + Watch Sidecar + offline Storage CLI |
 | **Upgrade Resilience** | Survives every Antigravity update natively via official plugin protocols | Leaves `app.asar` & Apple notarization untouched; auto re-attaches via Watch Daemon |
 | **Core Scope** | Side-pane / global engineering workbench, pre-tool hooks, verify gates, worktrees, spec lock, artifacts & remote IM | Native 6-Tab Settings Hub & global drawer, segmented HUD, 10-language UI translation, main chat DOM, composer palette/queue & local storage hygiene |
-| **Included Modules** | **13 native zero-CDP modules** across 5 categories (5 presets, 6–47 tools): `review`, `guard`, `xray`, `turbo`, `radar`, `verify`, `worktree`, `spec`, `studio`, `canvas`, `mem`, `ops`, `remote` | **12 renderer modules + Storage CLI** (4 presets): `hostI18n`, `themeStudio`, `compactGuard`, `precompactExport`, `draftGuard`, `promptQueue`, `promptLibrary`, `outlineBookmarks`, `sessionWatchdog`, `sessionRadar`, `safeAutoAccept`, `quotaPulse`, `storage-doctor` |
+| **Included Modules** | **13 native zero-CDP modules** across 5 categories (5 presets, 6–47 tools): `review`, `guard`, `xray`, `turbo`, `radar`, `verify`, `worktree`, `spec`, `studio`, `canvas`, `mem`, `ops`, `remote` | **13 renderer modules + Storage CLI** (4 presets): `hostI18n`, `themeStudio`, `readingNav`, `compactGuard`, `precompactExport`, `draftGuard`, `promptQueue`, `promptLibrary`, `outlineBookmarks`, `sessionWatchdog`, `sessionRadar`, `safeAutoAccept`, `quotaPulse`, `storage-doctor` |
 
 ### Built-In Dual-Star Synergy (Zero Extra Ports)
 
@@ -44,12 +44,12 @@ When both **`agy-Sag`** and **`agy-NOV`** are installed together, **`agy-Sag`**'
 
 ## Unified Control Hub & Segmented Status HUD
 
-- **Single-Source 6-Tab Settings Hub (`overview | ui | conversation | guard | nov | advanced`)**: Accessible inside Antigravity **Settings → Appearance**, via the **`Ctrl/Cmd+Alt+,`** slide-out drawer (`Esc` to close), or from the status card footer (`Full Settings →`). All 12 module master switches live exclusively in `Overview` (zero duplicate switches), advanced parameters fold cleanly inside `<details>`, instant cross-tab search filters all rows, and `Advanced` provides JSON export, sanitized import, inline 2-step reset (zero `window.confirm`), and runtime diagnostics.
+- **Single-Source 6-Tab Settings Hub (`overview | ui | conversation | guard | nov | advanced`)**: Accessible inside Antigravity **Settings → Appearance**, via the **`Ctrl/Cmd+Alt+,`** slide-out drawer (`Esc` to close), or from the status card footer (`Full Settings →`). All 13 module master switches live exclusively in `Overview` (zero duplicate switches), advanced parameters fold cleanly inside `<details>`, instant cross-tab search filters all rows, and `Advanced` provides JSON export, sanitized import, inline 2-step reset (zero `window.confirm`), and runtime diagnostics.
 - **Unified Segmented Status Capsule HUD**: Compact composer-footer pill displaying live read-only segments driven directly by active module switches (`ctx` 12px conic progress ring, `eta` turns-left / `m:ss` stall indicator, `quota` 5h percentage, `queue` item count / paused badge, `bookmarks`, `autoAccept` / `dryRun`, and `NOV` connection indicator). Turning off any module removes its segment immediately. When Obsidian Prism's context card is detected, `agy-Sag` embeds cleanly inside its Shadow DOM without adding an extra footer pill.
 
 ---
 
-## 12 Modular Capabilities + Storage Doctor CLI (Pick Only What You Need)
+## 13 Modular Capabilities + Storage Doctor CLI (Pick Only What You Need)
 
 Every module in **`agy-Sag`** is independently toggleable from the `Overview` tab or CLI. Disabled modules run zero DOM observers, zero listeners, and zero timers.
 
@@ -57,6 +57,7 @@ Every module in **`agy-Sag`** is independently toggleable from the `Overview` ta
 | :---: | :--- | :---: | :--- | :--- |
 | **L1** | **Native UI Translation** (`hostI18n`) | **ON** | 100% Offline · Lossless | Real-time multi-language localization for Antigravity 2.x UI across **10 languages** (`zh-CN`, `zh-TW`, `ja`, `ko`, `es`, `fr`, `de`, `ru`, `pt-BR`, `en`). ~5,400 entries per target locale (465 core + layered extended packs + 424 regex patterns), physical skip isolation for code / inputs / chat bubbles / slash command names, Shadow DOM recursion, instant hot-switch, and custom JSON pack import. |
 | **L1** | **Theme & Typography** (`themeStudio`) | OFF | 100% Offline | Zero-`:has()` CSS variable layer with 5 curated presets (`native`, `midnight-ink`, `nord-frost`, `warm-paper`, `oled-pure`), CJK + monospace font tuning, density controls, compact sidebar, wide reading column, and sanitized custom CSS injection. |
+| **L1** | **Reading Navigation** (`readingNav`) | OFF | 100% Offline | Automatic folding for long code blocks (`>= 40` lines default, configurable `20/40/60/80`) with sticky line-count/expand/copy bar, `Alt+↑/↓` turn-to-turn keyboard navigation, and a floating mini turn rail synced with bookmarks (auto-yields to Prism outline nav). |
 | **L2** | **Auto-Compact Guard** (`compactGuard`) | **ON** | 100% Offline | Configurable compaction threshold (`off` or `50%–98%`, default `80%`), silent auto-compact with viewport scroll shield, Lexical two-step slash menu support, `/clear` clean-slate restart, and post-compact anchor recovery. |
 | **L2** | **Pre-Compact Export** (`precompactExport`) | **ON** | 100% Offline | Nested under `compactGuard`: secret-redacted Markdown copy and `.md` file download before compaction (masks PEM private keys, API keys, Bearer tokens & JWTs). |
 | **L2** | **Draft Guard** (`draftGuard`) | **ON** | 100% Offline | Debounced per-session auto-save for unsent composer prompts (7-day TTL, 16 KB cap) with one-line restore after tab switches or reloads. |
@@ -75,8 +76,8 @@ Switch presets anytime in Settings or via CLI (`--preset=<name>`):
 
 - **`essential` (default)**: `hostI18n` + `compactGuard` + `precompactExport` + `draftGuard` + `promptQueue` + `sessionWatchdog`
 - **`i18n-only`**: Only `hostI18n` enabled for pure native multi-language UI translation
-- **`power`**: `essential` + `promptLibrary` + `outlineBookmarks` + `themeStudio` + `quotaPulse`
-- **`full-auto`**: All 12 modules enabled (`safeAutoAccept` locked to `readonly-safe` by default)
+- **`power`**: `essential` + `readingNav` + `promptLibrary` + `outlineBookmarks` + `themeStudio` + `quotaPulse`
+- **`full-auto`**: All 13 modules enabled (`safeAutoAccept` locked to `readonly-safe` by default)
 
 ---
 
@@ -171,12 +172,13 @@ Antigravity 2.0 Host (Electron 44 + language_server localhost UI)
  │    ├── cli/bundle.mjs         — Deterministic UMD bundler with SHA-256 hash idempotency, <=1.6MB ext preload & clean remove
  │    └── cli/storage-doctor.mjs — Read-only storage audit, WAL lock guard & secret-redacted export
  └── Renderer UMD Modules (packages/core/, 100% lossless destroy())
-      ├── coexist.js             — Config schema, 4 presets, 12-module catalog, owner yield & hibernation
+      ├── coexist.js             — Config schema, 4 presets, 13-module catalog, owner yield & hibernation
       ├── host-i18n*.js          — 10-language WeakMap DOM translator + 465 core + layered ~5k/locale ext packs (locales/ext/)
       ├── compact-guard.js       — Auto-silent /compact, scroll shield, clean-slate /clear & recovery
       ├── draft-guard.js         — Per-session unsent draft vault
       ├── prompt-queue.js        — Streaming follow-up queue with triple safety circuit-breakers
       ├── prompt-library.js      — Ctrl/Cmd+Alt+P command palette, {{var}} snippets & read-only agy-NOV templates
+      ├── reading-nav.js         — Long code block auto-folding, sticky copy bar & Alt+↑/↓ mini turn rail
       ├── safe-auto-accept.js    — Policy-gated auto-accept + non-bypassable hard deny blacklist
       ├── theme-studio.js        — Zero-:has() optical themes, CJK typography & sanitized custom CSS
       ├── quota-pulse.js         — Read-only 5h/7d quota tracker & rate-limit signal parser
@@ -196,9 +198,9 @@ Antigravity 2.0 Host (Electron 44 + language_server localhost UI)
 ## Development & Verification
 
 ```bash
-npm test                 # Run full native node:test suite (176/176 passing, zero external deps)
+npm test                 # Run full native node:test suite (180/180 passing, zero external deps)
 npm run i18n:validate    # Validate all 10 built-in + 9 extended UI translation packs (0 errors)
-npm run workbench:smoke  # Run automated HTTP smoke check against the offline workbench (16 markers)
+npm run workbench:smoke  # Run automated HTTP smoke check against the offline workbench (17 markers)
 npm run doctor           # Read-only local environment diagnostics
 ```
 

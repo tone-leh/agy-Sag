@@ -40,6 +40,7 @@
     const hostI18nPacksMod = options.hostI18nPacksMod || resolveDep('__agSagHostI18nPacks', './host-i18n-packs.js');
     const promptQueueMod = options.promptQueueMod || resolveDep('__agSagPromptQueue', './prompt-queue.js');
     const promptLibraryMod = options.promptLibraryMod || resolveDep('__agSagPromptLibrary', './prompt-library.js');
+    const readingNavMod = options.readingNavMod || resolveDep('__agSagReadingNav', './reading-nav.js');
     const safeAutoAcceptMod = options.safeAutoAcceptMod || resolveDep('__agSagSafeAutoAccept', './safe-auto-accept.js');
     const themeStudioMod = options.themeStudioMod || resolveDep('__agSagThemeStudio', './theme-studio.js');
     const quotaPulseMod = options.quotaPulseMod || resolveDep('__agSagQuotaPulse', './quota-pulse.js');
@@ -82,6 +83,7 @@
     let hostI18n = null;
     let promptQueue = null;
     let promptLibrary = null;
+    let readingNav = null;
     let safeAutoAccept = null;
     let themeStudio = null;
     let quotaPulse = null;
@@ -139,6 +141,11 @@
 
       if (promptLibrary) {
         promptLibrary.setEnabled?.(Boolean(nextCfg.modules?.promptLibrary));
+      }
+
+      if (readingNav) {
+        readingNav.setCollapseLines?.(nextCfg.readingCollapseLines || 40);
+        readingNav.setEnabled?.(Boolean(nextCfg.modules?.readingNav));
       }
 
       if (safeAutoAccept) {
@@ -257,6 +264,7 @@
       onCopyHandoff: options.onCopyHandoff,
       onBookmarksChange: (ev) => {
         void compactGuard.evaluateNow().then(syncStatusPill);
+        readingNav?.sync?.();
         syncStatusPill();
         if (typeof options.onBookmarksChange === 'function') options.onBookmarksChange(ev);
       },
@@ -534,6 +542,25 @@
         })
       : null;
 
+    readingNav = readingNavMod?.createReadingNavController
+      ? readingNavMod.createReadingNavController({
+          win,
+          doc,
+          coexist,
+          enabled: Boolean(cfg.modules?.readingNav),
+          collapseLines: cfg.readingCollapseLines || 40,
+          autoObserve: options.autoObserve,
+          getLang: options.getLang,
+          onCopyCode: options.onCopyText,
+          getStarredTurns: () => {
+            const st = outlineBookmarks?.getDebugState?.();
+            if (Array.isArray(st?.bookmarkedTurns)) return st.bookmarkedTurns;
+            if (Array.isArray(st?.turns)) return st.turns;
+            return [];
+          },
+        })
+      : null;
+
     statusPill = statusPillMod?.createStatusPillController
       ? statusPillMod.createStatusPillController({
           win,
@@ -625,6 +652,7 @@
             sessionRadar?.syncFromDom?.();
             hostI18n?.scanNow?.();
             promptLibrary?.sync?.();
+            readingNav?.sync?.();
             themeStudio?.sync?.();
             syncStatusPill();
           },
@@ -649,6 +677,7 @@
       hostI18n,
       promptQueue,
       promptLibrary,
+      readingNav,
       safeAutoAccept,
       themeStudio,
       quotaPulse,
@@ -661,6 +690,7 @@
         hostI18n?.scanNow?.();
         promptQueue?.sync?.();
         promptLibrary?.sync?.();
+        readingNav?.sync?.();
         safeAutoAccept?.scanNow?.();
         themeStudio?.sync?.();
         quotaPulse?.scanDomForSignals?.();
@@ -731,6 +761,7 @@
         hostI18n: hostI18n?.getDebugState?.() || null,
         promptQueue: promptQueue?.getDebugState?.() || null,
         promptLibrary: promptLibrary?.getDebugState?.() || null,
+        readingNav: readingNav?.getDebugState?.() || null,
         safeAutoAccept: safeAutoAccept?.getDebugState?.() || null,
         themeStudio: themeStudio?.getDebugState?.() || null,
         quotaPulse: quotaPulse?.getDebugState?.() || null,
@@ -745,6 +776,7 @@
         hostI18n?.destroy?.();
         promptQueue?.destroy?.();
         promptLibrary?.destroy?.();
+        readingNav?.destroy?.();
         safeAutoAccept?.destroy?.();
         themeStudio?.destroy?.();
         quotaPulse?.destroy?.();

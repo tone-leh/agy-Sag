@@ -51,6 +51,7 @@
     Object.freeze({ id: 'sessionRadar', category: 'navigation', defaultEnabled: false, aggressive: false }),
     Object.freeze({ id: 'safeAutoAccept', category: 'automation', defaultEnabled: false, aggressive: true }),
     Object.freeze({ id: 'themeStudio', category: 'ui', defaultEnabled: false, aggressive: false }),
+    Object.freeze({ id: 'readingNav', category: 'ui', defaultEnabled: false, aggressive: false }),
     Object.freeze({ id: 'quotaPulse', category: 'telemetry', defaultEnabled: false, aggressive: false }),
   ]);
 
@@ -63,6 +64,7 @@
   const MODULE_META = Object.freeze({
     hostI18n: Object.freeze({ id: 'hostI18n', group: 'ui', layer: 'L1', settingsTab: 'ui', labelKey: 'modHostI18n', descKey: 'modDescHostI18n', defaultEnabled: true, aggressive: false, parentId: null }),
     themeStudio: Object.freeze({ id: 'themeStudio', group: 'ui', layer: 'L1', settingsTab: 'ui', labelKey: 'modThemeStudio', descKey: 'modDescThemeStudio', defaultEnabled: false, aggressive: false, parentId: null }),
+    readingNav: Object.freeze({ id: 'readingNav', group: 'ui', layer: 'L1', settingsTab: 'ui', labelKey: 'modReadingNav', descKey: 'modDescReadingNav', defaultEnabled: false, aggressive: false, parentId: null }),
     compactGuard: Object.freeze({ id: 'compactGuard', group: 'conversation', layer: 'L2', settingsTab: 'conversation', labelKey: 'modCompactGuard', descKey: 'modDescCompactGuard', defaultEnabled: true, aggressive: false, parentId: null }),
     precompactExport: Object.freeze({ id: 'precompactExport', group: 'conversation', layer: 'L2', settingsTab: 'conversation', labelKey: 'modPrecompactExport', descKey: 'modDescPrecompactExport', defaultEnabled: true, aggressive: false, parentId: 'compactGuard' }),
     draftGuard: Object.freeze({ id: 'draftGuard', group: 'conversation', layer: 'L2', settingsTab: 'conversation', labelKey: 'cfgModDraftGuard', descKey: 'modDescDraftGuard', defaultEnabled: true, aggressive: false, parentId: null }),
@@ -98,6 +100,7 @@
     themeWideReadable: false,
     themeCustomCss: '', // sanitized custom CSS (<= 8192 chars)
     themeConflictPolicy: 'yield', // 'yield' | 'takeover'
+    readingCollapseLines: 40, // 20..200 auto-fold threshold for long <pre> blocks
     quotaSoftTurns5h: 60, // 10..500 local soft budget warning
     quotaSoftTurns7d: 350, // 30..5000 local soft weekly warning
     modules: Object.freeze({
@@ -112,6 +115,7 @@
       sessionWatchdog: true, // burn-rate estimate + streaming stall detector
       safeAutoAccept: false, // strict opt-in: policy-gated auto-accept with hard deny blacklist
       themeStudio: false, // opt-in: zero-:has() optical themes & typography studio
+      readingNav: false, // opt-in: long code folding, sticky copy bar & Alt+Up/Down turn rail
       quotaPulse: false, // opt-in: read-only 5h/weekly quota signal monitor
     }),
   });
@@ -131,6 +135,7 @@
         sessionRadar: false,
         safeAutoAccept: false,
         themeStudio: false,
+        readingNav: false,
         quotaPulse: false,
       }),
     }),
@@ -148,6 +153,7 @@
         sessionRadar: false,
         safeAutoAccept: false,
         themeStudio: false,
+        readingNav: false,
         quotaPulse: false,
       }),
     }),
@@ -165,6 +171,7 @@
         sessionRadar: false,
         safeAutoAccept: false,
         themeStudio: true,
+        readingNav: true,
         quotaPulse: true,
       }),
     }),
@@ -183,6 +190,7 @@
         sessionRadar: true,
         safeAutoAccept: true,
         themeStudio: true,
+        readingNav: true,
         quotaPulse: true,
       }),
     }),
@@ -301,6 +309,11 @@
       ? src.themeConflictPolicy
       : fallback.themeConflictPolicy || 'yield';
 
+    const rLinesRaw = Number(src.readingCollapseLines);
+    const readingCollapseLines = Number.isFinite(rLinesRaw)
+      ? Math.max(20, Math.min(200, Math.round(rLinesRaw)))
+      : fallback.readingCollapseLines || 40;
+
     const q5Raw = Number(src.quotaSoftTurns5h);
     const quotaSoftTurns5h = Number.isFinite(q5Raw)
       ? Math.max(10, Math.min(500, Math.round(q5Raw)))
@@ -325,6 +338,7 @@
       sessionWatchdog: mSrc.sessionWatchdog !== undefined ? Boolean(mSrc.sessionWatchdog) : fbMods.sessionWatchdog !== false,
       safeAutoAccept: mSrc.safeAutoAccept !== undefined ? Boolean(mSrc.safeAutoAccept) : Boolean(fbMods.safeAutoAccept),
       themeStudio: mSrc.themeStudio !== undefined ? Boolean(mSrc.themeStudio) : Boolean(fbMods.themeStudio),
+      readingNav: mSrc.readingNav !== undefined ? Boolean(mSrc.readingNav) : Boolean(fbMods.readingNav),
       quotaPulse: mSrc.quotaPulse !== undefined ? Boolean(mSrc.quotaPulse) : Boolean(fbMods.quotaPulse),
     };
 
@@ -351,6 +365,7 @@
       themeWideReadable,
       themeCustomCss,
       themeConflictPolicy,
+      readingCollapseLines,
       quotaSoftTurns5h,
       quotaSoftTurns7d,
       modules,

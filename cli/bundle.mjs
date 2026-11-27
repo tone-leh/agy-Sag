@@ -21,6 +21,7 @@ export const CORE_FILES = [
   'draft-guard.js',
   'prompt-queue.js',
   'prompt-library.js',
+  'reading-nav.js',
   'safe-auto-accept.js',
   'theme-studio.js',
   'quota-pulse.js',
@@ -43,6 +44,7 @@ const GLOBAL_KEYS = [
   '__agSagHostI18n',
   '__agSagPromptQueue',
   '__agSagPromptLibrary',
+  '__agSagReadingNav',
   '__agSagSafeAutoAccept',
   '__agSagThemeStudio',
   '__agSagQuotaPulse',
@@ -76,6 +78,7 @@ export const REMOVE_EXPRESSION = `(() => {
   try { document.getElementById('ag-sag-theme-css')?.remove(); } catch {}
   try { document.getElementById('ag-sag-queue-css')?.remove(); } catch {}
   try { document.querySelectorAll('[data-ag-sg-owned="1"], [data-ag-sag-owned="1"]').forEach((n) => n.remove()); } catch {}
+  try { document.querySelectorAll('[data-ag-sag-code-folded], [data-ag-sag-code-enhanced]').forEach((n) => { n.removeAttribute('data-ag-sag-code-folded'); n.removeAttribute('data-ag-sag-code-enhanced'); }); } catch {}
   try { document.querySelectorAll('#ag-prism-pulse-bar, [data-ag-prism-pulse-bar="true"], #ag-pulse-status-bar, [data-ag-pulse-bar="true"]').forEach((h) => { h?.shadowRoot?.querySelectorAll?.('[data-ag-sg-owned="1"], [data-ag-sag-owned="1"]')?.forEach?.((n) => n.remove()); }); } catch {}
   try {
     const html = document.documentElement;

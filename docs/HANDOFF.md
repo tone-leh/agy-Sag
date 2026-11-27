@@ -57,6 +57,9 @@
   - Added the 12th renderer module `promptLibrary` (default OFF, enabled in `power` and `full-auto`), providing a composer footer button + `Ctrl/Cmd+Alt+P` modal palette with slash shortcuts, 6 bilingual `{{var=default}}` templates, local custom snippets (`agSag.promptLibrary.v1`, `<= 100` snippets, `<= 128 KB` import cap, zero `innerHTML`), and read-only `agy-NOV` `ops/prompts.json` loading via zero-port `sag:nov_templates` (symlink-guarded, `<= 256 KB` cap).
   - Updated `README.md` & `README.zh-CN.md` end-to-end without static text/badge images (replaced `img.shields.io` images with plain translatable text metadata) and recorded the mandatory per-push README verification policy in `AGENTS.md`.
   - *IA Simplification Check (PASS)*: Verified all 12 master switches appear exclusively in `Overview`, Prompt Library import/export sits inside `<details>` in `conversation`, zero `:has()` / `.ag-cs-` CSS rules, zero `"Prism"` leaks in `SAG_UI_PACKS`, `176/176` tests passing, independent `auditor` review passed (fixing MutationObserver self-trigger guard, `insertMode` reset, live Settings import status/textarea sync & `realpath` containment), and `ru` bundle size `1,553,192 B` (`<= 1,677,721 B`).
+- **Phase 4 — Reading Navigation & Long Code Folding (`packages/core/reading-nav.js`, `packages/core/coexist.js`, `packages/core/index.js`, `packages/core/prism-bridge.js`, `packages/core/styles.js`, `packages/core/i18n.js`, `workbench/server.mjs`, `test/reading-nav.test.mjs`)**:
+  - Added the 13th renderer module `readingNav` (default OFF, enabled in `power` and `full-auto`): auto-folds `>= 40`-line `<pre>` blocks non-destructively via `data-ag-sag-code-folded="1"` with sticky line-count/expand/copy bar, adds `Alt+↑/↓` turn navigation (ignoring editable inputs), and renders a floating mini turn rail synced with `outlineBookmarks` stars while yielding automatically to Obsidian Prism outline nav.
+  - *IA Simplification Check (PASS)*: Confirmed all 13 master switches live exclusively in `Overview`, code fold threshold (`20/40/60/80`) sits inside `ui` `<details>`, zero `:has()` / `.ag-cs-` rules, zero `"Prism"` leaks in `SAG_UI_PACKS`, `180/180` tests passing, and `ru` bundle size `1,582,565 B` (`<= 1,677,721 B`).
 - **Layered 9-Locale Extended UI Dictionaries (`packages/core/locales/ext/*.json`, `scripts/i18n/`, `THIRD_PARTY_NOTICES.md`)**: Expanded target-locale coverage to ~5,375–5,491 entries per locale (`zh-CN`: 465 core + 4,602 ext + 424 patterns = 5,491; `zh-TW`: 5,430; `ja`: 5,421; `ko`: 5,422; `es`: 5,407; `fr`: 5,375; `de`: 5,381; `ru`: 5,424; `pt-BR`: 5,399) using strict precedence (`Custom > 465 Core > Extended`), loaded via single-locale CDP preload (`<= 1.6 MB`), zero-port `sag:ext_pack` bridge requests, or Workbench `/ext/<locale>.json`. `zh-CN` adapts MIT-licensed `yiheng8023/antigravity-chinese` (`v3.3.65`); the other 8 locales were independently translated from the deduplicated English source table.
 - **Cross-Platform CDP Launcher & Prism JSON PID Fix (`cli/launcher.mjs`, `cli/watch-daemon.mjs`)**: Fixed `isPrismDaemonActive()` to parse JSON `.daemon.pid` files and added safe cross-platform `launch` / `keepalive` automation.
 - **Visual & Accessibility Fixes (7 items, see `CHANGELOG.md`)**: Keyboard `Enter`/`Space` header toggle with focus retention across re-renders, removal of redundant `✦` prefix adjacent to status dots, `168px` minimum column width on `.ag-sag-nov-grid` eliminating English label truncation, pure-CSS dropdown indicator on `.ag-sag-select`, high-contrast light-theme active chips, unified `:focus-visible` focus rings, and workbench multi-locale sync.
@@ -68,9 +71,9 @@
 
 Run inside repository root:
 ```bash
-npm test                                  # 176/176 tests passing (node --test)
+npm test                                  # 180/180 tests passing (node --test)
 npm run i18n:validate                     # 10 built-in + 9 extended packs, 0 errors
-npm run workbench:smoke                   # HTTP 200, 994474 B, 16 markers verified
+npm run workbench:smoke                   # HTTP 200, 1024481 B, 17 markers verified
 node cli/sag-cli.mjs launch --dry-run --json  # Read-only launch plan + Prism yield check
 ```
 

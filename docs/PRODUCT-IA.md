@@ -15,7 +15,7 @@ L0 基础设施（常驻内核，不计入可选模块开关）
 L1 界面层「看得懂」（Tab: 界面 | ui）
  ├── hostI18n        — 10 语种弱引用 DOM 原生界面翻译（默认 ON）
  ├── themeStudio     — 零 :has() 光学皮肤、CJK 字体排版与安全自定义 CSS（默认 OFF）
- └── readingNav      — 长代码自动折叠、吸顶复制与 Alt+↑/↓ 迷你导航（阶段 4 新增，默认 OFF）
+ └── readingNav      — 长代码自动折叠、吸顶复制与 Alt+↑/↓ 迷你导航（默认 OFF，power/full-auto 开启）
 
 L2 对话层「用得顺」（Tab: 对话 | conversation）
  ├── compactGuard    — 自动静默 /compact、视口滚动盾与 /clear 轻重开（默认 ON，含 precompactExport 子开关）

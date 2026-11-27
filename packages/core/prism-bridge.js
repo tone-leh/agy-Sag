@@ -952,6 +952,26 @@
       cssWrap.appendChild(cssBtns);
       advThemeBody.appendChild(mkSuiteRow(t('themeCustomCssLabel', 'Custom CSS'), '', cssWrap, { stacked: true, searchExtra: 'themeCustomCss' }));
 
+      // ReadingNav auto-fold line threshold
+      const rnGrid = doc.createElement('div');
+      rnGrid.className = 'ag-sag-ext-grid';
+      for (const nLines of [20, 40, 60, 80]) {
+        rnGrid.appendChild(
+          mkChip({
+            label: `${nLines}`,
+            active: (cfg.readingCollapseLines || 40) === nLines,
+            attr: 'data-ag-sag-rnav-lines',
+            val: nLines,
+            onClick: () => updateConfig({ readingCollapseLines: nLines }),
+          })
+        );
+      }
+      advThemeBody.appendChild(
+        mkSuiteRow(t('uiReadingCollapseLabel', 'Code Fold Threshold'), t('uiReadingCollapseDesc', ''), rnGrid, {
+          searchExtra: 'readingNav readingCollapseLines fold code',
+        })
+      );
+
       advThemeDetails.appendChild(advThemeBody);
       pane.appendChild(advThemeDetails);
 

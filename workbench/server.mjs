@@ -39,6 +39,7 @@ export const SMOKE_REQUIRED_MARKERS = Object.freeze([
   'requestExtendedPack',
   'ag-sag-hud-seg',
   '__agSagPromptLibrary',
+  '__agSagReadingNav',
 ]);
 
 export function buildHtmlPage() {
@@ -424,6 +425,7 @@ ${coreScript}
           {
             u: '如果重启或新开了 Antigravity 窗口，怎么做到无感自动重挂？',
             a: '执行 npm run watch 即可启动零依赖 Watch Daemon：自适应退避探测 CDP 端口，窗口新建或重载后自动挂载，绝不触碰 app.asar。',
+            codeLines: 48,
           },
         ],
       },
@@ -536,6 +538,18 @@ ${coreScript}
         ba.className = 'bubble-a';
         ba.setAttribute('data-testid', 'agent-response');
         ba.textContent = t.a;
+        if (t.codeLines && t.codeLines > 0) {
+          const pre = document.createElement('pre');
+          pre.style.marginTop = '8px';
+          pre.style.padding = '8px 10px';
+          pre.style.borderRadius = '8px';
+          pre.style.background = 'rgba(2,6,23,0.45)';
+          pre.style.fontSize = '11px';
+          pre.textContent = Array.from({ length: t.codeLines }, (_, i) =>
+            '  // line ' + String(i + 1).padStart(2, '0') + ': telemetry.record({ turn: ' + (i + 1) + ', zeroHas: true });'
+          ).join('\\n');
+          ba.appendChild(pre);
+        }
 
         convView.appendChild(bu);
         convView.appendChild(ba);
@@ -863,6 +877,7 @@ ${coreScript}
             draftGuard: true,
             promptQueue: true,
             promptLibrary: true,
+            readingNav: true,
             outlineBookmarks: true,
             sessionRadar: radarChk.checked,
             sessionWatchdog: true,
