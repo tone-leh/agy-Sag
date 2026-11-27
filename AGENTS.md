@@ -16,3 +16,4 @@
 3. **激进能力默认关闭（Strict Opt-in）**：`safeAutoAccept`、`themeStudio`、`quotaPulse`、`outlineBookmarks`、`sessionRadar` 默认关闭；`safeAutoAccept` 的 `HARD_DENY_PATTERNS` 铁壁黑名单在任何策略下不可绕过；`quotaPulse` 坚持 100% 只读、零凭据接触、零封号风险。
 4. **物理级翻译与样式隔离**：`hostI18n` 必须跳过代码块、输入框、对话正文与斜杠命令名；全部 CSS 严格保持零 `:has()` 与零 `.ag-cs-*` 命名冲突；支持与 Obsidian Prism 冲突礼让/接管切换。
 5. **Manifest 与隔离开发红线**：`plugin.json` 严格只保留官方支持字段；开发验收统一运行 `npm test`、`npm run workbench:smoke`、`npm run i18n:validate` 与 `npm run doctor`，严禁未经授权写入 `~/.gemini/config/plugins/` 或改动真实 `~/.gemini/antigravity/`。
+6. **README 同步与可翻译性规范**：每次推送或发布新版到 GitHub 前，必须同步更新并全文核查 `README.md` 与 `README.zh-CN.md`（核对模块数、预设、双星能力、CLI 命令与验证状态）；README 与多语言消费文档避免以图片形式插入文字内容（含 `img.shields.io` 徽章图片与含英文文案的静态 SVG 截图），改用可随页面语言切换自动翻译的纯文本与 Markdown 表格/列表。

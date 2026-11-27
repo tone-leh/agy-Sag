@@ -57,7 +57,7 @@
 
 ## 四、分阶段执行计划与验收标准
 
-> **通用阶段验收**：每完成一个阶段，必须满足：① `npm test && npm run i18n:validate && npm run workbench:smoke` 全绿；② `packages/core/i18n.js` 全语种键值 100% 对齐；③ 离线 Workbench 补齐交互演示并在 Ego Lite 实机截图验证；④ 执行一次对照 [PRODUCT-IA.md](./PRODUCT-IA.md) 的简化自检并写入 [HANDOFF.md](./HANDOFF.md)；⑤ 更新 `CHANGELOG.md` 推送 `origin main` 且 GitHub Actions 三平台全绿；⑥ 阶段 1、3、6 须经独立 `auditor` 对抗审查通过。
+> **通用阶段验收**：每完成一个阶段，必须满足：① `npm test && npm run i18n:validate && npm run workbench:smoke` 全绿；② `packages/core/i18n.js` 全语种键值 100% 对齐；③ 离线 Workbench 补齐交互演示并在 Ego Lite 实机截图验证；④ 执行一次对照 [PRODUCT-IA.md](./PRODUCT-IA.md) 的简化自检并写入 [HANDOFF.md](./HANDOFF.md)；⑤ 每次推送/发布到 GitHub 前同步更新并全文核查 `README.md` 与 `README.zh-CN.md`（避免含文字的静态图片/徽章图片以保证页面多语言可翻译）、更新 `CHANGELOG.md` 推送 `origin main` 且 GitHub Actions 三平台全绿；⑥ 阶段 1、3、6 须经独立 `auditor` 对抗审查通过。
 
 ### 阶段 0：路线图与信息架构规范确立
 - **目标**：沉淀 `docs/ROADMAP.md`、`docs/PRODUCT-IA.md`，同步 `AGENTS.md` 双星边界。
@@ -100,7 +100,7 @@
 - [x] **阶段 0**：路线图、产品信息架构文档与 `AGENTS.md` 边界更新
 - [x] **阶段 1**：设置中心 6-Tab 单一真源重构 + `agy-NOV` v0.5.0 同步 + 视觉 Token 统一
 - [x] **阶段 2**：统一分段状态胶囊 HUD 升级
-- [ ] **阶段 3**：`promptLibrary` 提示词库与命令面板
+- [x] **阶段 3**：`promptLibrary` 提示词库与命令面板
 - [ ] **阶段 4**：`readingNav` 长代码折叠与轮次快速导航
 - [ ] **阶段 5**：WebAudio 提示音与本地 TTS 提醒中心
 - [ ] **阶段 6**：`sag:nov_feed` 双星只读数据流深度联动与快照回滚入口

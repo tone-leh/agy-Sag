@@ -21,7 +21,7 @@ L2 对话层「用得顺」（Tab: 对话 | conversation）
  ├── compactGuard    — 自动静默 /compact、视口滚动盾与 /clear 轻重开（默认 ON，含 precompactExport 子开关）
  ├── draftGuard      — 按会话未发送草稿保险箱（默认 ON）
  ├── promptQueue     — 流式运行中提示词排队与三重安全熔断（默认 ON）
- ├── promptLibrary   — 斜杠速填、变量片段库与只读 NOV 模板面板（阶段 3 新增，默认 OFF）
+ ├── promptLibrary   — 斜杠速填、变量片段库与只读 NOV 模板面板（默认 OFF，power/full-auto 开启）
  └── outlineBookmarks— 单轮星标书签与跨会话档案库 Ctrl/Cmd+Shift+B（默认 OFF）
 
 L3 守护层「守得住」（Tab: 守护 | guard）
