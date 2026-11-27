@@ -128,11 +128,11 @@ npm run workbench
 # 只读预览跨平台 CDP 启动计划（默认礼让 Obsidian Prism，不启停任何进程）
 node cli/sag-cli.mjs launch --dry-run --json
 
-# 跨平台带调试端口启动与保活循环（可选 --auto-relaunch-cold-start 仅限冷启动 <=5s 且优雅退出）
+# 跨平台带调试端口启动与保活循环（keepalive 自动贯通启动端口；支持 ANTIGRAVITY_BIN 与 <=5s 冷启动优雅重开）
 node cli/sag-cli.mjs launch --port=9222
 node cli/sag-cli.mjs keepalive --preset=power --lang=zh-CN
 
-# 一次性附着，并指定场景预设与目标语言
+# 一次性附着，并指定场景预设与目标语言（固定端口启动时可加 --port=9222）
 node cli/sag-cli.mjs attach --preset=power --lang=zh-CN
 
 # 启动自适应退避 Watch 守护进程（窗口新建或 Cmd+R 重载后自动补挂）
@@ -167,7 +167,8 @@ node cli/sag-cli.mjs remove
 Antigravity 2.0 宿主（Electron 44 + language_server 本地渲染界面）
  ├── Sidecar / CLI 层（Node.js >= 22，零 npm 运行依赖）
  │    ├── cli/sag-cli.mjs        — 统一命令入口（launch / keepalive / attach / watch / doctor / i18n / storage / nov / workbench）
- │    ├── cli/launcher.mjs       — 跨平台 CDP 启动与保活控制器（Prism 礼让、冷启动保护、0600 原子熔断状态）
+ │    ├── cli/platform-utils.mjs — 跨平台入口软链校验、Windows/Linux 路径边界归一与原子替换重试
+ │    ├── cli/launcher.mjs       — 跨平台 CDP 启动与保活（Win PowerShell UTF-8/pwsh/Scoop、Linux XDG/Flatpak/Snap//proc、Prism 礼让与 0600 原子状态）
  │    ├── cli/watch-daemon.mjs   — 自适应退避（3s -> 30s）CDP 守护进程、实时 nov:feed 推送与零端口桥（sag:ext_pack / sag:nov_templates / sag:nov_feed）
  │    ├── cli/nov-bridge.mjs     — 0600 原子化 agy-NOV v0.5 配置桥（13 模块 / 5 预设）+ 只读脱敏模板与实时数据流读取器
  │    ├── cli/bundle.mjs         — 零构建 UMD 拼接器（SHA-256 幂等附着、<=1.6MB 扩展包预注入与一键全清）
@@ -199,7 +200,7 @@ Antigravity 2.0 宿主（Electron 44 + language_server 本地渲染界面）
 ## 本地开发与验证
 
 ```bash
-npm test                 # 运行全量原生 node:test 单测套件（211/211 通过，零外部依赖）
+npm test                 # 运行全量原生 node:test 单测套件（233/233 通过，零外部依赖）
 npm run i18n:validate    # 校验全部 10 国内置 + 9 扩展界面翻译词典与正则模板（0 错误）
 npm run workbench:smoke  # 对离线沙盒执行自动化 HTTP 烟雾校验（22 markers）
 npm run doctor           # 只读本机环境与双星共存诊断

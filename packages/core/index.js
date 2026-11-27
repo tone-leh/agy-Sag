@@ -60,10 +60,15 @@
       };
     }
 
+    // Capture preloaded extended packs BEFORE tearing down any prior instance so hot-reloads never lose them
+    const rawPreloadedExtPacks = options.extPacks || win?.__agSagExtPacks || globalRoot?.__agSagExtPacks || null;
+    const preloadedExtPacks =
+      rawPreloadedExtPacks && typeof rawPreloadedExtPacks === 'object' ? { ...rawPreloadedExtPacks } : null;
+
     // Replace any prior standalone instance losslessly
-    try { win?.[coexist.INSTANCE_GLOBAL]?.destroy?.(); } catch {}
+    try { win?.[coexist.INSTANCE_GLOBAL]?.destroy?.({ replacing: true }); } catch {}
     if (coexist.LEGACY_INSTANCE_GLOBAL) {
-      try { win?.[coexist.LEGACY_INSTANCE_GLOBAL]?.destroy?.(); } catch {}
+      try { win?.[coexist.LEGACY_INSTANCE_GLOBAL]?.destroy?.({ replacing: true }); } catch {}
     }
 
     // Migrate legacy agSessionGuard.* keys to agSag.* before sub-modules initialize
@@ -136,6 +141,14 @@
       sessionRadar?.setQuietHours?.(nextCfg.radarQuietHours || '');
 
       if (hostI18n) {
+        const liveExtPacks = win?.__agSagExtPacks || globalRoot?.__agSagExtPacks || null;
+        if (liveExtPacks && hostI18nPacksMod?.registerExtendedPack) {
+          for (const [extLoc, extPack] of Object.entries(liveExtPacks)) {
+            if (extPack && typeof extPack === 'object' && !hostI18nPacksMod.hasExtendedPack?.(extLoc)) {
+              try { hostI18nPacksMod.registerExtendedPack(extLoc, extPack); } catch {}
+            }
+          }
+        }
         hostI18n.setConflictPolicy?.(nextCfg.hostI18nConflictPolicy || 'yield');
         hostI18n.setCollectMissing?.(Boolean(nextCfg.hostI18nCollectMissing));
         hostI18n.setLocale?.(nextCfg.hostI18nLocale || 'auto');
@@ -450,8 +463,7 @@
       }
     }
 
-    const preloadedExtPacks = win?.__agSagExtPacks || globalRoot?.__agSagExtPacks || null;
-    if (preloadedExtPacks && typeof preloadedExtPacks === 'object' && hostI18nPacksMod?.registerExtendedPack) {
+    if (preloadedExtPacks && hostI18nPacksMod?.registerExtendedPack) {
       for (const [extLoc, extPack] of Object.entries(preloadedExtPacks)) {
         if (extPack && typeof extPack === 'object') {
           try { hostI18nPacksMod.registerExtendedPack(extLoc, extPack); } catch {}
@@ -889,9 +901,10 @@
         quotaPulse: quotaPulse?.getDebugState?.() || null,
         novSynergy: novSynergy?.getDebugState?.() || null,
       }),
-      destroy() {
+      destroy(destroyOpts = {}) {
         if (destroyed) return;
         destroyed = true;
+        const isReplacing = Boolean(destroyOpts && destroyOpts.replacing);
         statusPill?.destroy?.();
         prismBridge?.destroy?.();
         novSynergy?.destroy?.();
@@ -919,8 +932,10 @@
           if (win && coexist.LEGACY_OWNER_GLOBAL && win[coexist.LEGACY_OWNER_GLOBAL] === source) {
             delete win[coexist.LEGACY_OWNER_GLOBAL];
           }
-          if (win && '__agSagExtPacks' in win) delete win.__agSagExtPacks;
-          if (globalRoot && '__agSagExtPacks' in globalRoot) delete globalRoot.__agSagExtPacks;
+          if (!isReplacing) {
+            if (win && '__agSagExtPacks' in win) delete win.__agSagExtPacks;
+            if (globalRoot && '__agSagExtPacks' in globalRoot) delete globalRoot.__agSagExtPacks;
+          }
         } catch {}
       },
     };

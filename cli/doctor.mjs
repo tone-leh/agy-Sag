@@ -16,6 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { discoverCdpPort, evalViaCdp, httpGetJson, isAntigravityHostTarget } from './cdp-attach.mjs';
 import { NOV_MODULE_IDS, readNovState } from './nov-bridge.mjs';
+import { isCliEntry } from './platform-utils.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -322,7 +323,8 @@ export async function runDoctor(options = {}) {
       env: options.env || process.env,
     });
 
-  const discoverFn = options.discoverPort || ((p) => discoverCdpPort(p, platform, homeDir));
+  const env = options.env || process.env;
+  const discoverFn = options.discoverPort || ((p) => discoverCdpPort(p, platform, homeDir, env));
   const listFn = options.listTargets || ((port) => httpGetJson(`http://127.0.0.1:${port}/json/list`));
   const evalFn = options.evalTarget || ((wsUrl, expr) => evalViaCdp(wsUrl, expr));
 
@@ -336,7 +338,7 @@ export async function runDoctor(options = {}) {
       const list = Array.isArray(targets) ? targets : [];
       cdp.reachable = true;
       cdp.totalTargets = list.length;
-      const hostPages = list.filter(isAntigravityHostTarget);
+      const hostPages = list.filter((t) => isAntigravityHostTarget(t, { expectedPort: port }));
       cdp.hostWindowCount = hostPages.length;
 
       for (const page of hostPages) {
@@ -480,13 +482,13 @@ export async function runDoctorCli(argv = process.argv.slice(2)) {
   } else {
     console.log(formatDoctorHuman(report));
   }
-  if (!report.node.ok || (report.cdp.port && !report.cdp.reachable)) {
+  if (!report.node.ok || (report.cdp.port && !report.cdp.reachable) || report.windows.some((w) => !w.ok)) {
     process.exitCode = 1;
   }
   return report;
 }
 
-const isEntry = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+const isEntry = isCliEntry(import.meta.url);
 if (isEntry) {
   runDoctorCli(process.argv.slice(2)).catch((err) => {
     console.error('[agy-Sag:doctor]', err?.message || err);

@@ -304,6 +304,7 @@
         statusDraft: '输入框有草稿，已自动暂停',
         statusApproval: '等待审批处理，已自动暂停',
         statusSpecLock: 'agy-NOV Spec 写锁生效，队列暂停',
+        statusSubmitUnconfirmed: '未能确认发送，已保留在队列并暂停',
         statusReady: '空闲后自动发送',
       };
     }
@@ -328,6 +329,7 @@
       statusDraft: 'Paused: composer has draft',
       statusApproval: 'Paused: approval pending',
       statusSpecLock: 'Paused: agy-NOV Spec write-lock active',
+      statusSubmitUnconfirmed: 'Paused: submit not confirmed (kept in queue)',
       statusReady: 'Auto-send when idle',
     };
   }
@@ -454,18 +456,21 @@
 
     function findComposerBox(scope = getScope()) {
       if (!doc) return null;
-      const candidates = [
-        ...safeQueryAll(scope, '[data-testid="agent-input-box"], .surface-composer-card'),
-        ...safeQueryAll(doc, '[data-testid="agent-input-box"], .surface-composer-card'),
-      ];
-      return candidates.find((el) => el && !isOwnedNode(el)) || null;
+      const pools = scope && scope !== doc ? [scope] : [doc];
+      for (const pool of pools) {
+        const hit = safeQueryAll(pool, '[data-testid="agent-input-box"], .surface-composer-card').find(
+          (el) => el && !isOwnedNode(el)
+        );
+        if (hit) return hit;
+      }
+      return null;
     }
 
     function findComposerEditor(scope = getScope()) {
       if (!doc) return null;
       const box = findComposerBox(scope);
       const sel = '[data-lexical-editor="true"], [contenteditable="true"], textarea';
-      const pools = [box, scope, doc].filter(Boolean);
+      const pools = [box, scope && scope !== doc ? scope : doc].filter(Boolean);
       for (const pool of pools) {
         const found = safeQueryAll(pool, sel).find((el) => el && !isOwnedNode(el));
         if (found) return found;
@@ -473,12 +478,15 @@
       return null;
     }
 
-    function readComposerText(scope = getScope()) {
-      const ed = findComposerEditor(scope);
+    function readEditorValue(ed) {
       if (!ed) return '';
       const tag = String(ed.tagName || '').toUpperCase();
       const raw = tag === 'TEXTAREA' || tag === 'INPUT' ? ed.value : ed.textContent;
       return String(raw || '').replace(/\u200B/g, '').trim();
+    }
+
+    function readComposerText(scope = getScope()) {
+      return readEditorValue(findComposerEditor(scope));
     }
 
     function checkStreaming(scope = getScope()) {
@@ -596,44 +604,50 @@
         return { ok: false, reason: 'insert-failed' };
       }
 
-      const box = findComposerBox(scope);
-      const sendSels = [
-        '[data-testid="send-button"]',
-        '[data-testid="input-send-button"]',
-        'button[type="submit"]',
-      ];
-      const scopes = [box, scope, doc].filter(Boolean);
-      let sendBtn = null;
-      for (const sc of scopes) {
-        for (const sel of sendSels) {
-          const btns = safeQueryAll(sc, sel);
-          sendBtn = btns.find(
-            (b) =>
-              b &&
-              !isOwnedNode(b) &&
-              !b.disabled &&
-              b.getAttribute?.('aria-disabled') !== 'true' &&
-              !b.hasAttribute?.('disabled') &&
-              typeof b.click === 'function'
-          );
-          if (sendBtn) break;
+      const box = ed.closest?.('[data-testid="agent-input-box"], .surface-composer-card') || findComposerBox(scope);
+      const formScope = ed.closest?.('form') || null;
+      const fb = !box && !formScope && ed.parentElement && ed.parentElement !== doc.body && ed.parentElement !== doc.documentElement ? ed.parentElement : null;
+      const usable = (b) =>
+        Boolean(b && !isOwnedNode(b) && isElementVisible(b, win) && !b.disabled && b.getAttribute?.('aria-disabled') !== 'true' && !b.hasAttribute?.('disabled') && typeof b.click === 'function');
+      const pickBtn = (list, sels) => {
+        const seen = new Set();
+        for (const sc of list) {
+          if (!sc || sc === doc || seen.has(sc)) continue;
+          seen.add(sc);
+          for (const sel of sels) {
+            const b = safeQueryAll(sc, sel).find(usable);
+            if (b) return b;
+          }
         }
-        if (sendBtn) break;
-      }
-
+        return null;
+      };
+      const before = readEditorValue(ed);
+      const isSubmitted = () => {
+        const after = readEditorValue(ed);
+        return after === '' || after !== before || checkStreaming(scope);
+      };
+      const sendBtn =
+        pickBtn([box, formScope, fb], ['[data-testid="send-button"]', '[data-testid="input-send-button"]']) ||
+        pickBtn([box, formScope, fb], ['button[type="submit"]']);
       if (sendBtn) {
         sendBtn.click();
-        return { ok: true, method: 'click-send-button' };
+        if (isSubmitted()) {
+          return { ok: true, method: 'click-send-button' };
+        }
+        return { ok: false, reason: 'submit-unconfirmed' };
       }
 
       const KEv = win?.KeyboardEvent || globalThis.KeyboardEvent;
       if (typeof KEv === 'function') {
         try {
-          ed.dispatchEvent?.(new KEv('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
-          return { ok: true, method: 'enter-key' };
+          const ev = new KEv('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true });
+          ed.dispatchEvent?.(ev);
+          if (isSubmitted()) {
+            return { ok: true, method: 'enter-key' };
+          }
         } catch {}
       }
-      return { ok: true, method: 'fill-only' };
+      return { ok: false, reason: 'submit-unconfirmed' };
     }
 
     function ensureStyle() {
@@ -808,7 +822,8 @@
       if (!expanded) return;
 
       titleTextEl.textContent = `${s.title} (${items.length}/${MAX_QUEUE_ITEMS})`;
-      if (paused) statusEl.textContent = s.statusPaused;
+      if (lastSkipReason === 'submit-unconfirmed') statusEl.textContent = s.statusSubmitUnconfirmed;
+      else if (paused) statusEl.textContent = s.statusPaused;
       else if (lastSkipReason === 'streaming') statusEl.textContent = s.statusStreaming;
       else if (lastSkipReason === 'composer-occupied') statusEl.textContent = s.statusDraft;
       else if (lastSkipReason === 'blocking-approval') statusEl.textContent = s.statusApproval;
@@ -1073,7 +1088,12 @@
       const res = writeAndSubmitComposer(head.text, check.scope);
       if (!res.ok) {
         lastSkipReason = res.reason || 'insert-failed';
+        if (res.reason === 'submit-unconfirmed') {
+          paused = true;
+          clearDispatchTimer();
+        }
         renderBar();
+        emitQueueChange();
         return { dispatched: false, reason: lastSkipReason };
       }
 

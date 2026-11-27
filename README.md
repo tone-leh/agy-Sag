@@ -128,11 +128,11 @@ Opens `http://127.0.0.1:4179` with an interactive offline sandbox covering the 6
 # Preview safe cross-platform CDP launch plan (read-only; yields to Obsidian Prism)
 node cli/sag-cli.mjs launch --dry-run --json
 
-# Launch Antigravity with CDP port or keepalive watch loop (supports --auto-relaunch-cold-start within 5s)
+# Launch Antigravity with CDP port or keepalive watch loop (keepalive auto-propagates launched port; supports ANTIGRAVITY_BIN & --auto-relaunch-cold-start within 5s)
 node cli/sag-cli.mjs launch --port=9222
 node cli/sag-cli.mjs keepalive --preset=power --lang=zh-CN
 
-# Attach once with optional preset & display language
+# Attach once with optional preset & display language (pass --port=9222 if launched with a fixed port)
 node cli/sag-cli.mjs attach --preset=power --lang=zh-CN
 
 # Run adaptive-backoff Watch Daemon (auto-reattaches across reloads/new windows)
@@ -167,7 +167,8 @@ node cli/sag-cli.mjs remove
 Antigravity 2.0 Host (Electron 44 + language_server localhost UI)
  ├── Sidecar / CLI Layer (Node.js >= 22, 0 npm dependencies)
  │    ├── cli/sag-cli.mjs        — Unified CLI (launch, keepalive, attach, watch, doctor, i18n, storage, nov, workbench)
- │    ├── cli/launcher.mjs       — Cross-platform CDP launcher/keepalive with Prism yield & 0600 atomic circuit-breaker state
+ │    ├── cli/platform-utils.mjs — Cross-platform CLI entry/symlink guard, Win/POSIX path containment & atomic rename retry
+ │    ├── cli/launcher.mjs       — Cross-platform CDP launcher/keepalive (Win PowerShell UTF-8/pwsh/Scoop, Linux XDG/Flatpak/Snap//proc, Prism yield & 0600 atomic state)
  │    ├── cli/watch-daemon.mjs   — Adaptive-backoff (3s -> 30s) CDP watcher, live nov:feed push & zero-port bridge (sag:ext_pack / sag:nov_templates / sag:nov_feed)
  │    ├── cli/nov-bridge.mjs     — Atomic 0600 agy-NOV v0.5 config bridge (13 modules / 5 presets) + read-only redacted templates & live feed loader
  │    ├── cli/bundle.mjs         — Deterministic UMD bundler with SHA-256 hash idempotency, <=1.6MB ext preload & clean remove
@@ -199,7 +200,7 @@ Antigravity 2.0 Host (Electron 44 + language_server localhost UI)
 ## Development & Verification
 
 ```bash
-npm test                 # Run full native node:test suite (211/211 passing, zero external deps)
+npm test                 # Run full native node:test suite (233/233 passing, zero external deps)
 npm run i18n:validate    # Validate all 10 built-in + 9 extended UI translation packs (0 errors)
 npm run workbench:smoke  # Run automated HTTP smoke check against the offline workbench (22 markers)
 npm run doctor           # Read-only local environment diagnostics

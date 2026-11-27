@@ -166,6 +166,8 @@
     let domObserver = null;
     let htmlObserver = null;
     let keydownCleanup = null;
+    let compositionCleanup = null;
+    let imeComposing = false;
     let lastLang = '';
     let lastTheme = '';
     let copiedInstallFeedback = false;
@@ -2670,7 +2672,7 @@
           },
         })
       );
-      const backupCliCmd = 'node cli/sag-cli.mjs storage backup --out=~/agy-backup --dry-run';
+      const backupCliCmd = 'node cli/sag-cli.mjs storage backup --out=./agy-backup --dry-run';
       stBtns.appendChild(
         mkChip({
           label: storageCmdCopied ? t('advStorageCopiedCmd', 'CLI Copied') : t('advStorageCopyCmdBtn', 'Copy Backup CLI'),
@@ -3044,8 +3046,40 @@
       settingsNavEl = navBtn;
     }
 
-    function renderIntoSettings() {
+    function isNodeInside(container, node) {
+      if (!container || !node) return false;
+      if (node === container) return true;
+      if (typeof container.contains === 'function') {
+        try {
+          if (container.contains(node)) return true;
+        } catch {}
+      }
+      let cur = node.parentElement || node.parentNode || null;
+      let hops = 0;
+      while (cur && hops < 64) {
+        if (cur === container) return true;
+        cur = cur.parentElement || cur.parentNode || null;
+        hops += 1;
+      }
+      return false;
+    }
+
+    function isUserEditingInside(container) {
+      if (!container || container.isConnected === false || !doc) return false;
+      const act = doc.activeElement;
+      if (!act || act === doc.body || act === doc.documentElement) return false;
+      if (!isNodeInside(container, act)) return false;
+      if (imeComposing) return true;
+      const tag = String(act.tagName || '').toUpperCase();
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+      return Boolean(act.isContentEditable || act.getAttribute?.('contenteditable') === 'true');
+    }
+
+    function renderIntoSettings({ fromObserver = false } = {}) {
       if (destroyed || !doc) return false;
+      if (fromObserver && mountedEl && mountedEl.isConnected !== false && isUserEditingInside(mountedEl)) {
+        return true;
+      }
       ensureStyle();
 
       // Priority 1: Embed cleanly inside Obsidian Prism's Modules tab if #ag-cs-settings-sec exists
@@ -3064,6 +3098,7 @@
         }
         mountedEl = section;
         mountedMode = 'prism';
+        if (fromObserver && isUserEditingInside(section)) return true;
         renderHub(section, { inPrism: true, inDrawer: false });
         return true;
       }
@@ -3080,6 +3115,7 @@
         }
         mountedEl = section;
         mountedMode = 'native';
+        if (fromObserver && isUserEditingInside(section)) return true;
         renderHub(section, { inPrism: false, inDrawer: false });
         ensureNativeSettingsNavAnchor(section);
         return true;
@@ -3092,6 +3128,7 @@
       if (existingNative && existingNative.isConnected) {
         mountedEl = existingNative;
         mountedMode = 'native';
+        if (fromObserver && isUserEditingInside(existingNative)) return true;
         renderHub(existingNative, { inPrism: false, inDrawer: false });
         return true;
       }
@@ -3177,7 +3214,18 @@
     }
 
     function startObservers() {
-      if (!doc || typeof win?.MutationObserver !== 'function') return;
+      if (!doc) return;
+      if (!compositionCleanup && typeof doc.addEventListener === 'function') {
+        const onCompStart = () => { imeComposing = true; };
+        const onCompEnd = () => { imeComposing = false; };
+        doc.addEventListener('compositionstart', onCompStart, true);
+        doc.addEventListener('compositionend', onCompEnd, true);
+        compositionCleanup = () => {
+          doc.removeEventListener?.('compositionstart', onCompStart, true);
+          doc.removeEventListener?.('compositionend', onCompEnd, true);
+        };
+      }
+      if (typeof win?.MutationObserver !== 'function') return;
       try {
         if (!domObserver) {
           let scheduled = false;
@@ -3192,7 +3240,7 @@
             scheduled = true;
             const run = () => {
               scheduled = false;
-              if (!destroyed) renderIntoSettings();
+              if (!destroyed) renderIntoSettings({ fromObserver: true });
             };
             if (typeof win.requestAnimationFrame === 'function') win.requestAnimationFrame(run);
             else setTimeout(run, 16);
@@ -3224,6 +3272,11 @@
         try { keydownCleanup(); } catch {}
         keydownCleanup = null;
       }
+      if (compositionCleanup) {
+        try { compositionCleanup(); } catch {}
+        compositionCleanup = null;
+      }
+      imeComposing = false;
       try { domObserver?.disconnect?.(); } catch {}
       try { htmlObserver?.disconnect?.(); } catch {}
       domObserver = htmlObserver = null;

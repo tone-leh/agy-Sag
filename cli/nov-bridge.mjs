@@ -14,6 +14,13 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {
+  atomicRenameWithRetry,
+  isPathWithinBase,
+  isPlatformSystemRootSymlink,
+  normalizePathForCompare,
+  safeChmodSync,
+} from './platform-utils.mjs';
 
 export const NOV_MODULE_IDS = Object.freeze([
   'review',
@@ -334,33 +341,22 @@ function safeRealpath(targetPath) {
   }
 }
 
-function isPathWithinBase(childReal, baseReal) {
-  if (!childReal || !baseReal) return false;
-  if (childReal === baseReal) return true;
-  const prefix = baseReal.endsWith(path.sep) ? baseReal : `${baseReal}${path.sep}`;
-  return childReal.startsWith(prefix);
-}
-
-function isPlatformSystemRootSymlink(p) {
-  return process.platform === 'darwin' && /^\/(?:var|tmp|etc)$/.test(p);
-}
-
 /**
  * Walks targetPath and all its ancestors up to root (or baseDir if inside baseDir),
  * ensuring no existing path segment is a symbolic link (skipping only macOS /var, /tmp, /etc).
  */
 function findSymlinkViolation(targetPath, homeDir = null) {
   const resolved = path.resolve(targetPath);
+  const resolvedHome = homeDir ? path.resolve(homeDir) : null;
   const stopAt =
-    homeDir && !path.relative(path.resolve(homeDir), resolved).startsWith('..') &&
-    !path.isAbsolute(path.relative(path.resolve(homeDir), resolved))
-      ? path.resolve(homeDir)
+    resolvedHome && isPathWithinBase(resolved, resolvedHome)
+      ? resolvedHome
       : null;
 
   let cur = resolved;
   const root = path.parse(cur).root;
   while (true) {
-    if (stopAt && cur === stopAt) return null;
+    if (stopAt && normalizePathForCompare(cur) === normalizePathForCompare(stopAt)) return null;
     const st = safeLstat(cur);
     if (st && st.isSymbolicLink() && !isPlatformSystemRootSymlink(cur)) {
       return `Symbolic link is not allowed at: ${cur}`;
@@ -1062,11 +1058,7 @@ function writeNovConfigAtomic(dataDir, configPath, configObj, homeDir) {
   }
 
   fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
-  try {
-    fs.chmodSync(dataDir, 0o700);
-  } catch {
-    // Best-effort permission hardening on platforms supporting POSIX chmod
-  }
+  safeChmodSync(dataDir, 0o700);
 
   // Re-verify after directory creation to guard against races
   const postCheckErr = assertSafeWritePaths(dataDir, configPath, homeDir);
@@ -1098,12 +1090,8 @@ function writeNovConfigAtomic(dataDir, configPath, configObj, homeDir) {
 
   try {
     fs.writeFileSync(tmpPath, payload, { mode: 0o600, flag: 'wx' });
-    try {
-      fs.chmodSync(tmpPath, 0o600);
-    } catch {
-      // Ignore on unsupported filesystems
-    }
-    fs.renameSync(tmpPath, configPath);
+    safeChmodSync(tmpPath, 0o600);
+    atomicRenameWithRetry(tmpPath, configPath);
   } catch (err) {
     try {
       fs.unlinkSync(tmpPath);

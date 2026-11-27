@@ -13,8 +13,8 @@ import http from 'node:http';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { buildInjectExpression, REMOVE_EXPRESSION } from './bundle.mjs';
+import { isCliEntry } from './platform-utils.mjs';
 
 const require = createRequire(import.meta.url);
 const coexist = require('../packages/core/coexist.js');
@@ -106,18 +106,43 @@ export function parseCliArgs(argv) {
   return opts;
 }
 
-export function discoverCdpPort(explicitPort = null, platform = process.platform, homeDir = os.homedir()) {
+export function discoverCdpPort(
+  explicitPort = null,
+  platform = process.platform,
+  homeDir = os.homedir(),
+  env = process.env
+) {
   if (Number.isInteger(explicitPort) && explicitPort > 0) return explicitPort;
   const candidates = [];
   if (platform === 'darwin') {
     candidates.push(path.join(homeDir, 'Library', 'Application Support', 'Antigravity', 'DevToolsActivePort'));
   } else if (platform === 'win32') {
-    const appData = process.env.APPDATA || path.join(homeDir, 'AppData', 'Roaming');
+    const appData = env?.APPDATA || path.join(homeDir, 'AppData', 'Roaming');
+    const localAppData = env?.LOCALAPPDATA || path.join(homeDir, 'AppData', 'Local');
     candidates.push(path.join(appData, 'Antigravity', 'DevToolsActivePort'));
+    const localCand = path.join(localAppData, 'Antigravity', 'DevToolsActivePort');
+    if (!candidates.includes(localCand)) {
+      candidates.push(localCand);
+    }
   } else {
+    const xdgConfigHome = typeof env?.XDG_CONFIG_HOME === 'string' ? env.XDG_CONFIG_HOME.trim() : '';
+    if (xdgConfigHome) {
+      candidates.push(path.join(xdgConfigHome, 'Antigravity', 'DevToolsActivePort'));
+      candidates.push(path.join(xdgConfigHome, 'antigravity', 'DevToolsActivePort'));
+    }
     candidates.push(path.join(homeDir, '.config', 'Antigravity', 'DevToolsActivePort'));
+    candidates.push(path.join(homeDir, '.config', 'antigravity', 'DevToolsActivePort'));
+    candidates.push(
+      path.join(homeDir, '.var', 'app', 'com.google.Antigravity', 'config', 'Antigravity', 'DevToolsActivePort')
+    );
+    candidates.push(
+      path.join(homeDir, 'snap', 'antigravity', 'current', '.config', 'Antigravity', 'DevToolsActivePort')
+    );
   }
+  const seen = new Set();
   for (const file of candidates) {
+    if (!file || seen.has(file)) continue;
+    seen.add(file);
     try {
       if (!fs.existsSync(file)) continue;
       const firstLine = fs.readFileSync(file, 'utf8').split(/\r?\n/)[0]?.trim();
@@ -143,25 +168,89 @@ export function httpGetJson(url, timeoutMs = 2500) {
   });
 }
 
-export function isAntigravityHostTarget(target) {
-  if (!target || target.type !== 'page' || !target.webSocketDebuggerUrl) return false;
+export function isLoopbackWsUrl(wsUrl, expectedPort = null) {
+  if (typeof wsUrl !== 'string' || !wsUrl.trim()) return false;
+  let parsed;
+  try {
+    parsed = new URL(wsUrl.trim());
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'ws:') return false;
+  if (parsed.username || parsed.password) return false;
+  const host = parsed.hostname.toLowerCase();
+  if (host !== '127.0.0.1' && host !== 'localhost' && host !== '[::1]' && host !== '::1') {
+    return false;
+  }
+  const hasExpectedPort = Number.isInteger(expectedPort) && expectedPort > 0;
+  if (parsed.port !== '') {
+    const portNum = Number(parsed.port);
+    if (!Number.isInteger(portNum) || portNum <= 0 || portNum > 65535) return false;
+    if (hasExpectedPort && expectedPort !== portNum) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function isAntigravityHostUrl(rawUrl) {
+  const url = String(rawUrl || '').toLowerCase();
+  if (!url) return false;
+  if (/^(?:devtools|chrome|chrome-extension|data|blob|plugin):/.test(url)) return false;
+  if (/\/launchpad(?:\.html)?(?:[?#]|$)/i.test(url)) return false;
+  if (/^(?:vscode-file|app):/.test(url)) {
+    return /(?:antigravity|\/workbench\/workbench|workbench\.html)/i.test(url);
+  }
+  if (/^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?\//.test(url)) {
+    return true;
+  }
+  return false;
+}
+
+export function isAntigravityHostTarget(target, opts = null) {
+  const expectedPort =
+    opts && typeof opts === 'object' && Number.isInteger(opts.expectedPort) && opts.expectedPort > 0
+      ? opts.expectedPort
+      : null;
+  if (!target || target.type !== 'page' || !isLoopbackWsUrl(target.webSocketDebuggerUrl, expectedPort)) return false;
   const url = String(target.url || '').toLowerCase();
   const title = String(target.title || '');
   if (/^(?:devtools|chrome|chrome-extension|data|blob|plugin):/.test(url)) return false;
   if (/\/launchpad(?:\.html)?(?:[?#]|$)/i.test(url)) return false;
-  if (/^(?:vscode-file|app):/.test(url)) return true;
+  if (/^(?:vscode-file|app):/.test(url)) {
+    return (
+      /(?:antigravity|\/workbench\/workbench|workbench\.html)/i.test(url) ||
+      /antigravity/i.test(title)
+    );
+  }
   if (/^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?\//.test(url) && /antigravity/i.test(title)) {
     return true;
   }
   return false;
 }
 
-export function evalViaCdp(wsUrl, expression, timeoutMs = 4000) {
+function formatCdpExceptionDetails(exceptionDetails) {
+  if (!exceptionDetails || typeof exceptionDetails !== 'object') {
+    return 'Uncaught CDP evaluation exception';
+  }
+  const desc = exceptionDetails.exception?.description;
+  if (typeof desc === 'string' && desc.trim()) return desc.trim();
+  const val = exceptionDetails.exception?.value;
+  if (typeof val === 'string' && val.trim()) return val.trim();
+  const text = exceptionDetails.text;
+  if (typeof text === 'string' && text.trim()) return text.trim();
+  return 'Uncaught CDP evaluation exception';
+}
+
+export function evalViaCdp(wsUrl, expression, timeoutMs = 4000, WebSocketImpl = globalThis.WebSocket) {
   return new Promise((resolve, reject) => {
-    if (typeof WebSocket !== 'function') {
+    if (!isLoopbackWsUrl(wsUrl)) {
+      return reject(new Error(`Refusing non-loopback CDP WebSocket URL: ${wsUrl}`));
+    }
+    if (typeof WebSocketImpl !== 'function') {
       return reject(new Error('Node.js >= 22 global WebSocket is required'));
     }
-    const ws = new WebSocket(wsUrl);
+    const ws = new WebSocketImpl(wsUrl);
     const timer = setTimeout(() => {
       try { ws.close(); } catch {}
       reject(new Error('CDP evaluation timeout'));
@@ -182,6 +271,9 @@ export function evalViaCdp(wsUrl, expression, timeoutMs = 4000) {
           clearTimeout(timer);
           try { ws.close(); } catch {}
           if (msg.error) return reject(new Error(msg.error.message || 'CDP error'));
+          if (msg.result?.exceptionDetails) {
+            return reject(new Error(formatCdpExceptionDetails(msg.result.exceptionDetails)));
+          }
           resolve(msg.result?.result?.value ?? null);
         }
       } catch (err) {
@@ -197,17 +289,23 @@ export function evalViaCdp(wsUrl, expression, timeoutMs = 4000) {
   });
 }
 
-export async function runCdpAttachCli(argv = process.argv.slice(2)) {
+export async function runCdpAttachCli(argv = process.argv.slice(2), deps = {}) {
   const opts = parseCliArgs(argv);
-  const port = discoverCdpPort(opts.port);
+  const discoverFn = deps.discoverPort || ((p) => discoverCdpPort(p));
+  const listFn = deps.listTargets || ((port) => httpGetJson(`http://127.0.0.1:${port}/json/list`));
+  const evalFn = deps.evalTarget || ((wsUrl, expr) => evalViaCdp(wsUrl, expr));
+  const logOut = deps.log || ((s) => console.log(s));
+  const logErr = deps.error || ((s) => console.error(s));
+
+  const port = discoverFn(opts.port);
   if (!port) {
-    console.error('[agy-Sag] No active Antigravity CDP port found. Start Antigravity with --remote-debugging-port=0 or pass --port=<PORT>.');
+    logErr('[agy-Sag] No active Antigravity CDP port found. Start Antigravity with --remote-debugging-port=0 or pass --port=<PORT>.');
     process.exitCode = 1;
     return { ok: false, reason: 'no-port' };
   }
 
-  const targets = await httpGetJson(`http://127.0.0.1:${port}/json/list`);
-  const hostPages = (Array.isArray(targets) ? targets : []).filter(isAntigravityHostTarget);
+  const targets = await listFn(port);
+  const hostPages = (Array.isArray(targets) ? targets : []).filter((t) => isAntigravityHostTarget(t, { expectedPort: port }));
 
   const cfgPatch = buildConfigPatchFromOpts(opts);
 
@@ -220,8 +318,21 @@ export async function runCdpAttachCli(argv = process.argv.slice(2)) {
       ...(Object.keys(cfgPatch).length ? { configPatch: cfgPatch } : {}),
       hostPages: hostPages.map((p) => ({ title: p.title, url: p.url })),
     };
-    console.log(JSON.stringify(out, null, 2));
+    logOut(JSON.stringify(out, null, 2));
     return out;
+  }
+
+  if (hostPages.length === 0 && (opts.action === 'attach' || opts.action === 'remove')) {
+    const summary = {
+      ok: false,
+      reason: 'no-host-windows',
+      action: opts.action,
+      port,
+      targets: [],
+    };
+    logOut(JSON.stringify(summary, null, 2));
+    process.exitCode = 1;
+    return summary;
   }
 
   const expr =
@@ -235,16 +346,34 @@ export async function runCdpAttachCli(argv = process.argv.slice(2)) {
           });
 
   const results = [];
+  let failedCount = 0;
   for (const page of hostPages) {
-    const res = await evalViaCdp(page.webSocketDebuggerUrl, expr);
-    results.push({ title: page.title, result: res });
+    try {
+      const res = await evalFn(page.webSocketDebuggerUrl, expr);
+      const targetFailed =
+        (opts.action === 'attach' || opts.action === 'remove') &&
+        (!res || typeof res !== 'object' || res.ok !== true);
+      if (targetFailed) failedCount += 1;
+      results.push({ title: page.title, ok: !targetFailed, result: res });
+    } catch (err) {
+      failedCount += 1;
+      results.push({ title: page.title, ok: false, error: err?.message || String(err), result: null });
+    }
   }
-  const summary = { ok: true, action: opts.action, port, targets: results };
-  console.log(JSON.stringify(summary, null, 2));
+  const ok = failedCount === 0;
+  const summary = {
+    ok,
+    action: opts.action,
+    port,
+    ...(failedCount > 0 ? { failedCount } : {}),
+    targets: results,
+  };
+  logOut(JSON.stringify(summary, null, 2));
+  if (!ok) process.exitCode = 1;
   return summary;
 }
 
-const isEntry = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+const isEntry = isCliEntry(import.meta.url);
 if (isEntry) {
   runCdpAttachCli(process.argv.slice(2)).catch((err) => {
     console.error('[agy-Sag]', err?.message || err);

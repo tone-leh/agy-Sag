@@ -387,6 +387,12 @@
 
     // MutationObserver & batched scheduling state
     const observers = [];
+    const shadowObservers = []; // { root, host, observer }
+    let shadowPruneTimer = null;
+    const shadowPruneIntervalMs = Math.max(
+      100,
+      Number.isFinite(Number(options.shadowPruneIntervalMs)) ? Number(options.shadowPruneIntervalMs) : 30_000
+    );
     let observedRoots = new WeakSet();
     let observersStarted = false;
     const pendingNodes = new Set();
@@ -612,7 +618,47 @@
       }
     }
 
+    function stopShadowPruneTimer() {
+      if (shadowPruneTimer) {
+        clearInterval(shadowPruneTimer);
+        shadowPruneTimer = null;
+      }
+    }
+
+    function pruneDetachedShadowObservers() {
+      if (shadowObservers.length === 0) return 0;
+      let removed = 0;
+      for (let i = shadowObservers.length - 1; i >= 0; i -= 1) {
+        const entry = shadowObservers[i];
+        if (!entry || (entry.host && entry.host.isConnected === false)) {
+          if (entry) {
+            try { entry.observer?.disconnect?.(); } catch {}
+            try { observedRoots.delete(entry.root); } catch {}
+          }
+          shadowObservers.splice(i, 1);
+          removed += 1;
+        }
+      }
+      if (shadowObservers.length === 0) {
+        stopShadowPruneTimer();
+      }
+      return removed;
+    }
+
+    function ensureShadowPruneTimer() {
+      if (shadowPruneTimer || destroyed || !enabled || shadowObservers.length === 0) return;
+      shadowPruneTimer = setInterval(() => {
+        if (destroyed || !enabled) {
+          stopShadowPruneTimer();
+          return;
+        }
+        pruneDetachedShadowObservers();
+      }, shadowPruneIntervalMs);
+      shadowPruneTimer?.unref?.();
+    }
+
     function sweepDeadRefs() {
+      pruneDetachedShadowObservers();
       for (const ref of trackedTextRefs) {
         const node = ref.deref();
         if (!node || !textRecords.has(node)) {
@@ -788,7 +834,12 @@
           attributeFilter: ATTR_WHITELIST,
         });
         observedRoots.add(rootNode);
-        observers.push(mo);
+        if (rootNode.host && rootNode.host.nodeType === 1) {
+          shadowObservers.push({ root: rootNode, host: rootNode.host, observer: mo });
+          ensureShadowPruneTimer();
+        } else {
+          observers.push(mo);
+        }
       } catch {}
     }
 
@@ -913,6 +964,7 @@
       flushHandle = null;
       flushHandleType = 'none';
       if (destroyed) return;
+      pruneDetachedShadowObservers();
 
       if (isHibernated()) {
         hibernatedDirty = true;
@@ -997,6 +1049,9 @@
         } else if (rec.type === 'attributes' && rec.target) {
           pendingNodes.add(rec.target);
         } else if (rec.type === 'childList') {
+          if (shadowObservers.length > 0 && rec.removedNodes && rec.removedNodes.length > 0) {
+            pruneDetachedShadowObservers();
+          }
           const added = rec.addedNodes;
           if (added && added.length) {
             for (let j = 0; j < added.length; j++) {
@@ -1047,6 +1102,7 @@
 
     function stopObservers() {
       cancelScheduledFlush();
+      stopShadowPruneTimer();
       pendingNodes.clear();
       pendingFullScan = false;
       hibernatedDirty = false;
@@ -1054,6 +1110,10 @@
       while (observers.length > 0) {
         const mo = observers.pop();
         try { mo.disconnect(); } catch {}
+      }
+      while (shadowObservers.length > 0) {
+        const entry = shadowObservers.pop();
+        try { entry?.observer?.disconnect?.(); } catch {}
       }
       while (eventCleanups.length > 0) {
         const fn = eventCleanups.pop();
@@ -1270,7 +1330,8 @@
         collectMissing,
         missingCount: missingSet.size,
         extendedPackLoaded: Boolean(packsMod.hasExtendedPack?.(currentLocale)),
-        observerCount: observers.length,
+        observerCount: observers.length + shadowObservers.length,
+        shadowObserverCount: shadowObservers.length,
         hibernatedDirty,
       };
     }

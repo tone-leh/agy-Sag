@@ -434,11 +434,16 @@ test('Phase 13: PromptLibrary standalone context menu supports /btw & /plan and 
   btwBtn.click();
   assert.equal(ta.value, '/btw why does this fail? ');
 
-  // Quick slash menu (no selection) includes /btw and /plan
+  // Quick slash menu protects parameterized /btw draft, and replaces bare slash placeholder cleanly
   assert.equal(pl.openContextMenu({ allowQuickSlash: true, x: 20, y: 30 }), true);
   const planBtn = doc.querySelector('[data-ag-sag-ctx-act="plan-quick"]');
   assert.ok(planBtn, 'quick context menu should include /plan');
   planBtn.click();
+  assert.equal(ta.value, '/btw why does this fail? ', 'Parameterized slash draft must not be overwritten');
+
+  ta.value = '/btw';
+  assert.equal(pl.openContextMenu({ allowQuickSlash: true, x: 20, y: 30 }), true);
+  doc.querySelector('[data-ag-sag-ctx-act="plan-quick"]').click();
   assert.equal(ta.value, '/plan ');
 
   // Auto-yield when Obsidian Prism context menu marker is active

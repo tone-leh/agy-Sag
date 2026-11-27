@@ -93,6 +93,7 @@
     let allFoldedToggleState = true;
     let createdStyleEl = null;
     let keydownOff = null;
+    let paneTrackOff = null;
     let domObserver = null;
     let observerTimer = null;
     let pulseTimer = null;
@@ -103,6 +104,8 @@
     const enhancedPres = new Set(); // track pre elements for lossless teardown
     const codeBars = new WeakMap(); // preEl -> barEl
     const mermaidBtns = new Map(); // svgEl -> btnEl
+    const originalDetailsOpen = new WeakMap(); // detailsEl -> original boolean open state
+    const modifiedDetails = new Set(); // track modified host <details> for lossless restore
 
     const isStreamingNow = () => {
       if (typeof options.isStreaming === 'function') {
@@ -135,6 +138,11 @@
     function getConversationContainer() {
       if (!doc) return null;
       const scope = getScope();
+      if (scope && scope !== doc) {
+        if (scope.getAttribute?.('data-testid') === 'conversation-view') return scope;
+        const scopedConv = scope.querySelector?.('[data-testid="conversation-view"]') || null;
+        if (scopedConv) return scopedConv;
+      }
       return (
         (ctxSrc?.resolveActiveConversationView ? ctxSrc.resolveActiveConversationView(doc, scope) : null) ||
         scope?.querySelector?.('[data-testid="conversation-view"]') ||
@@ -211,21 +219,22 @@
 
     function copyCodeText(text, btn) {
       const str = String(text || '');
-      if (typeof options.onCopyCode === 'function') {
-        try { options.onCopyCode(str); } catch {}
-      } else {
-        try { win?.navigator?.clipboard?.writeText?.(str); } catch {}
-      }
-      if (btn) {
-        const copiedLabel = t('rnavCopiedBtn', 'Copied ✓');
-        if (btn.textContent !== copiedLabel) btn.textContent = copiedLabel;
-        const timer = setTimeout(() => {
-          if (!destroyed && btn.isConnected !== false) {
-            const copyLabel = t('rnavCopyBtn', 'Copy');
-            if (btn.textContent !== copyLabel) btn.textContent = copyLabel;
-          }
+      const show = (ok) => {
+        if (!btn || destroyed || btn.isConnected === false) return;
+        btn.textContent = ok ? t('rnavCopiedBtn', 'Copied ✓') : t('rnavCopyFailedBtn', 'Copy failed');
+        const tm = setTimeout(() => {
+          if (!destroyed && btn.isConnected !== false) btn.textContent = t('rnavCopyBtn', 'Copy');
         }, 1200);
-        timer?.unref?.();
+        tm?.unref?.();
+      };
+      const done = (r) => (r && typeof r.then === 'function' ? r.then((v) => show(v !== false), () => show(false)) : show(r !== false));
+      try {
+        if (typeof options.onCopyCode === 'function') return void done(options.onCopyCode(str));
+        const wf = win?.navigator?.clipboard?.writeText;
+        if (typeof wf !== 'function') return void show(false);
+        done(wf.call(win.navigator.clipboard, str));
+      } catch {
+        show(false);
       }
     }
 
@@ -435,6 +444,18 @@
       return { enhanced: enhancedCount, folded: foldedCount };
     }
 
+    function restoreModifiedDetails() {
+      for (const det of Array.from(modifiedDetails)) {
+        if (det && det.isConnected !== false && originalDetailsOpen.has(det)) {
+          try {
+            det.open = Boolean(originalDetailsOpen.get(det));
+          } catch {}
+        }
+        originalDetailsOpen.delete(det);
+        modifiedDetails.delete(det);
+      }
+    }
+
     function toggleFoldAllStepsAndCode(forceFold = null) {
       const targetFold = typeof forceFold === 'boolean' ? forceFold : !allFoldedToggleState;
       allFoldedToggleState = targetFold;
@@ -451,6 +472,10 @@
         for (const det of detailsList) {
           if (isOwnedNode(det)) continue;
           try {
+            if (!originalDetailsOpen.has(det)) {
+              originalDetailsOpen.set(det, Boolean(det.open));
+            }
+            modifiedDetails.add(det);
             det.open = !targetFold;
           } catch {}
         }
@@ -884,13 +909,33 @@
       if (outlineOpen) renderOutlinePopover(false);
     }
 
+    function findScopedScrollViewport() {
+      const scope = getScope();
+      const conv = getConversationContainer();
+      const ok = (el) => Boolean(el && el.isConnected !== false);
+      const hit =
+        conv?.querySelector?.('[data-testid="autoscroll-viewport"]') ||
+        (scope && scope !== doc ? scope.querySelector?.('[data-testid="autoscroll-viewport"]') : null);
+      if (ok(hit)) return hit;
+      const canScroll = (el) => {
+        if (!ok(el) || (Number(el.scrollHeight) || 0) <= (Number(el.clientHeight) || 0) + 20) return false;
+        try {
+          const ov = String((win?.getComputedStyle || doc?.defaultView?.getComputedStyle)?.(el)?.overflowY || '');
+          if (ov && !/(auto|scroll|overlay)/.test(ov)) return false;
+        } catch {}
+        return true;
+      };
+      if (conv) {
+        if (canScroll(conv)) return conv;
+        for (const el of conv.querySelectorAll?.('*') || []) if (canScroll(el)) return el;
+        return conv;
+      }
+      return scope && scope !== doc ? scope : null;
+    }
+
     function scrollToBottom() {
       if (destroyed || !enabled) return false;
-      const conv = getConversationContainer();
-      const vp =
-        conv?.querySelector?.('[data-testid="autoscroll-viewport"]') ||
-        doc?.querySelector?.('[data-testid="autoscroll-viewport"]') ||
-        conv;
+      const vp = findScopedScrollViewport();
       if (!vp) return false;
       const targetTop = Math.max(0, Number(vp.scrollHeight) || 0);
       if (typeof vp.scrollTo === 'function') {
@@ -960,6 +1005,22 @@
       doc.addEventListener?.('keydown', onKeyDown, true);
       keydownOff = () => doc.removeEventListener?.('keydown', onKeyDown, true);
 
+      if (ctxSrc?.findPaneRootForNode) {
+        const onPaneFocus = (ev) => {
+          if (destroyed || !enabled || !ev?.target || isOwnedNode(ev.target)) return;
+          const pane = ctxSrc.findPaneRootForNode(ev.target, doc);
+          if (pane && pane !== activePaneEl) {
+            activePaneEl = pane;
+          }
+        };
+        doc.addEventListener?.('pointerdown', onPaneFocus, true);
+        doc.addEventListener?.('focusin', onPaneFocus, true);
+        paneTrackOff = () => {
+          doc.removeEventListener?.('pointerdown', onPaneFocus, true);
+          doc.removeEventListener?.('focusin', onPaneFocus, true);
+        };
+      }
+
       if (options.autoObserve !== false && typeof win?.MutationObserver === 'function' && doc.body) {
         domObserver = new win.MutationObserver((records) => {
           if (!enabled || destroyed) return;
@@ -996,6 +1057,10 @@
         try { keydownOff(); } catch {}
         keydownOff = null;
       }
+      if (paneTrackOff) {
+        try { paneTrackOff(); } catch {}
+        paneTrackOff = null;
+      }
       if (domObserver) {
         try { domObserver.disconnect(); } catch {}
         domObserver = null;
@@ -1005,6 +1070,7 @@
     function sync() {
       if (destroyed) return;
       if (!enabled) {
+        restoreModifiedDetails();
         cleanupEnhancedCodeBlocks();
         cleanupMermaidButtons();
         removeRail();
@@ -1029,6 +1095,7 @@
       } else {
         detachListeners();
         clearPulse();
+        restoreModifiedDetails();
         cleanupEnhancedCodeBlocks();
         cleanupMermaidButtons();
         removeRail();
@@ -1064,6 +1131,7 @@
       enabled = false;
       detachListeners();
       clearPulse();
+      restoreModifiedDetails();
       cleanupEnhancedCodeBlocks();
       cleanupMermaidButtons();
       removeRail();

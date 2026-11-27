@@ -36,9 +36,9 @@
   ];
 
   const CJK_SANS_STACK =
-    '"PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei UI", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    '"PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei UI", "Microsoft YaHei", "WenQuanYi Micro Hei", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
   const CJK_MONO_STACK =
-    '"JetBrains Mono", "SF Mono", "Fira Code", Menlo, Consolas, "PingFang SC", "Noto Sans Mono CJK SC", "Microsoft YaHei UI", monospace';
+    '"JetBrains Mono", "SF Mono", "Cascadia Mono", "Fira Code", Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", "PingFang SC", "Noto Sans Mono CJK SC", "Microsoft YaHei UI", monospace';
 
   const CODE_FONT_PRESETS = Object.freeze({
     default: Object.freeze({
@@ -531,6 +531,45 @@
     });
   }
 
+  function stripHasRules(css) {
+    const hasRe = /:has\s*\(/gi;
+    let out = css;
+    for (let g = 0; g < 128; g += 1) {
+      hasRe.lastIndex = 0;
+      const m = hasRe.exec(out);
+      if (!m) break;
+      let s = 0;
+      let bp = 0;
+      let bq = null;
+      for (let i = m.index - 1; i >= 0; i -= 1) {
+        const ch = out[i];
+        if (bq) { if (ch === bq && out[i - 1] !== '\\') bq = null; continue; }
+        if (ch === '"' || ch === "'") { bq = ch; continue; }
+        if (ch === ')') { bp += 1; continue; }
+        if (ch === '(') { if (bp > 0) bp -= 1; continue; }
+        if (bp === 0 && (ch === '{' || ch === '}' || ch === ';')) { s = i + 1; break; }
+      }
+      const op = m.index + m[0].length - 1;
+      const cp = findMatchingParen(out, op);
+      let e = out.length;
+      let q = null;
+      let bd = 0;
+      let inBlk = false;
+      for (let i = cp !== -1 ? cp + 1 : op + 1; i < out.length; i += 1) {
+        const ch = out[i];
+        if (q) { if (ch === '\\') { i += 1; continue; } if (ch === q) q = null; continue; }
+        if (ch === '"' || ch === "'") { q = ch; continue; }
+        if (ch === '{') { bd += 1; inBlk = true; continue; }
+        if (ch === '}') {
+          if (inBlk) { if (--bd <= 0) { e = i + 1; break; } }
+          else { e = i; break; }
+        } else if (!inBlk && ch === ';') { e = i + 1; break; }
+      }
+      out = out.slice(0, s) + out.slice(e);
+    }
+    return out;
+  }
+
   function sanitizeCssSinglePass(input) {
     let css = input;
 
@@ -567,7 +606,7 @@
 
     css = sanitizeImageSetCalls(css);
     css = sanitizeUrlCalls(css);
-    css = replaceCssCall(css, /:has\s*\(/gi, () => '', { checkIdentBefore: false, stopAtOpenBrace: true });
+    css = stripHasRules(css);
 
     return css;
   }
@@ -902,6 +941,10 @@
 
     // Dedicated ambient glow node
     let glowEl = null;
+
+    // Extension iframe sync state
+    const frameLoadCleanups = new Map(); // iframe -> cleanup fn
+    let lastFramePayload = null;
 
     // Host color-scheme watcher (matchMedia + DOM attribute observer)
     let mediaQuery = null;
@@ -1367,12 +1410,44 @@
       return /^(?:plugin|vscode-webview|antigravity-plugin|app):\/\//i.test(src) || /^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?\//i.test(src);
     }
 
-    function syncExtensionFrames(presetSpec, colorsState, effVars) {
-      if (!doc || typeof doc.querySelectorAll !== 'function') {
-        lastSyncedFrames = 0;
-        return 0;
+    function resolveFrameTargetOrigin(iframe) {
+      const src = String(iframe?.getAttribute?.('src') || iframe?.src || '').trim();
+      if (!src || src === 'about:blank') {
+        try {
+          const o = String(win?.location?.origin || '');
+          if (o && o !== 'null' && /^https?:\/\//i.test(o)) return o;
+        } catch {}
+        return '*';
       }
-      const frames = Array.from(doc.querySelectorAll('iframe') || []);
+      try {
+        const u = new URL(src);
+        if ((u.protocol === 'http:' || u.protocol === 'https:') && u.origin && u.origin !== 'null') return u.origin;
+      } catch {}
+      return '*';
+    }
+
+    function teardownFrameListeners() {
+      for (const off of frameLoadCleanups.values()) { try { off(); } catch {} }
+      frameLoadCleanups.clear();
+      lastFramePayload = null;
+    }
+
+    function postToAllowedFrame(f, payload) {
+      if (!f || !payload || !isAllowedExtensionFrame(f)) return false;
+      try {
+        if (typeof f.contentWindow?.postMessage === 'function') {
+          f.contentWindow.postMessage(payload, resolveFrameTargetOrigin(f));
+          return true;
+        }
+      } catch {}
+      return false;
+    }
+
+    function syncExtensionFrames(presetSpec, colorsState, effVars) {
+      if (!doc || typeof doc.querySelectorAll !== 'function') { lastSyncedFrames = 0; return 0; }
+      for (const [f, off] of frameLoadCleanups.entries()) {
+        if (f?.isConnected === false) { try { off(); } catch {} frameLoadCleanups.delete(f); }
+      }
       let count = 0;
       const payload = {
         type: 'ag-sag:theme-sync',
@@ -1382,14 +1457,17 @@
         colorsState,
         vars: colorsState === 'active' && effVars ? { ...effVars } : null,
       };
-      for (const f of frames) {
+      lastFramePayload = payload;
+      for (const f of Array.from(doc.querySelectorAll('iframe') || [])) {
         if (!isAllowedExtensionFrame(f)) continue;
-        try {
-          if (typeof f.contentWindow?.postMessage === 'function') {
-            f.contentWindow.postMessage(payload, '*');
-            count += 1;
-          }
-        } catch {}
+        if (enabled && !destroyed && !frameLoadCleanups.has(f) && typeof f.addEventListener === 'function') {
+          const onLoad = () => { if (!destroyed && enabled && lastFramePayload) postToAllowedFrame(f, lastFramePayload); };
+          try {
+            f.addEventListener('load', onLoad);
+            frameLoadCleanups.set(f, () => { try { f.removeEventListener?.('load', onLoad); } catch {} });
+          } catch {}
+        }
+        if (postToAllowedFrame(f, payload)) count += 1;
       }
       lastSyncedFrames = count;
       return count;
@@ -1603,6 +1681,7 @@
         lastColorsYielded = false;
         lastSurfaceYielded = false;
         syncExtensionFrames(THEME_PRESETS.native, 'disabled', null);
+        teardownFrameListeners();
         return {
           applied: false,
           enabled,
@@ -1733,6 +1812,7 @@
       removeStyleElement();
       clearHtmlAttributes();
       syncExtensionFrames(THEME_PRESETS.native, 'disabled', null);
+      teardownFrameListeners();
       lastColorsYielded = false;
       lastSurfaceYielded = false;
       lastConvState = 'idle';

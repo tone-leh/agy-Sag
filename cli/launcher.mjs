@@ -15,7 +15,6 @@ import { execFile as nodeExecFile, spawn as nodeSpawn } from 'node:child_process
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import {
   buildConfigPatchFromOpts,
@@ -24,6 +23,13 @@ import {
   validateHostLang,
   validatePresetName,
 } from './cdp-attach.mjs';
+import {
+  assertNoSymlinkAncestors,
+  atomicRenameWithRetry,
+  isCliEntry,
+  quoteShellArgForDisplay,
+  safeChmodSync,
+} from './platform-utils.mjs';
 import { SagWatchDaemon, isPrismDaemonActive } from './watch-daemon.mjs';
 
 const execFileAsync = promisify(nodeExecFile);
@@ -31,8 +37,8 @@ const execFileAsync = promisify(nodeExecFile);
 export const DEFAULT_CDP_PORT = 9222;
 export const MIN_CDP_PORT = 1024;
 export const MAX_CDP_PORT = 65535;
-export const REMOTE_DEBUGGING_PORT_RE = /(?:^|\s)--remote-debugging-port(?:=|\s|$)/;
-export const REMOTE_DEBUGGING_PORT_VALUE_RE = /(?:^|\s)--remote-debugging-port(?:=|\s+)(\d+)(?=\s|$)/;
+export const REMOTE_DEBUGGING_PORT_RE = /(?:^|[\s"])--remote-debugging-port(?:=|\s|"|$)/;
+export const REMOTE_DEBUGGING_PORT_VALUE_RE = /(?:^|[\s"])--remote-debugging-port(?:="?\s*|"\s+"?|\s+"?)(\d+)(?=["\s]|$)/;
 
 export const PRISM_START_TOLERANCE_MS = 15000;
 export const COLD_START_WINDOW_MS = 5000;
@@ -140,6 +146,18 @@ export function getDefaultLaunchStatePath(homeDir = os.homedir()) {
   return path.join(path.resolve(homeDir), '.gemini', 'antigravity', 'agy-sag', 'launch-state.json');
 }
 
+function getEnvCaseInsensitive(env, key) {
+  if (!env || typeof env !== 'object') return undefined;
+  if (env[key] !== undefined && String(env[key]).trim()) return String(env[key]).trim();
+  const target = String(key).toLowerCase();
+  for (const [k, v] of Object.entries(env)) {
+    if (k.toLowerCase() === target && v !== undefined && String(v).trim()) {
+      return String(v).trim();
+    }
+  }
+  return undefined;
+}
+
 export function buildLaunchSpec({
   platform = process.platform,
   port = DEFAULT_CDP_PORT,
@@ -149,20 +167,47 @@ export function buildLaunchSpec({
 } = {}) {
   const validPort = validateCdpPort(port);
   const debugFlag = `--remote-debugging-port=${validPort}`;
-  const resolvedHome = path.resolve(homeDir);
+  const rawHome = String(homeDir || os.homedir());
+  const safeExists = (p) => {
+    try {
+      return Boolean(existsSyncFn(p));
+    } catch {
+      return false;
+    }
+  };
+
+  const explicitBin = getEnvCaseInsensitive(env, 'ANTIGRAVITY_BIN');
+  if (explicitBin) {
+    if (platform === 'darwin' && /\.app\/?$/i.test(explicitBin)) {
+      const appPath = explicitBin.replace(/\/+$/, '');
+      return {
+        platform,
+        port: validPort,
+        command: 'open',
+        args: ['-na', appPath, '--args', debugFlag],
+        resolvedPath: appPath,
+        executableFound: safeExists(appPath),
+        shell: false,
+      };
+    }
+    return {
+      platform,
+      port: validPort,
+      command: explicitBin,
+      args: [debugFlag],
+      resolvedPath: explicitBin,
+      executableFound: safeExists(explicitBin),
+      shell: false,
+    };
+  }
 
   if (platform === 'darwin') {
+    const resolvedHome = path.resolve(rawHome);
     const candidates = [
       '/Applications/Antigravity.app',
       path.join(resolvedHome, 'Applications', 'Antigravity.app'),
     ];
-    const detectedApp = candidates.find((p) => {
-      try {
-        return Boolean(existsSyncFn(p));
-      } catch {
-        return false;
-      }
-    });
+    const detectedApp = candidates.find(safeExists);
     return {
       platform,
       port: validPort,
@@ -175,21 +220,20 @@ export function buildLaunchSpec({
   }
 
   if (platform === 'win32') {
-    const localAppData = env?.LOCALAPPDATA || path.win32.join(resolvedHome, 'AppData', 'Local');
-    const programFiles = env?.ProgramFiles || 'C:\\Program Files';
-    const programFilesX86 = env?.['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+    const winHome = /^[A-Za-z]:[\\/]/.test(rawHome) || rawHome.includes('\\') ? rawHome : path.resolve(rawHome);
+    const userProfile = getEnvCaseInsensitive(env, 'USERPROFILE') || winHome;
+    const localAppData =
+      getEnvCaseInsensitive(env, 'LOCALAPPDATA') || path.win32.join(userProfile, 'AppData', 'Local');
+    const programFiles = getEnvCaseInsensitive(env, 'ProgramFiles') || 'C:\\Program Files';
+    const programFilesX86 = getEnvCaseInsensitive(env, 'ProgramFiles(x86)') || 'C:\\Program Files (x86)';
     const candidates = [
       path.win32.join(localAppData, 'Programs', 'Antigravity', 'Antigravity.exe'),
+      path.win32.join(localAppData, 'Antigravity', 'Antigravity.exe'),
+      path.win32.join(userProfile, 'scoop', 'apps', 'antigravity', 'current', 'Antigravity.exe'),
       path.win32.join(programFiles, 'Antigravity', 'Antigravity.exe'),
       path.win32.join(programFilesX86, 'Antigravity', 'Antigravity.exe'),
     ];
-    const detectedExe = candidates.find((p) => {
-      try {
-        return Boolean(existsSyncFn(p));
-      } catch {
-        return false;
-      }
-    });
+    const detectedExe = candidates.find(safeExists);
     const chosen = detectedExe || candidates[0];
     return {
       platform,
@@ -203,19 +247,18 @@ export function buildLaunchSpec({
   }
 
   // linux & other POSIX
+  const posixHome = rawHome.startsWith('/') ? rawHome : path.resolve(rawHome);
   const linuxCandidates = [
+    path.posix.join(posixHome, '.local', 'bin', 'antigravity'),
     '/usr/share/antigravity/antigravity',
+    '/usr/lib/antigravity/antigravity',
     '/opt/Antigravity/antigravity',
+    '/opt/antigravity/antigravity',
+    '/snap/bin/antigravity',
     '/usr/bin/antigravity',
     '/usr/local/bin/antigravity',
   ];
-  const detectedBin = linuxCandidates.find((p) => {
-    try {
-      return Boolean(existsSyncFn(p));
-    } catch {
-      return false;
-    }
-  });
+  const detectedBin = linuxCandidates.find(safeExists);
   const chosen = detectedBin || 'antigravity';
   return {
     platform,
@@ -317,6 +360,44 @@ export function parseWindowsTimestamp(raw) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function extractFirstCommandToken(cmd) {
+  const s = String(cmd || '').trim();
+  if (!s) return { token: '', rest: '' };
+  const quote = s[0];
+  if (quote === '"' || quote === "'") {
+    let token = '';
+    let i = 1;
+    for (; i < s.length; i += 1) {
+      const ch = s[i];
+      if (ch === '\\' && quote === '"' && i + 1 < s.length) {
+        token += s[i + 1];
+        i += 1;
+        continue;
+      }
+      if (ch === quote) {
+        return { token, rest: s.slice(i + 1).trim() };
+      }
+      token += ch;
+    }
+    return { token, rest: '' };
+  }
+  let token = '';
+  let i = 0;
+  for (; i < s.length; i += 1) {
+    const ch = s[i];
+    if (ch === '\\' && i + 1 < s.length) {
+      token += s[i + 1];
+      i += 1;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      return { token, rest: s.slice(i + 1).trim() };
+    }
+    token += ch;
+  }
+  return { token, rest: '' };
+}
+
 export function isAntigravityMainProcess(commandLine, platform = process.platform) {
   const cmd = String(commandLine || '').trim();
   if (!cmd) return false;
@@ -341,10 +422,25 @@ export function isAntigravityMainProcess(commandLine, platform = process.platfor
   if (platform === 'win32') {
     return /(?:^|[\\/\s"])Antigravity\.exe(?:"|\s|$)/i.test(cmd);
   }
-  if (/^\s*(?:node|npm|npx|python3?|bash|zsh|sh)\b/i.test(cmd)) {
-    return false;
+
+  // Linux / POSIX: inspect executable basename strictly to avoid false positives like `vim antigravity.md`
+  const { token: exeToken, rest } = extractFirstCommandToken(cmd);
+  if (!exeToken) return false;
+  const baseName = path.posix.basename(exeToken.replace(/\\/g, '/'));
+  if (/^(?:antigravity|antigravity-bin|antigravity(?:-[A-Za-z0-9._+-]+)?\.appimage)$/i.test(baseName)) {
+    return true;
   }
-  return /(?:^|[\/\s"])antigravity(?:"|\s|$)/i.test(cmd);
+  if (/^electron(?:\d+)?$/i.test(baseName)) {
+    return /(?:^|[\s"'])\/[^\s"']*\/antigravity(?:[\/\s"']|$)/i.test(rest);
+  }
+  // Support unquoted absolute Linux executable paths containing spaces (e.g. `/opt/My Apps/Antigravity/antigravity --flag`)
+  if (cmd.startsWith('/') && !/^\/(?:usr\/)?(?:local\/)?bin\/(?:vim|vi|nano|cat|less|more|grep|rg|awk|sed|bash|zsh|sh|env|python3?|node)\b/i.test(cmd)) {
+    const beforeFlags = cmd.split(/\s+--/)[0];
+    if (/(?:^|\/)(?:antigravity|antigravity-bin|antigravity(?:-[A-Za-z0-9._+-]+)?\.appimage)(?:\s|$)/i.test(beforeFlags)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function defaultExecFile(file, args, options = {}) {
@@ -356,32 +452,53 @@ function defaultExecFile(file, args, options = {}) {
   });
 }
 
-function parseWindowsProcessOutput(stdout) {
-  const trimmed = String(stdout || '').trim();
+function parseWindowsProcessOutput(stdout, { strictJson = false } = {}) {
+  const trimmed = String(stdout || '').replace(/^\uFEFF/, '').trim();
   if (!trimmed) return [];
 
-  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(trimmed);
-      const list = Array.isArray(parsed) ? parsed : [parsed];
-      return list
-        .map((item) => {
-          const pid = Number(item?.ProcessId ?? item?.pid);
-          const ppid = Number(item?.ParentProcessId ?? item?.ppid ?? 0);
-          const commandLine = String(item?.CommandLine ?? item?.commandLine ?? '').trim();
-          const startMs = parseWindowsTimestamp(item?.CreationDate ?? item?.startMs);
-          if (!Number.isInteger(pid) || pid <= 0) return null;
-          return { pid, ppid: Number.isFinite(ppid) ? ppid : 0, startMs, commandLine };
-        })
-        .filter(Boolean);
-    } catch {
-      return [];
+  if (strictJson) {
+    const parsed = JSON.parse(trimmed);
+    const list = Array.isArray(parsed) ? parsed : [parsed];
+    const mapped = list
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null;
+        const pid = Number(item.ProcessId ?? item.pid);
+        const ppid = Number(item.ParentProcessId ?? item.ppid ?? 0);
+        const commandLine = String(item.CommandLine ?? item.commandLine ?? '').trim();
+        const startMs = parseWindowsTimestamp(item.CreationDate ?? item.startMs);
+        if (!Number.isInteger(pid) || pid <= 0) return null;
+        return { pid, ppid: Number.isFinite(ppid) ? ppid : 0, startMs, commandLine };
+      })
+      .filter(Boolean);
+    if (mapped.some((m) => !m.commandLine)) {
+      throw new Error('Windows process CommandLine unavailable (incomplete query result)');
     }
+    return mapped;
+  }
+
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    const parsed = JSON.parse(trimmed);
+    const list = Array.isArray(parsed) ? parsed : [parsed];
+    return list
+      .map((item) => {
+        const pid = Number(item?.ProcessId ?? item?.pid);
+        const ppid = Number(item?.ParentProcessId ?? item?.ppid ?? 0);
+        const commandLine = String(item?.CommandLine ?? item?.commandLine ?? '').trim();
+        const startMs = parseWindowsTimestamp(item?.CreationDate ?? item?.startMs);
+        if (!Number.isInteger(pid) || pid <= 0) return null;
+        return { pid, ppid: Number.isFinite(ppid) ? ppid : 0, startMs, commandLine };
+      })
+      .filter(Boolean);
+  }
+
+  if (/^no instance\(s\) available\.?$/i.test(trimmed)) {
+    return [];
   }
 
   // WMIC /format:list fallback
   const records = [];
   let current = {};
+  let sawKeyValue = false;
   for (const rawLine of trimmed.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line) {
@@ -393,14 +510,18 @@ function parseWindowsProcessOutput(stdout) {
     }
     const eq = line.indexOf('=');
     if (eq > 0) {
+      sawKeyValue = true;
       const k = line.slice(0, eq).trim();
       const v = line.slice(eq + 1).trim();
       current[k] = v;
     }
   }
   if (Object.keys(current).length > 0) records.push(current);
+  if (!sawKeyValue) {
+    throw new Error(`Unrecognized WMIC process output: ${trimmed.slice(0, 120)}`);
+  }
 
-  return records
+  const wmicMapped = records
     .map((item) => {
       const pid = Number(item.ProcessId);
       const ppid = Number(item.ParentProcessId || 0);
@@ -410,35 +531,113 @@ function parseWindowsProcessOutput(stdout) {
       return { pid, ppid: Number.isFinite(ppid) ? ppid : 0, startMs, commandLine };
     })
     .filter(Boolean);
+  if (wmicMapped.some((m) => !m.commandLine)) {
+    throw new Error('Windows WMIC CommandLine unavailable (incomplete query result)');
+  }
+  return wmicMapped;
+}
+
+function readLinuxProcProcesses(procDir = '/proc') {
+  const dirents = fs.readdirSync(procDir, { withFileTypes: true });
+  let bootTimeSec = null;
+  try {
+    const procStat = fs.readFileSync(path.join(procDir, 'stat'), 'utf8');
+    const btimeMatch = procStat.match(/^btime\s+(\d+)/m);
+    if (btimeMatch) bootTimeSec = Number(btimeMatch[1]);
+  } catch {}
+
+  const entries = [];
+  for (const ent of dirents) {
+    if (!/^\d+$/.test(ent.name)) continue;
+    const pid = Number(ent.name);
+    if (!Number.isInteger(pid) || pid <= 0) continue;
+    const cmdlinePath = path.join(procDir, ent.name, 'cmdline');
+    let rawCmd;
+    try {
+      rawCmd = fs.readFileSync(cmdlinePath, 'utf8');
+    } catch {
+      continue;
+    }
+    const parts = rawCmd.split('\0').filter((s) => s.length > 0);
+    if (parts.length === 0) continue;
+    const commandLine = parts
+      .map((part, idx) => (idx === 0 && /\s/.test(part) ? `"${part}"` : part))
+      .join(' ');
+
+    let ppid = 0;
+    let startMs = null;
+    try {
+      const statRaw = fs.readFileSync(path.join(procDir, ent.name, 'stat'), 'utf8');
+      const rparen = statRaw.lastIndexOf(')');
+      if (rparen > 0) {
+        const fields = statRaw.slice(rparen + 2).trim().split(/\s+/);
+        // fields[0]=state, fields[1]=ppid, fields[19]=starttime (clock ticks after boot)
+        const parsedPpid = Number(fields[1]);
+        if (Number.isFinite(parsedPpid)) ppid = parsedPpid;
+        const startTicks = Number(fields[19]);
+        if (bootTimeSec !== null && Number.isFinite(startTicks)) {
+          // Standard Linux USER_HZ is 100
+          startMs = Math.round((bootTimeSec + startTicks / 100) * 1000);
+        }
+      }
+    } catch {}
+
+    entries.push({ pid, ppid, startMs, commandLine });
+  }
+  return entries;
+}
+
+function makeDetectionFailedResult(errorMessage) {
+  const out = [];
+  out.detectionFailed = true;
+  out.detectionError = String(errorMessage || 'Process detection failed');
+  return out;
 }
 
 export async function detectAntigravityProcesses({
   platform = process.platform,
   execFileFn = defaultExecFile,
   nowFn = () => Date.now(),
+  procDir = '/proc',
 } = {}) {
   const nowMs = nowFn();
   let entries = [];
 
   if (platform === 'win32') {
     const psCmd =
-      "Get-CimInstance Win32_Process -Filter \"Name='Antigravity.exe'\" | Select-Object ProcessId,ParentProcessId,CreationDate,CommandLine | ConvertTo-Json -Compress";
-    try {
-      const res = await execFileFn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', psCmd], {
-        windowsHide: true,
-      });
-      entries = parseWindowsProcessOutput(res?.stdout ?? res);
-    } catch {
+      "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process -Filter \"Name='Antigravity.exe'\" | Select-Object ProcessId,ParentProcessId,CreationDate,CommandLine | ConvertTo-Json -Compress";
+    const errors = [];
+    let succeeded = false;
+
+    for (const psExe of ['powershell.exe', 'pwsh']) {
+      try {
+        const res = await execFileFn(psExe, ['-NoProfile', '-NonInteractive', '-Command', psCmd], {
+          windowsHide: true,
+        });
+        entries = parseWindowsProcessOutput(res?.stdout ?? res, { strictJson: true });
+        succeeded = true;
+        break;
+      } catch (err) {
+        errors.push(`${psExe}: ${err?.message || String(err)}`);
+      }
+    }
+
+    if (!succeeded) {
       try {
         const res = await execFileFn(
           'wmic',
           ['process', 'where', "name='Antigravity.exe'", 'get', 'ProcessId,ParentProcessId,CreationDate,CommandLine', '/format:list'],
           { windowsHide: true }
         );
-        entries = parseWindowsProcessOutput(res?.stdout ?? res);
-      } catch {
-        entries = [];
+        entries = parseWindowsProcessOutput(res?.stdout ?? res, { strictJson: false });
+        succeeded = true;
+      } catch (err) {
+        errors.push(`wmic: ${err?.message || String(err)}`);
       }
+    }
+
+    if (!succeeded) {
+      return makeDetectionFailedResult(errors.join('; '));
     }
   } else {
     try {
@@ -446,12 +645,26 @@ export async function detectAntigravityProcesses({
         env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
       });
       const stdout = String(res?.stdout ?? res ?? '');
-      for (const line of stdout.split(/\r?\n/)) {
+      const nonEmptyLines = stdout.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      for (const line of nonEmptyLines) {
         const parsed = parseUnixPsLine(line, nowMs);
         if (parsed) entries.push(parsed);
       }
-    } catch {
-      entries = [];
+      if (nonEmptyLines.length > 0 && entries.length === 0) {
+        throw new Error('Unparseable ps output (0 valid process lines)');
+      }
+    } catch (psErr) {
+      if (platform === 'linux') {
+        try {
+          entries = readLinuxProcProcesses(procDir);
+        } catch (procErr) {
+          return makeDetectionFailedResult(
+            `ps: ${psErr?.message || String(psErr)}; proc(${procDir}): ${procErr?.message || String(procErr)}`
+          );
+        }
+      } else {
+        return makeDetectionFailedResult(`ps: ${psErr?.message || String(psErr)}`);
+      }
     }
   }
 
@@ -583,18 +796,7 @@ export function shouldYieldToPrism({
 }
 
 function assertNoSymlinkPath(targetPath) {
-  const resolved = path.resolve(targetPath);
-  const dir = path.dirname(resolved);
-  for (const p of [dir, resolved]) {
-    try {
-      const st = fs.lstatSync(p);
-      if (st.isSymbolicLink()) {
-        throw new Error(`Security violation: refusing symlink path ${p}`);
-      }
-    } catch (err) {
-      if (err?.code !== 'ENOENT') throw err;
-    }
-  }
+  assertNoSymlinkAncestors(path.resolve(targetPath));
 }
 
 export function readLaunchState(statePath) {
@@ -624,11 +826,12 @@ export function readLaunchState(statePath) {
   return { version: 1, attempts, cooldownUntil, updatedAt };
 }
 
-export function writeLaunchStateAtomic(statePath, state) {
+export function writeLaunchStateAtomic(statePath, state, { platform = process.platform, renameSyncFn = fs.renameSync, waitFn = null } = {}) {
   const resolved = path.resolve(statePath);
   assertNoSymlinkPath(resolved);
   const dir = path.dirname(resolved);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  safeChmodSync(dir, 0o700, { platform });
   assertNoSymlinkPath(resolved);
 
   const tmpName = `.launch-state.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
@@ -646,8 +849,8 @@ export function writeLaunchStateAtomic(statePath, state) {
 
   try {
     fs.writeFileSync(tmpPath, payload, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-    fs.chmodSync(tmpPath, 0o600);
-    fs.renameSync(tmpPath, resolved);
+    safeChmodSync(tmpPath, 0o600, { platform });
+    atomicRenameWithRetry(tmpPath, resolved, { platform, renameSyncFn, waitFn });
   } catch (err) {
     try {
       fs.unlinkSync(tmpPath);
@@ -771,17 +974,32 @@ export async function requestGracefulQuit({
         await execFileFn('osascript', ['-e', 'tell application "Antigravity" to quit']);
       } catch {
         for (const proc of processes) {
-          killFn(proc.pid, 'SIGTERM');
+          try {
+            killFn(proc.pid, 'SIGTERM');
+          } catch (err) {
+            if (err?.code === 'ESRCH' || !isProcessAliveFn(proc.pid)) continue;
+            throw err;
+          }
         }
       }
     } else if (platform === 'win32') {
       for (const proc of processes) {
         // Strictly without /F (never force-kill)
-        await execFileFn('taskkill', ['/PID', String(proc.pid)], { windowsHide: true });
+        try {
+          await execFileFn('taskkill', ['/PID', String(proc.pid)], { windowsHide: true });
+        } catch (err) {
+          if (!isProcessAliveFn(proc.pid)) continue;
+          throw err;
+        }
       }
     } else {
       for (const proc of processes) {
-        killFn(proc.pid, 'SIGTERM');
+        try {
+          killFn(proc.pid, 'SIGTERM');
+        } catch (err) {
+          if (err?.code === 'ESRCH' || !isProcessAliveFn(proc.pid)) continue;
+          throw err;
+        }
       }
     }
   } catch (err) {
@@ -822,15 +1040,21 @@ export async function evaluateLaunchPlan(options = {}) {
   const existsSyncFn = options.existsSyncFn || fs.existsSync;
   const statePath = path.resolve(options.statePath || getDefaultLaunchStatePath(homeDir));
 
+  const env = options.env || process.env;
   const launchSpec = buildLaunchSpec({
     platform,
     port,
     homeDir,
-    env: options.env || process.env,
+    env,
     existsSyncFn,
   });
 
-  const processes = await detectAntigravityProcesses({ platform, execFileFn, nowFn });
+  const processes = await detectAntigravityProcesses({
+    platform,
+    execFileFn,
+    nowFn,
+    procDir: options.procDir ?? '/proc',
+  });
   const prism = shouldYieldToPrism({ homeDir, processes, killFn });
 
   let launchState;
@@ -863,6 +1087,24 @@ export async function evaluateLaunchPlan(options = {}) {
     maxWindowAttempts: options.maxWindowAttempts ?? DEFAULT_MAX_WINDOW_ATTEMPTS,
   });
 
+  if (processes.detectionFailed) {
+    return {
+      ok: false,
+      action: 'blocked-detection-failed',
+      code: 'PROCESS_DETECTION_FAILED',
+      error: `Unable to verify whether Antigravity is running (${processes.detectionError || 'process detection failed'}); refusing to launch (fail-closed).`,
+      platform,
+      port,
+      launchSpec,
+      processes,
+      prism,
+      prismYielded: false,
+      circuitBreaker: breaker,
+      statePath,
+      nowMs,
+    };
+  }
+
   if (prism.prismYielded) {
     return {
       ok: true,
@@ -883,7 +1125,7 @@ export async function evaluateLaunchPlan(options = {}) {
 
   const withCdp = processes.filter((p) => p.hasRemoteDebuggingPort);
   if (withCdp.length > 0) {
-    const discovered = discoverCdpPort(null, platform, homeDir);
+    const discovered = discoverCdpPort(null, platform, homeDir, env);
     const activePort = withCdp[0].debuggingPort || discovered || port;
     return {
       ok: true,
@@ -913,11 +1155,14 @@ export async function evaluateLaunchPlan(options = {}) {
     );
 
     if (!options.autoRelaunchColdStart) {
+      const displayCmd = [launchSpec.command, ...launchSpec.args]
+        .map((a) => quoteShellArgForDisplay(a, platform))
+        .join(' ');
       return {
         ok: true,
         action: 'guide-only',
         requiresManualRelaunch: true,
-        message: `Antigravity is running without --remote-debugging-port. Quit Antigravity manually and relaunch via: ${launchSpec.command} ${launchSpec.args.join(' ')}`,
+        message: `Antigravity is running without --remote-debugging-port. Quit Antigravity manually and relaunch via: ${displayCmd}`,
         platform,
         port,
         launchSpec,
@@ -1035,6 +1280,14 @@ export async function executeLaunchPlan(plan, options = {}) {
   const nowFn = options.nowFn || (() => Date.now());
   const spawnFn = options.spawnFn || defaultSpawnDetached;
 
+  // Persist launch attempt BEFORE quitting the host during graceful-relaunch so a transient
+  // state-file lock or permission failure never leaves Antigravity closed without relaunching.
+  const updatedState = recordLaunchAttempt(plan.statePath, nowFn(), {
+    windowMs: options.windowMs ?? DEFAULT_WINDOW_MS,
+    maxWindowAttempts: options.maxWindowAttempts ?? DEFAULT_MAX_WINDOW_ATTEMPTS,
+    cooldownMs: options.cooldownMs ?? DEFAULT_COOLDOWN_MS,
+  });
+
   if (plan.action === 'graceful-relaunch') {
     const quitRes = await requestGracefulQuit({
       processes: plan.processes,
@@ -1055,16 +1308,11 @@ export async function executeLaunchPlan(plan, options = {}) {
         code: quitRes.code,
         error: quitRes.error,
         quitResult: quitRes,
+        updatedState,
         executed: false,
       };
     }
   }
-
-  const updatedState = recordLaunchAttempt(plan.statePath, nowFn(), {
-    windowMs: options.windowMs ?? DEFAULT_WINDOW_MS,
-    maxWindowAttempts: options.maxWindowAttempts ?? DEFAULT_MAX_WINDOW_ATTEMPTS,
-    cooldownMs: options.cooldownMs ?? DEFAULT_COOLDOWN_MS,
-  });
 
   const child = spawnFn(plan.launchSpec.command, plan.launchSpec.args, {
     detached: true,
@@ -1111,6 +1359,8 @@ export class SagKeepaliveController {
     this.explicitPort = Boolean(options.explicitPort);
     this.platform = options.platform || process.platform;
     this.homeDir = path.resolve(options.homeDir || os.homedir());
+    this.env = options.env || process.env;
+    this.procDir = options.procDir ?? '/proc';
     this.statePath = path.resolve(options.statePath || getDefaultLaunchStatePath(this.homeDir));
     this.autoRelaunch = Boolean(options.autoRelaunch || options.autoRelaunchColdStart);
     this.autoRelaunchColdStart = Boolean(options.autoRelaunchColdStart);
@@ -1133,9 +1383,14 @@ export class SagKeepaliveController {
 
     this.sessionAttempts = 0;
     this.disconnectCount = 0;
+    this.activePort = this.explicitPort ? this.port : null;
     this.running = false;
     this._stopped = false;
     this.timer = null;
+    this._externalDaemon = Boolean(options.daemon);
+
+    const baseDiscoverPort =
+      options.discoverPort || ((p) => discoverCdpPort(p, this.platform, this.homeDir, this.env));
 
     this.daemon =
       options.daemon ||
@@ -1144,7 +1399,13 @@ export class SagKeepaliveController {
         config: options.config || null,
         intervalMs: options.intervalMs ?? 3000,
         maxBackoffMs: options.maxBackoffMs ?? 30000,
-        discoverPort: options.discoverPort || ((p) => discoverCdpPort(p, this.platform, this.homeDir)),
+        discoverPort: (p) => {
+          const explicit = p ?? null;
+          if (explicit) return explicit;
+          const discovered = baseDiscoverPort(null);
+          if (discovered) return discovered;
+          return this.activePort;
+        },
         listTargets: options.listTargets || ((p) => httpGetJson(`http://127.0.0.1:${p}/json/list`)),
         evalTarget: options.evalTarget,
         enableHostBridge: options.enableHostBridge,
@@ -1195,6 +1456,8 @@ export class SagKeepaliveController {
     const plan = await evaluateLaunchPlan({
       platform: this.platform,
       homeDir: this.homeDir,
+      env: this.env,
+      procDir: this.procDir,
       port: this.port,
       statePath: this.statePath,
       sessionAttempts: this.sessionAttempts,
@@ -1223,11 +1486,21 @@ export class SagKeepaliveController {
 
     if (launchResult.executed) {
       this.sessionAttempts += 1;
+      const verifiedPort = launchResult.activePort || launchResult.port || this.port;
+      this.activePort = verifiedPort;
+      if (!this._externalDaemon && this.daemon && this.daemon.explicitPort === null) {
+        this.daemon.port = verifiedPort;
+      }
       this.emit('keepalive-relaunched', {
-        port: launchResult.port,
+        port: verifiedPort,
         sessionAttempts: this.sessionAttempts,
         spawnedPid: launchResult.spawnedPid,
       });
+    } else if (launchResult.action === 'already-running-with-cdp' && launchResult.activePort) {
+      this.activePort = launchResult.activePort;
+      if (!this._externalDaemon && this.daemon && this.daemon.explicitPort === null) {
+        this.daemon.port = launchResult.activePort;
+      }
     } else if (launchResult.prismYielded) {
       this.emit('keepalive-yielded', { reason: launchResult.reason });
     } else if (!launchResult.ok) {
@@ -1314,7 +1587,7 @@ export async function runKeepaliveCli(argv = [], deps = {}) {
   return { controller, keepAliveHandle };
 }
 
-const isEntry = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+const isEntry = isCliEntry(import.meta.url);
 if (isEntry) {
   const rawArgs = process.argv.slice(2);
   const mode = rawArgs[0] === 'keepalive' ? 'keepalive' : 'launch';

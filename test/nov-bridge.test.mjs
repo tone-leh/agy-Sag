@@ -1065,12 +1065,15 @@ test('9. [H-1] HostBridgeSession fails closed when unready, blocks child iframe 
     await new Promise((r) => setImmediate(r));
     assert.equal(overrideCalls.length, 1);
 
-    // Fallback test: when Page.getFrameTree returns an error, known child frames are still blocked
+    // Fail-closed test: when Page.getFrameTree returns an error, NEVER fall back to unverified default contexts;
+    // keep unbound until a subsequent Page.getFrameTree re-probe succeeds authoritatively.
     const { MockWebSocket: MockWs3, instances: inst3 } = createMockWebSocketClass();
+    const fbEvents = [];
     const sess3 = new HostBridgeSession({
       targetId: 'fallback-page',
       wsUrl: 'ws://127.0.0.1:9222/page/h1-fallback',
       WebSocketImpl: MockWs3,
+      onEvent: (name, data) => fbEvents.push({ name, ...data }),
     });
     sess3.open();
     const wsFb = inst3[0];
@@ -1089,6 +1092,16 @@ test('9. [H-1] HostBridgeSession fails closed when unready, blocks child iframe 
     });
     const fbReq = wsFb.findLastSent('Page.getFrameTree');
     wsFb.simulateMessage({ id: fbReq.id, error: { code: -32601, message: 'Method not found' } });
+    assert.equal(sess3._frameTreeResolved, false);
+    assert.equal(sess3.mainFrameId, null);
+    assert.equal(sess3.mainContextId, null);
+    assert.equal(wsFb.findLastSent('Runtime.addBinding'), null);
+    assert.ok(fbEvents.some((e) => e.name === 'bridge-frame-tree-failed'));
+
+    // Re-probing via ensureBinding() succeeds once Page.getFrameTree returns authoritative top frame
+    assert.equal(sess3.ensureBinding(), false);
+    wsFb.replyFrameTree('fb-top', ['fb-child']);
+    assert.equal(sess3._frameTreeResolved, true);
     assert.equal(sess3.mainFrameId, 'fb-top');
     assert.equal(sess3.mainContextId, 61);
     assert.deepEqual(wsFb.findLastSent('Runtime.addBinding')?.params, {

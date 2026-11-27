@@ -50,6 +50,7 @@ const GLOBAL_KEYS = [
   '__agSagQuotaPulse',
   '__agSagNovSynergy',
   '__agSagBridgeReceiver',
+  '__agSagHostBridge',
   '__agSessionGuard',
   '__agSgCore',
   '__agSgI18n',
@@ -70,9 +71,14 @@ const GLOBAL_KEYS = [
 ];
 
 export const REMOVE_EXPRESSION = `(() => {
+  const curOwner = window.__agSagOwner || window.__agSessionGuardOwner;
+  if (curOwner && curOwner !== 'standalone') {
+    return { ok: true, status: 'yielded', owner: curOwner };
+  }
   try { window.__agSag?.destroy?.(); } catch {}
   try { window.__agSessionGuard?.destroy?.(); } catch {}
   try { delete window.__agSagBridgeReceiver; } catch {}
+  try { delete window.__agSagHostBridge; } catch {}
   try { delete window.__agSagNovSynergy; } catch {}
   try { document.getElementById('ag-sg-core-css')?.remove(); } catch {}
   try { document.getElementById('ag-sag-theme-css')?.remove(); } catch {}
@@ -484,34 +490,73 @@ export function readExtendedPackFile(locale, repoRoot = path.resolve(__dirname, 
   }
 }
 
+function minifyStaticCss(css) {
+  const s = String(css ?? '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^[ \t]+|[ \t]+$/gm, '')
+    .replace(/\n+/g, '');
+  let out = '';
+  let quote = '';
+  for (let i = 0; i < s.length; i += 1) {
+    const ch = s[i];
+    if (quote) {
+      out += ch;
+      if (ch === '\\' && i + 1 < s.length) {
+        out += s[i + 1];
+        i += 1;
+      } else if (ch === quote) {
+        quote = '';
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    if (ch === ' ' || ch === '\t') {
+      const prev = out.length > 0 ? out[out.length - 1] : '';
+      let j = i + 1;
+      while (j < s.length && (s[j] === ' ' || s[j] === '\t')) j += 1;
+      const next = j < s.length ? s[j] : '';
+      i = j - 1;
+      if ('{};,>~:'.includes(prev) || '{};,>~'.includes(next)) {
+        continue;
+      }
+      out += ' ';
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
 function compactCorePart(part) {
   let code = compactCoreSource(part.code);
   if (part.file === 'styles.js') {
     code = code.replace(/const CORE_CSS\s*=\s*`([\s\S]*?)`\.trim\(\)/, (_m, css) => {
-      const minCss = css
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/^[ \t]+|[ \t]+$/gm, '')
-        .replace(/\n+/g, '');
-      return `const CORE_CSS=\`${minCss}\`.trim()`;
+      return `const CORE_CSS=\`${minifyStaticCss(css)}\`.trim()`;
     });
   }
   return code;
 }
 
+function combineCoreParts(parts, useCompact) {
+  return parts
+    .map((p) => (useCompact ? compactCorePart(p) : `/* ${p.file} */\n${p.code}`))
+    .join('\n;\n');
+}
+
 export function computeCoreHash(parts = readCoreSources(), opts = {}) {
   const useCompact = opts.compact !== false;
-  const combined = parts
-    .map((p) => `/* ${p.file} */\n${useCompact ? compactCorePart(p) : p.code}`)
-    .join('\n;\n');
+  const combined = combineCoreParts(parts, useCompact);
   return crypto.createHash('sha256').update(combined).digest('hex').slice(0, 16);
 }
 
 export function buildInjectExpression(config = null, opts = {}) {
   const parts = readCoreSources();
   const useCompact = opts.compact !== false;
-  const combined = parts
-    .map((p) => `/* ${p.file} */\n${useCompact ? compactCorePart(p) : p.code}`)
-    .join('\n;\n');
+  const combined = combineCoreParts(parts, useCompact);
   const codeHash = crypto.createHash('sha256').update(combined).digest('hex').slice(0, 16);
   const cfgJson = JSON.stringify(config && typeof config === 'object' ? config : null);
   const sourceJson = JSON.stringify(typeof opts.source === 'string' && opts.source ? opts.source : 'standalone');
@@ -536,13 +581,17 @@ export function buildInjectExpression(config = null, opts = {}) {
   const targetHash = ${JSON.stringify(codeHash)};
   const bootCfg = ${cfgJson};
   const source = ${sourceJson};
+  const curOwner = window.__agSagOwner || window.__agSessionGuardOwner;
+  if (curOwner && curOwner !== source) {
+    return { ok: true, yielded: true, owner: curOwner, codeHash: targetHash, brand: 'agy-Sag' };
+  }
+  ${extPrelude}
   const prev = window.__agSag || window.__agSessionGuard;
   if (prev && !prev.getDebugState?.()?.destroyed && prev.__agSgHash === targetHash) {
     if (bootCfg && typeof prev.updateConfig === 'function') prev.updateConfig(bootCfg);
     if (typeof prev.evaluateNow === 'function') void prev.evaluateNow();
     return { ok: true, reused: true, codeHash: targetHash, brand: 'agy-Sag' };
   }
-  ${extPrelude}
   ${combined}
   const api = (window.__agSagCore || window.__agSgCore)?.mountSag?.({
     win: window,

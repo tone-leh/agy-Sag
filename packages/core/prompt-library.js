@@ -28,6 +28,14 @@
   const MAX_TAG_LEN = 24;
   const MAX_VAR_VALUE_LEN = 1000;
   const VAR_TOKEN_RE = /\{\{\s*([a-zA-Z0-9_\u4e00-\u9fff-]{1,40})(?:\s*=\s*([^}]{0,120}))?\s*\}\}/g;
+  const SELECTION_PREFILL_VAR_RE = /^(?:selection|code|target|error|topic|snippet|subject|issue|symptom)$/i;
+  const BARE_SLASH_CMD_RE = /^\/[a-zA-Z0-9_-]*$/;
+  const URL_SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
+  const POSIX_EXT_PATH_RE = /^(?:\.{0,2}\/|~\/|\/)?[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._ -]+)+\.[A-Za-z0-9]{1,10}(?::\d+(?::\d+)?)?$/;
+  const POSIX_ROOTED_PATH_RE = /^(?:\/|~\/|\.{1,2}\/)[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+(?::\d+(?::\d+)?)?$/;
+  const WIN_DRIVE_PATH_RE = /^[A-Za-z]:[\\/](?:[^<>:"|?*\r\n\\/]+[\\/])*[^<>:"|?*\r\n\\/]+(?::\d+(?::\d+)?)?$/;
+  const WIN_UNC_PATH_RE = /^\\\\[A-Za-z0-9._-]+\\[^<>:"|?*\r\n\\/]+(?:\\[^<>:"|?*\r\n\\/]+)+(?::\d+(?::\d+)?)?$/;
+  const WIN_REL_PATH_RE = /^(?:\.{1,2}\\)?[A-Za-z0-9._-]+(?:\\[A-Za-z0-9._ -]+)+(?::\d+(?::\d+)?)?$/;
   const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
   const BUILTIN_SLASH_ITEMS = Object.freeze([
@@ -546,7 +554,8 @@
         activeVarItem = item;
         varValues = {};
         for (const v of vars) {
-          varValues[v.name] = v.defaultValue || '';
+          const prefill = selectionContext && SELECTION_PREFILL_VAR_RE.test(v.name) ? selectionContext : '';
+          varValues[v.name] = prefill || v.defaultValue || '';
         }
         renderModal();
         return;
@@ -799,10 +808,10 @@
         inp.setAttribute('data-ag-sag-pl-var', v.name);
         inp.placeholder = v.defaultValue || `{{${v.name}}}`;
         const prefillSel =
-          selectionContext && /^(?:selection|code|target|error|topic|snippet|subject|issue)$/i.test(v.name)
+          selectionContext && SELECTION_PREFILL_VAR_RE.test(v.name)
             ? selectionContext
             : '';
-        const initVal = varValues[v.name] ?? (prefillSel || v.defaultValue || '');
+        const initVal = varValues[v.name] !== undefined ? varValues[v.name] : (prefillSel || v.defaultValue || '');
         varValues[v.name] = initVal;
         inp.value = initVal;
         inp.addEventListener('input', () => {
@@ -810,6 +819,7 @@
           syncPreview();
         });
         inp.addEventListener('keydown', (ev) => {
+          if (ev?.isComposing || ev?.keyCode === 229) return;
           if (ev?.key === 'Enter') {
             ev.preventDefault?.();
             applySelectedItem(item);
@@ -1197,8 +1207,8 @@
     function insertSlashSafely(cmdText) {
       const scope = getScope();
       const existing = ctxSrc?.readComposerDraft ? String(ctxSrc.readComposerDraft(doc, scope) || '').trim() : '';
-      const isSingleLineSlashPlaceholder = existing.startsWith('/') && !existing.includes('\n');
-      if (existing && !isSingleLineSlashPlaceholder) {
+      const isBareSlashPlaceholder = BARE_SLASH_CMD_RE.test(existing);
+      if (existing && !isBareSlashPlaceholder) {
         showCtxToast(t('plCtxDraftBusy', 'Composer has an unsent draft; send or clear it first'));
         return { ok: false, reason: 'draft-occupied' };
       }
@@ -1218,6 +1228,25 @@
       return false;
     }
 
+    function isRecognizedFilePathText(raw) {
+      const txt = String(raw || '').trim();
+      if (txt.length < 3 || txt.length > 260) return false;
+      if (/[\r\n<>|*?"]/.test(txt) || URL_SCHEME_RE.test(txt)) return false;
+      return (
+        WIN_DRIVE_PATH_RE.test(txt) ||
+        WIN_UNC_PATH_RE.test(txt) ||
+        WIN_REL_PATH_RE.test(txt) ||
+        POSIX_EXT_PATH_RE.test(txt) ||
+        POSIX_ROOTED_PATH_RE.test(txt)
+      );
+    }
+
+    function formatAtFileRef(filePath) {
+      const clean = String(filePath || '').trim();
+      if (!clean) return '';
+      return /\s/.test(clean) ? `@"${clean.replace(/"/g, '\\"')}"` : `@${clean}`;
+    }
+
     function extractPathFromTarget(target) {
       if (!target || target.nodeType !== 1) return '';
       const attrPath =
@@ -1229,7 +1258,7 @@
       const tag = String(target.tagName || '').toUpperCase();
       if (tag === 'CODE' || tag === 'A' || tag === 'SPAN') {
         const txt = String(target.textContent || '').trim();
-        if (txt.length >= 3 && txt.length <= 200 && /^(?:\.{0,2}\/|~\/|\/)?[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+\.[A-Za-z0-9]{1,8}(?::\d+)?$/.test(txt)) {
+        if (isRecognizedFilePathText(txt)) {
           return txt;
         }
       }
@@ -1340,10 +1369,33 @@
       };
 
       const copyText = (txt) => {
+        const onCopyFail = () => {
+          showCtxToast(t('plCtxCopyFailed', 'Copy failed: clipboard unavailable'));
+        };
         try {
-          if (typeof options.onCopyText === 'function') options.onCopyText(txt);
-          else win?.navigator?.clipboard?.writeText?.(txt);
-        } catch {}
+          if (typeof options.onCopyText === 'function') {
+            const res = options.onCopyText(txt);
+            if (res === false) {
+              onCopyFail();
+            } else if (res && typeof res.then === 'function') {
+              res.then((v) => {
+                if (v === false) onCopyFail();
+              }, onCopyFail);
+            }
+            return;
+          }
+          const writeFn = win?.navigator?.clipboard?.writeText;
+          if (typeof writeFn !== 'function') {
+            onCopyFail();
+            return;
+          }
+          const p = writeFn.call(win.navigator.clipboard, txt);
+          if (p && typeof p.then === 'function') {
+            p.then(undefined, onCopyFail);
+          }
+        } catch {
+          onCopyFail();
+        }
       };
 
       if (selection) {
@@ -1380,7 +1432,8 @@
       if (filePath) {
         addItem(t('plCtxCopyPath', 'Copy file path'), 'copy-path', () => copyText(filePath));
         addItem(t('plCtxInsertAt', 'Insert @file reference'), 'insert-at', () => {
-          insertIntoComposer(`@${filePath} `, 'append');
+          const ref = formatAtFileRef(filePath);
+          if (ref) insertIntoComposer(`${ref} `, 'append');
         });
       }
 
@@ -1467,6 +1520,7 @@
         const host = modalEl?.querySelector?.('[data-testid="ag-sag-pl-list"]');
         renderListArea(host);
       } else if (key === 'Enter' && items.length > 0 && (!isEditableTarget(ev?.target) || ev?.target === searchInputEl)) {
+        if (ev?.isComposing || ev?.keyCode === 229) return;
         ev.preventDefault?.();
         applySelectedItem(items[selectedIndex]);
       }

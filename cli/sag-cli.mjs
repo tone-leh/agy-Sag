@@ -40,8 +40,8 @@ import {
   parseStorageArgs,
 } from './storage-doctor.mjs';
 import { runKeepaliveCli, runLaunchCli } from './launcher.mjs';
+import { isCliEntry } from './platform-utils.mjs';
 import { startWatchDaemonCli } from './watch-daemon.mjs';
-import { runWorkbenchCli } from '../workbench/server.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -576,7 +576,7 @@ export async function runSagCli(argv = process.argv.slice(2), io = {}) {
 
   if (cmd === 'watch') {
     const data = await startWatchDaemonCli(rest);
-    const failed = data && data.status && data.status !== 'ok';
+    const failed = Boolean(data && (data.ok === false || (data.status && data.status !== 'ok')));
     return { ok: !failed, exitCode: failed ? 1 : 0, data };
   }
 
@@ -594,7 +594,12 @@ export async function runSagCli(argv = process.argv.slice(2), io = {}) {
 
   if (cmd === 'doctor') {
     const data = await runDoctorCli(rest);
-    const failed = Boolean(data && (!data.node?.ok || (data.cdp?.port && !data.cdp?.reachable)));
+    const failed = Boolean(
+      data &&
+        (!data.node?.ok ||
+          (data.cdp?.port && !data.cdp?.reachable) ||
+          (Array.isArray(data.windows) && data.windows.some((w) => !w.ok)))
+    );
     return { ok: !failed, exitCode: failed ? 1 : 0, data };
   }
 
@@ -608,6 +613,14 @@ export async function runSagCli(argv = process.argv.slice(2), io = {}) {
   }
 
   if (cmd === 'workbench') {
+    let runWorkbenchCli;
+    try {
+      ({ runWorkbenchCli } = await import('../workbench/server.mjs'));
+    } catch (err) {
+      throw new Error(
+        `Offline workbench is not bundled in this installed copy (run from repository checkout): ${err?.message || err}`
+      );
+    }
     const data = await runWorkbenchCli(rest);
     return { ok: true, exitCode: 0, data };
   }
@@ -617,7 +630,7 @@ export async function runSagCli(argv = process.argv.slice(2), io = {}) {
   return { ok: false, exitCode: 1, error: msg };
 }
 
-const isEntry = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+const isEntry = isCliEntry(import.meta.url);
 if (isEntry) {
   runSagCli(process.argv.slice(2))
     .then((res) => {

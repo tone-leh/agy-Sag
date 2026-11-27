@@ -15,7 +15,6 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { EXT_PACK_LOCALES, buildInjectExpression, computeCoreHash, readExtendedPackFile } from './bundle.mjs';
 import {
   buildConfigPatchFromOpts,
@@ -23,9 +22,12 @@ import {
   evalViaCdp,
   httpGetJson,
   isAntigravityHostTarget,
+  isAntigravityHostUrl,
+  isLoopbackWsUrl,
   validateHostLang,
   validatePresetName,
 } from './cdp-attach.mjs';
+import { isCliEntry } from './platform-utils.mjs';
 import {
   computeNovFeedSignature,
   handleBridgePayload,
@@ -141,6 +143,8 @@ export class HostBridgeSession {
     this._frameTreeSupported = true;
     this._executionContexts = new Map(); // ctxId -> { id, frameId, isDefault, type }
     this._knownChildFrameIds = new Set();
+    this._lastNovStateSig = undefined;
+    this._lastNovFeedSig = undefined;
   }
 
   isOpen() {
@@ -150,7 +154,12 @@ export class HostBridgeSession {
   }
 
   isMainContextReady() {
-    return this.isOpen() && typeof this.mainContextId === 'number';
+    return (
+      this.isOpen() &&
+      this._frameTreeResolved &&
+      Boolean(this._authoritativeMainFrameId) &&
+      typeof this.mainContextId === 'number'
+    );
   }
 
   _sendCdpWithId(method, params) {
@@ -214,56 +223,27 @@ export class HostBridgeSession {
   }
 
   _reconcileMainContext() {
-    // 1. Authoritative top-level frame ID locked by Page.getFrameTree / top-level Page.frameNavigated
-    if (this._authoritativeMainFrameId) {
+    // Fail-closed: only bind after Page.getFrameTree authoritatively resolves top-level mainFrameId.
+    if (this._frameTreeResolved && this._authoritativeMainFrameId) {
       this.mainFrameId = this._authoritativeMainFrameId;
       const matched = this._findLatestDefaultContextForFrame(this._authoritativeMainFrameId);
       if (matched) {
         return this._bindMainContext(matched.id);
       }
-      // Fail-closed: drop any non-authoritative context until the real top frame context arrives
       this.mainContextId = null;
       this._boundContextId = null;
       return false;
     }
 
-    // 2. Before Page.getFrameTree returns, only allow an exact match against CDP targetId (page.id)
-    //    and never allow an arbitrary child iframe to preempt mainFrameId/mainContextId.
-    if (this.pageTargetId && !this._knownChildFrameIds.has(this.pageTargetId)) {
-      const targetMatched = this._findLatestDefaultContextForFrame(this.pageTargetId);
-      if (targetMatched) {
-        this.mainFrameId = this.pageTargetId;
-        return this._bindMainContext(targetMatched.id);
-      }
-    }
-
-    // 3. Fallback only when Page.getFrameTree is explicitly unsupported by the host/mock:
-    //    accept only an explicit type='default' context whose frameId is not a known child frame.
-    if (!this._frameTreeSupported) {
-      if (this.mainFrameId && !this._knownChildFrameIds.has(this.mainFrameId)) {
-        const existingMatched = this._findLatestDefaultContextForFrame(this.mainFrameId);
-        if (existingMatched) {
-          return this._bindMainContext(existingMatched.id);
-        }
-        this.mainContextId = null;
-        this._boundContextId = null;
-        return false;
-      }
-      for (const ctx of this._executionContexts.values()) {
-        if (!ctx.isDefault || ctx.type !== 'default') continue;
-        if (ctx.frameId && this._knownChildFrameIds.has(ctx.frameId)) continue;
-        if (ctx.frameId) this.mainFrameId = ctx.frameId;
-        return this._bindMainContext(ctx.id);
-      }
-    }
-
+    this.mainContextId = null;
+    this._boundContextId = null;
     return false;
   }
 
   ensureBinding() {
     if (!this.isOpen()) return false;
-    if (typeof this.mainContextId !== 'number') {
-      if (this._frameTreeReqId === null && !this._authoritativeMainFrameId) {
+    if (!this._frameTreeResolved || !this._authoritativeMainFrameId || typeof this.mainContextId !== 'number') {
+      if (this._frameTreeReqId === null && (!this._frameTreeResolved || !this._authoritativeMainFrameId)) {
         this._requestFrameTree();
       }
       return false;
@@ -280,6 +260,15 @@ export class HostBridgeSession {
 
   open() {
     if (this.closed || this.ws || typeof this.WebSocketImpl !== 'function' || !this.wsUrl) return false;
+    if (!isLoopbackWsUrl(this.wsUrl)) {
+      this.closed = true;
+      this.onEvent('bridge-error', {
+        targetId: this.targetId,
+        error: `Refusing non-loopback CDP WebSocket URL: ${this.wsUrl}`,
+      });
+      this.onClose(this);
+      return false;
+    }
     let ws;
     try {
       ws = new this.WebSocketImpl(this.wsUrl);
@@ -316,15 +305,15 @@ export class HostBridgeSession {
       }
       if (!msg || typeof msg !== 'object') return;
 
-      // Response to Page.getFrameTree: authoritatively lock the top-level frame ID
+      // Response to Page.getFrameTree: authoritatively lock the top-level frame ID & verify host URL (fail-closed)
       if (this._frameTreeReqId !== null && msg.id === this._frameTreeReqId) {
         this._frameTreeReqId = null;
-        this._frameTreeResolved = true;
-        const topFrameId =
-          typeof msg.result?.frameTree?.frame?.id === 'string' && msg.result.frameTree.frame.id
-            ? msg.result.frameTree.frame.id
-            : null;
-        if (topFrameId) {
+        const topFrame = msg.result?.frameTree?.frame || null;
+        const topFrameId = typeof topFrame?.id === 'string' && topFrame.id ? topFrame.id : null;
+        const topFrameUrl = typeof topFrame?.url === 'string' ? topFrame.url.trim() : '';
+        const urlAllowed = !topFrameUrl || isAntigravityHostUrl(topFrameUrl);
+        if (topFrameId && !msg.error && urlAllowed) {
+          this._frameTreeResolved = true;
           this._frameTreeSupported = true;
           this._knownChildFrameIds.clear();
           collectChildFrameIds(msg.result.frameTree, this._knownChildFrameIds);
@@ -332,9 +321,20 @@ export class HostBridgeSession {
           this._authoritativeMainFrameId = topFrameId;
           this.mainFrameId = topFrameId;
           this._reconcileMainContext();
-        } else if (msg.error) {
+        } else {
+          // Fail-closed: never fall back to an unverified default context or non-host URL
+          this._frameTreeResolved = false;
           this._frameTreeSupported = false;
-          this._reconcileMainContext();
+          this._authoritativeMainFrameId = null;
+          this.mainFrameId = null;
+          this.mainContextId = null;
+          this._boundContextId = null;
+          this.onEvent('bridge-frame-tree-failed', {
+            targetId: this.targetId,
+            error: !urlAllowed
+              ? `Disallowed top frame URL: ${topFrameUrl}`
+              : msg.error?.message || 'Missing authoritative top frame id',
+          });
         }
         return;
       }
@@ -367,11 +367,22 @@ export class HostBridgeSession {
               this._boundContextId = null;
               this._reconcileMainContext();
             }
-          } else {
+          } else if (this._frameTreeResolved) {
+            const navUrl = typeof frame?.url === 'string' ? frame.url.trim() : '';
+            if (navUrl && !isAntigravityHostUrl(navUrl)) {
+              this._frameTreeResolved = false;
+              this._authoritativeMainFrameId = null;
+              this.mainFrameId = null;
+              this.mainContextId = null;
+              this._boundContextId = null;
+              return;
+            }
             this._knownChildFrameIds.delete(frameId);
             this._authoritativeMainFrameId = frameId;
             this.mainFrameId = frameId;
             this._reconcileMainContext();
+          } else if (this.isOpen() && this._frameTreeReqId === null) {
+            this._requestFrameTree();
           }
         }
         return;
@@ -415,6 +426,9 @@ export class HostBridgeSession {
       if (msg.method === 'Runtime.executionContextsCleared') {
         this._executionContexts.clear();
         this._knownChildFrameIds.clear();
+        this._frameTreeResolved = false;
+        this._authoritativeMainFrameId = null;
+        this.mainFrameId = null;
         this.mainContextId = null;
         this._boundContextId = null;
         if (this.isOpen()) {
@@ -426,8 +440,8 @@ export class HostBridgeSession {
       if (msg.method === 'Runtime.bindingCalled') {
         const params = msg.params || {};
         if (params.name !== HOST_BRIDGE_BINDING_NAME) return;
-        // Fail-closed: never dispatch until mainContextId is locked and strictly matches executionContextId
-        if (this.mainContextId === null) {
+        // Fail-closed: never dispatch until Page.getFrameTree has resolved and mainContextId strictly matches
+        if (!this._frameTreeResolved || this.mainContextId === null) {
           this.onEvent('bridge-ignored', {
             targetId: this.targetId,
             reason: 'main-context-unready',
@@ -480,13 +494,16 @@ export class HostBridgeSession {
   }
 
   async _dispatchBindingCall(rawPayload, callContextId = this.mainContextId) {
+    if (!this._frameTreeResolved || typeof callContextId !== 'number' || this.mainContextId !== callContextId) {
+      return;
+    }
     let response;
     try {
       response = await this.onPayload(rawPayload, { targetId: this.targetId });
     } catch (err) {
       response = { reqId: null, ok: false, error: err?.message || String(err) };
     }
-    if (this.mainContextId !== callContextId) return;
+    if (!this._frameTreeResolved || this.mainContextId !== callContextId) return;
     this.sendResponse(response);
   }
 
@@ -680,6 +697,13 @@ export class SagWatchDaemon {
     return `${state.installed ? '1' : '0'}:${state.version || ''}:${state.configPath || ''}:${state.signature || 'none'}`;
   }
 
+  _isSessionReady(session) {
+    if (!session) return false;
+    return typeof session.isMainContextReady === 'function'
+      ? session.isMainContextReady()
+      : Boolean(session.isOpen?.());
+  }
+
   _pushInitialNovState(session, key) {
     if (this._stopped || !this.enableHostBridge || !session) return false;
     if (this.bridgeSessions.get(key) !== session) return false;
@@ -689,9 +713,11 @@ export class SagWatchDaemon {
     } catch {
       return false;
     }
-    this.lastNovSignature = this._computeNovSignature(state);
-    this._novSignatureInitialized = true;
+    const sig = this._computeNovSignature(state);
     if (session.push?.('nov:state', { state })) {
+      session._lastNovStateSig = sig;
+      this.lastNovSignature = sig;
+      this._novSignatureInitialized = true;
       this.emit('nov-state-pushed', {
         signature: state.signature,
         preset: state.config?.preset || null,
@@ -699,7 +725,11 @@ export class SagWatchDaemon {
         reason: 'initial',
       });
       try {
-        this.lastNovFeedSignature = computeNovFeedSignature(this.novBridgeOpts);
+        const feedSig = computeNovFeedSignature(this.novBridgeOpts);
+        if (session._lastNovFeedSig === undefined) {
+          session._lastNovFeedSig = feedSig;
+        }
+        this.lastNovFeedSignature = feedSig;
         this._novFeedSignatureInitialized = true;
       } catch {}
       return true;
@@ -776,12 +806,17 @@ export class SagWatchDaemon {
     // Delegate size check (64KB) and JSON parsing exclusively to handleBridgePayload
     const res = handleBridgePayload(rawPayload, this.novBridgeOpts);
     if (res.ok && res._meta?.mutated && res.data) {
-      this.lastNovSignature = this._computeNovSignature(res.data);
+      const nextSig = this._computeNovSignature(res.data);
+      this.lastNovSignature = nextSig;
       this._novSignatureInitialized = true;
       let peersPushed = 0;
       for (const [key, session] of this.bridgeSessions.entries()) {
-        if (key === meta.targetId) continue;
+        if (key === meta.targetId || session?.targetId === meta.targetId) {
+          if (session) session._lastNovStateSig = nextSig;
+          continue;
+        }
         if (session?.push?.('nov:state', { state: res.data })) {
+          session._lastNovStateSig = nextSig;
           peersPushed += 1;
         }
       }
@@ -870,26 +905,36 @@ export class SagWatchDaemon {
       return { pushed: 0, changed: false };
     }
     const sig = this._computeNovSignature(state);
+    const sessions = [...this.bridgeSessions.values()];
+    const readySessions = sessions.filter((s) => this._isSessionReady(s));
+    if (!forcePush && readySessions.length === 0) {
+      return { pushed: 0, changed: false, signature: sig };
+    }
+
     if (!this._novSignatureInitialized) {
-      const hasReadySession = [...this.bridgeSessions.values()].some((s) =>
-        typeof s?.isMainContextReady === 'function' ? s.isMainContextReady() : Boolean(s?.isOpen?.())
-      );
-      if (!hasReadySession && !forcePush) {
-        return { pushed: 0, changed: false, signature: sig };
-      }
       this.lastNovSignature = sig;
       this._novSignatureInitialized = true;
       if (!forcePush) {
+        for (const s of readySessions) {
+          if (s._lastNovStateSig === undefined) s._lastNovStateSig = sig;
+        }
         return { pushed: 0, changed: false, signature: sig };
       }
     }
-    if (!forcePush && sig === this.lastNovSignature) {
+
+    const targetsToPush = forcePush
+      ? sessions
+      : readySessions.filter((s) => s._lastNovStateSig !== sig);
+
+    if (targetsToPush.length === 0) {
+      this.lastNovSignature = sig;
       return { pushed: 0, changed: false, signature: sig };
     }
 
     let pushed = 0;
-    for (const session of this.bridgeSessions.values()) {
+    for (const session of targetsToPush) {
       if (session?.push?.('nov:state', { state })) {
+        session._lastNovStateSig = sig;
         pushed += 1;
       }
     }
@@ -916,20 +961,29 @@ export class SagWatchDaemon {
     } catch {
       return { pushed: 0, changed: false };
     }
+    const sessions = [...this.bridgeSessions.values()];
+    const readySessions = sessions.filter((s) => this._isSessionReady(s));
+    if (!forcePush && readySessions.length === 0) {
+      return { pushed: 0, changed: false, signature: sig };
+    }
+
     if (!this._novFeedSignatureInitialized) {
-      const hasReadySession = [...this.bridgeSessions.values()].some((s) =>
-        typeof s?.isMainContextReady === 'function' ? s.isMainContextReady() : Boolean(s?.isOpen?.())
-      );
-      if (!hasReadySession && !forcePush) {
-        return { pushed: 0, changed: false, signature: sig };
-      }
       this.lastNovFeedSignature = sig;
       this._novFeedSignatureInitialized = true;
       if (!forcePush) {
+        for (const s of readySessions) {
+          if (s._lastNovFeedSig === undefined) s._lastNovFeedSig = sig;
+        }
         return { pushed: 0, changed: false, signature: sig };
       }
     }
-    if (!forcePush && sig === this.lastNovFeedSignature) {
+
+    const targetsToPush = forcePush
+      ? sessions
+      : readySessions.filter((s) => s._lastNovFeedSig !== sig);
+
+    if (targetsToPush.length === 0) {
+      this.lastNovFeedSignature = sig;
       return { pushed: 0, changed: false, signature: sig };
     }
 
@@ -944,8 +998,9 @@ export class SagWatchDaemon {
     }
 
     let pushed = 0;
-    for (const session of this.bridgeSessions.values()) {
+    for (const session of targetsToPush) {
       if (session?.push?.('nov:feed', { feed: feedRes.feed })) {
+        session._lastNovFeedSig = sig;
         pushed += 1;
       }
     }
@@ -1040,7 +1095,7 @@ export class SagWatchDaemon {
     }
     this.lastPort = port;
 
-    const hostPages = (Array.isArray(targets) ? targets : []).filter(isAntigravityHostTarget);
+    const hostPages = (Array.isArray(targets) ? targets : []).filter((t) => isAntigravityHostTarget(t, { expectedPort: port }));
     const activeKeys = new Set();
     let changed = portChanged;
     let attached = 0;
@@ -1168,8 +1223,12 @@ export class SagWatchDaemon {
     }
 
     const nextDelayMs = changed ? this._resetBackoff() : this._bumpBackoff(1.5);
+    const allTargetsFailed = hostPages.length > 0 && attached === 0 && reused === 0 && yielded === 0 && errors > 0;
+    const status = hostPages.length === 0 ? 'no-host-windows' : allTargetsFailed ? 'all-failed' : 'ok';
+    const ok = status === 'ok';
     const summary = {
-      status: 'ok',
+      ok,
+      status,
       port,
       hostPages: hostPages.length,
       attached,
@@ -1261,7 +1320,7 @@ export async function startWatchDaemonCli(argv = process.argv.slice(2)) {
   if (opts.once) {
     const res = await daemon.reconcileOnce();
     if (opts.json) console.log(JSON.stringify(res));
-    if (res.status !== 'ok') process.exitCode = 1;
+    if (res.status !== 'ok' || res.ok === false) process.exitCode = 1;
     return res;
   }
 
@@ -1282,7 +1341,7 @@ export async function startWatchDaemonCli(argv = process.argv.slice(2)) {
   setInterval(() => {}, 60_000);
 }
 
-const isEntry = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+const isEntry = isCliEntry(import.meta.url);
 if (isEntry) {
   startWatchDaemonCli(process.argv.slice(2)).catch((err) => {
     console.error('[agy-Sag:watch]', err?.message || err);

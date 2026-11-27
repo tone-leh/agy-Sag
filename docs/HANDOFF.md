@@ -68,6 +68,9 @@
   - Wired `spec.writeLockActive` into `promptQueue` dispatch circuit-breaker (`spec-write-lock`), surfaced `NOV 🔒` / `NOV · ΔN` on the HUD `nov` segment and Live NOV Feed in Settings `nov`, and added a per-turn `↺` rollback prompt filler (only when `agy-NOV guard` is connected; appends safely, never overwrites drafts or auto-submits).
   - *Phase 7 Evaluation*: Kept cross-session bookmark search in `BookmarkVault` (`Ctrl/Cmd+Shift+B`) and full offline session archival in `storage-doctor` CLI without adding extra renderer bloat, keeping `ru` injection comfortably under the 1.6 MiB hard cap.
   - *IA Simplification Check (PASS)*: Still 13 modules in `Overview`, zero duplicate controls, zero `:has()` / `.ag-cs-` rules, zero `"Prism"` leaks, `186/186` tests passing, and `ru` bundle size `1,604,340 B` (`<= 1,677,721 B`).
+- **v1.3 Audit & Windows/Linux Cross-Platform Hardening (`cli/platform-utils.mjs`, `cli/*.mjs`, `packages/core/*.js`, `workbench/server.mjs`, `test/cross-platform-audit-fixes.test.mjs`, `test/renderer-audit-fixes.test.mjs`)**:
+  - Completed independent Codex CLI (`gpt-6.2-sol`) read-only security/bug audit + Windows/Linux compatibility remediation covering cross-platform CLI entry/symlink/path identity, Windows PowerShell UTF-8/`pwsh`/`renameSync` lock retry/quoted guidance, Linux XDG/Flatpak/Snap/`/proc` fallback & strict basename matching, fail-closed CDP top-level frame auth & loopback WS validation, destination symlink guards on install/backup, per-session NOV feed sync, and renderer reliability fixes (`safeAutoAccept`, `promptQueue`, `compactGuard`, `hostI18n`, `promptLibrary`, `readingNav`, `themeStudio`, `prismBridge`, `index`).
+  - *Verification Baseline*: `233/233` tests passing, `ru` sync bundle `1,548,739 B` (`<= 1,550,000 B` / `<= 1,677,721 B`), Watch deferred `935,293 B`, `workbench:smoke` HTTP 200 (`1,256,145 B`, 22 markers).
 - **v1.3 Phase 13 — Optical Theme & Atmosphere Studio 2.0 + Obsidian Prism Parity (`packages/core/theme-studio.js`, `packages/core/coexist.js`, `packages/core/prism-bridge.js`, `packages/core/styles.js`, `packages/core/i18n.js`, `packages/core/index.js`, `packages/core/prompt-library.js`, `packages/core/reading-nav.js`, `cli/bundle.mjs`, `workbench/server.mjs`, `test/phase13-theme-atmosphere-prism-parity.test.mjs`)**:
   - Upgraded `themeStudio` to 16 total presets (`native` + 15 dark/light/stylized skins covering Obsidian Prism aesthetics, classic dark/light palettes, and Matcha/Phantom/Doodle/Pixel/Aurora stylized skins), 8 one-click visual looks, automatic dark/light host pairing (`themeAutoPair`), 7 accent overrides, 4 surface materials (`clean`, `smoked`, `paper`, `glass`), 4 corner styles, 6 code font stacks (`sarasa` included) + ligatures, Browser Hole transparency guard, `CSS.highlights` 5-step velvet stream feathering, FastDOM smooth typing caret, and 0fps CSS semantic horizon glow (reusing `compactGuard` callbacks when active, with a throttled standalone DOM state fallback when `compactGuard` is disabled and 100% lossless cleanup).
   - Rebuilt Settings `ui` tab with a 3-dot visual swatch gallery, `Restore Host Native` accent reset, and 8 one-click look pills while preserving **0 new top-level module switches**; added `/btw` & `/plan` to standalone `promptLibrary` context menu (yielding to Prism), smooth scroll-to-bottom (`⤓`) to `readingNav`, Phase 13 interactive controls to `workbench/server.mjs`, and lexer-safe code whitespace compaction in `cli/bundle.mjs`.
@@ -90,9 +93,9 @@
 
 Run inside repository root:
 ```bash
-npm test                                  # 211/211 tests passing (node --test)
+npm test                                  # 233/233 tests passing (node --test)
 npm run i18n:validate                     # 10 built-in + 9 extended packs, 0 errors
-npm run workbench:smoke                   # HTTP 200, 1233586 B, 22 markers verified
+npm run workbench:smoke                   # HTTP 200, 1256145 B, 22 markers verified
 node cli/sag-cli.mjs launch --dry-run --json  # Read-only launch plan + Prism yield check
 ```
 

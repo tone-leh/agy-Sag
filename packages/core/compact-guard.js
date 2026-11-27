@@ -49,6 +49,7 @@
     let silentTimer = null;
     let toastTimer = null;
     const slashTimers = new Set();
+    let submitToken = 0;
     let countdownRemaining = 0;
     let countdownCanceledForSession = new Set();
     let lastSnapshot = null;
@@ -496,14 +497,30 @@
       });
     }
 
-    const scheduleSlashTimer = (fn, ms) => {
+    const cancelPendingSlashSubmits = () => {
+      submitToken += 1;
+      for (const t of slashTimers) {
+        try { clearTimeout(t); } catch {}
+      }
+      slashTimers.clear();
+      releaseActiveScrollShield();
+    };
+
+    const scheduleSlashTimer = (fn, ms, token = submitToken) => {
       const t = setTimeout(() => {
         slashTimers.delete(t);
-        if (!destroyed) fn();
+        if (!destroyed && token === submitToken) fn();
       }, ms);
       t?.unref?.();
       slashTimers.add(t);
       return t;
+    };
+
+    const readEditorDraftText = (editor) => {
+      if (!editor) return '';
+      const tag = String(editor.tagName || '').toUpperCase();
+      const raw = tag === 'TEXTAREA' || tag === 'INPUT' ? editor.value : editor.textContent;
+      return String(raw || '').replace(/\u200B/g, '').trim();
     };
 
     const writeTextIntoComposer = (text, { allowSameAs = [], append = false } = {}) => {
@@ -604,10 +621,13 @@
       const inSidePanel = (node) =>
         Boolean(node?.closest?.('[data-side-panel-focus-scope="true"], [data-testid="side-question-panel"]'));
       const box = editor?.closest?.('[data-testid="agent-input-box"], .surface-composer-card') || null;
-      const scopes = [box, scope, doc].filter(Boolean);
+      const formScope = editor?.closest?.('form') || null;
+      const scopes = [box, formScope, scope && scope !== doc ? scope : null].filter(Boolean);
+      const fallbackScopes = scopes.length ? scopes : [doc].filter(Boolean);
+      const allowedSels = scopes.length ? sendSels : ['[data-testid="input-send-button"]', '[data-testid="send-button"]'];
       let sendBtn = null;
-      for (const sc of scopes) {
-        for (const sel of sendSels) {
+      for (const sc of fallbackScopes) {
+        for (const sel of allowedSels) {
           const btns = Array.from(sc.querySelectorAll?.(sel) || []);
           sendBtn = btns.find(
             (b) =>
@@ -634,13 +654,19 @@
       return 'none';
     };
 
-    const insertCompactIntoComposer = ({ submit = false, preserveScroll = false } = {}) => {
+    const insertCompactIntoComposer = ({ submit = false, preserveScroll = false, triggerMode = null } = {}) => {
       const strings = S();
       const scope = getScope();
       if (ctxSrc.isTurnStreaming(doc, scope) || lastSnapshot?.streaming) {
         setToast(strings.toastStreamingBlocked, 'warn');
         return { ok: false, reason: 'streaming' };
       }
+      if (submit) {
+        cancelPendingSlashSubmits();
+      }
+      const myToken = submitToken;
+      const expectedMode = triggerMode || config.compactTriggerMode;
+      const isAutoTriggered = triggerMode === 'auto-silent' || triggerMode === 'auto-countdown';
       const cmd = buildCompactCommand();
       const extraSuffix = cmd.startsWith(`${COMPACT_CMD} `) ? cmd.slice(COMPACT_CMD.length) : '';
       const editorPreview = ctxSrc.findComposerEditor(doc, scope);
@@ -711,19 +737,44 @@
           const slashSubmitDelayMs = Number.isFinite(Number(options.slashSubmitDelayMs))
             ? Math.max(0, Number(options.slashSubmitDelayMs))
             : 50;
-          const isSessionUnchanged = () => {
-            if (destroyed) return false;
+          const canProceedPendingSubmit = (phase) => {
+            if (destroyed || myToken !== submitToken) return false;
+            if (!config.modules.compactGuard) return false;
+            if (config.compactTriggerMode === 'fill-only') return false;
+            if (isAutoTriggered && (config.compactTriggerMode !== expectedMode || config.compactThreshold === 'off')) {
+              return false;
+            }
+            if (ctxSrc.isTurnStreaming(doc, scope) || lastSnapshot?.streaming) return false;
             if (written.editor?.isConnected === false) return false;
             const curCid = ctxSrc.detectCascadeId(doc, win, getScope());
             if (startCid && startCid !== 'default-session' && curCid && curCid !== 'default-session' && curCid !== startCid) {
               return false;
             }
+            const curDraft = readEditorDraftText(written.editor);
+            if (phase === 'poll') {
+              if (curDraft !== COMPACT_CMD && curDraft !== cmd) {
+                return false;
+              }
+            } else if (phase === 'finalize') {
+              if (curDraft) {
+                const lower = curDraft.toLowerCase();
+                const stillCompact =
+                  lower === 'compact' ||
+                  curDraft === COMPACT_CMD ||
+                  curDraft === cmd;
+                if (!stillCompact) return false;
+              }
+            }
             return true;
           };
           const executePickedSlash = (target) => {
+            if (!canProceedPendingSubmit('poll')) {
+              shield?.release?.();
+              return;
+            }
             try { target.clickTarget.click(); } catch {}
             const finalizeSubmit = () => {
-              if (!isSessionUnchanged()) {
+              if (!canProceedPendingSubmit('finalize')) {
                 shield?.release?.();
                 return;
               }
@@ -738,7 +789,7 @@
             if (slashSubmitDelayMs === 0) {
               finalizeSubmit();
             } else {
-              scheduleSlashTimer(finalizeSubmit, slashSubmitDelayMs);
+              scheduleSlashTimer(finalizeSubmit, slashSubmitDelayMs, myToken);
             }
           };
 
@@ -751,7 +802,7 @@
           let attempts = 0;
           const maxAttempts = 8;
           const pollSlash = () => {
-            if (!isSessionUnchanged()) {
+            if (!canProceedPendingSubmit('poll')) {
               shield?.release?.();
               return;
             }
@@ -762,7 +813,7 @@
             }
             attempts += 1;
             if (attempts < maxAttempts) {
-              scheduleSlashTimer(pollSlash, slashPollMs);
+              scheduleSlashTimer(pollSlash, slashPollMs, myToken);
             } else {
               restoreReadingFocus(written.editor);
               shield?.release?.();
@@ -770,7 +821,7 @@
               setToast(i18n.formatTemplate(strings.toastFilled, { cmd: shortCmd }), 'ok');
             }
           };
-          scheduleSlashTimer(pollSlash, slashPollMs);
+          scheduleSlashTimer(pollSlash, slashPollMs, myToken);
           const shortCmd = cmd.length > 36 ? `${cmd.slice(0, 36)}…` : cmd;
           setToast(i18n.formatTemplate(strings.toastFilled, { cmd: shortCmd }), 'ok');
           return { ok: true, submitted: false, pendingSlashOption: true, command: cmd };
@@ -1152,7 +1203,7 @@
           }
         }
 
-        insertCompactIntoComposer({ submit: true, preserveScroll: true });
+        insertCompactIntoComposer({ submit: true, preserveScroll: true, triggerMode: 'auto-silent' });
       };
 
       const sinceScrollInitial = lastUserScrollAtMs > 0 ? nowFn() - lastUserScrollAtMs : Infinity;
@@ -1209,7 +1260,7 @@
         countdownRemaining -= 1;
         if (countdownRemaining <= 0) {
           stopCountdown();
-          insertCompactIntoComposer({ submit: true, preserveScroll: true });
+          insertCompactIntoComposer({ submit: true, preserveScroll: true, triggerMode: 'auto-countdown' });
         }
         render();
       }, 1000);
@@ -1304,6 +1355,8 @@
       if (destroyed || coexist.isWindowHibernated(doc, win, blurred)) return lastSnapshot;
       if (!config.modules.compactGuard) {
         stopCountdown();
+        stopSilent();
+        cancelPendingSlashSubmits();
         if (bannerEl) bannerEl.hidden = true;
         if (recoveryEl) recoveryEl.hidden = true;
         return lastSnapshot;
@@ -1317,8 +1370,8 @@
       });
       const prevCid = lastSnapshot?.cascadeId || '';
       lastSnapshot = snap;
-      if (activeScrollShield && prevCid && snap?.cascadeId && snap.cascadeId !== prevCid) {
-        releaseActiveScrollShield();
+      if (prevCid && snap?.cascadeId && snap.cascadeId !== prevCid) {
+        cancelPendingSlashSubmits();
       }
       if (watchdog && snap) {
         lastWatchdog = watchdog.observe({
@@ -1367,23 +1420,44 @@
 
     function updateConfig(patch) {
       if (destroyed) return config;
+      const prevMode = config.compactTriggerMode;
+      const prevEnabled = Boolean(config.modules.compactGuard);
       config = coexist.sanitizeConfig({ ...config, ...(patch || {}) }, config);
       if (options.persistConfig !== false) coexist.writeStoredConfig(storage, config);
       watchdog?.setConfig?.({
         enabled: Boolean(config.modules.sessionWatchdog),
         stallThresholdSeconds: config.stallThresholdSeconds,
       });
-      if (config.compactTriggerMode !== 'auto-countdown' || config.compactThreshold === 'off') {
+      if (!config.modules.compactGuard || config.compactTriggerMode !== prevMode || config.compactThreshold === 'off') {
+        cancelPendingSlashSubmits();
+      }
+      if (!config.modules.compactGuard || config.compactTriggerMode !== 'auto-countdown' || config.compactThreshold === 'off') {
         stopCountdown();
       }
-      if (config.compactTriggerMode !== 'auto-silent' || config.compactThreshold === 'off') {
+      if (!config.modules.compactGuard || config.compactTriggerMode !== 'auto-silent' || config.compactThreshold === 'off') {
         stopSilent();
+      }
+      if (prevEnabled && !config.modules.compactGuard) {
+        if (bannerEl) bannerEl.hidden = true;
+        if (recoveryEl) recoveryEl.hidden = true;
       }
       render();
       if (typeof options.onConfigChange === 'function') {
         try { options.onConfigChange({ ...config }); } catch {}
       }
       return { ...config };
+    }
+
+    function setEnabled(nextEnabled) {
+      if (destroyed) return false;
+      const flag = Boolean(nextEnabled);
+      if (!flag) {
+        stopCountdown();
+        stopSilent();
+        cancelPendingSlashSubmits();
+      }
+      updateConfig({ modules: { ...config.modules, compactGuard: flag } });
+      return Boolean(config.modules.compactGuard);
     }
 
     const addL = (target, ev, fn, cap = false) => {
@@ -1397,6 +1471,7 @@
       const rootPane = ctxSrc.findPaneRootForNode(ev.target, doc);
       if (rootPane && rootPane !== activePaneEl) {
         activePaneEl = rootPane;
+        cancelPendingSlashSubmits();
         void evaluateNow();
       }
     };
@@ -1454,6 +1529,7 @@
         countdownActive: Boolean(countdownTimer),
         countdownRemaining,
         silentPending: Boolean(silentTimer),
+        pendingSlashTimers: slashTimers.size,
         scrollShieldActive: Boolean(activeScrollShield?.active),
         pollActive: Boolean(pollTimer),
         hibernated: coexist.isWindowHibernated(doc, win, blurred),
@@ -1468,10 +1544,8 @@
       stopPoll();
       stopCountdown();
       stopSilent();
-      releaseActiveScrollShield();
+      cancelPendingSlashSubmits();
       if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
-      for (const t of slashTimers) { try { clearTimeout(t); } catch {} }
-      slashTimers.clear();
       if (composerListenerOff) { try { composerListenerOff(); } catch {} composerListenerOff = null; }
       while (listeners.length) {
         try { listeners.pop()(); } catch {}
@@ -1494,6 +1568,7 @@
     return {
       evaluateNow,
       updateConfig,
+      setEnabled,
       getConfig: () => ({ ...config, modules: { ...config.modules } }),
       buildCompactCommand,
       captureRecoverySnapshot,

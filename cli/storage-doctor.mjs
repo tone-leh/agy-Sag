@@ -8,7 +8,13 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import {
+  assertNoSymlinkAncestors,
+  copyFileSafeAtomic,
+  expandTildePath,
+  isCliEntry,
+  isPathWithinBase,
+} from './platform-utils.mjs';
 
 export const DEFAULT_DATA_DIR = path.join(os.homedir(), '.gemini', 'antigravity');
 
@@ -66,9 +72,7 @@ function resolveCanonicalPath(targetPath) {
 function isPathInsideOrEqual(candidatePath, baseDirPath) {
   const realCandidate = resolveCanonicalPath(candidatePath);
   const realBase = resolveCanonicalPath(baseDirPath);
-  if (realCandidate === realBase) return true;
-  const prefix = realBase.endsWith(path.sep) ? realBase : realBase + path.sep;
-  return realCandidate.startsWith(prefix);
+  return isPathWithinBase(realCandidate, realBase);
 }
 
 function toPosixRel(rootDir, absPath) {
@@ -110,7 +114,7 @@ function isLockFilename(filename) {
   );
 }
 
-export function parseStorageArgs(argv = []) {
+export function parseStorageArgs(argv = [], homeDir = os.homedir()) {
   const args = Array.isArray(argv) ? argv.map(String) : [];
   const opts = {
     command: 'audit',
@@ -140,6 +144,7 @@ export function parseStorageArgs(argv = []) {
   }
 
   let rawOut = null;
+  let rawOutFile = null;
 
   for (; idx < args.length; idx += 1) {
     const a = args[idx];
@@ -152,11 +157,11 @@ export function parseStorageArgs(argv = []) {
     } else if (a.startsWith('--data-dir=')) {
       const val = a.slice('--data-dir='.length).trim();
       if (!val) throw new Error('Invalid --data-dir value');
-      opts.dataDir = val;
+      opts.dataDir = expandTildePath(val, homeDir);
     } else if (a === '--data-dir') {
       const val = args[idx + 1];
       if (!val || val.startsWith('--')) throw new Error('Missing value for --data-dir');
-      opts.dataDir = val;
+      opts.dataDir = expandTildePath(val, homeDir);
       idx += 1;
     } else if (a.startsWith('--top=')) {
       const n = Number(a.slice('--top='.length));
@@ -170,11 +175,20 @@ export function parseStorageArgs(argv = []) {
     } else if (a.startsWith('--out=')) {
       const val = a.slice('--out='.length).trim();
       if (!val) throw new Error('Invalid --out value');
-      rawOut = val;
+      rawOut = expandTildePath(val, homeDir);
     } else if (a === '--out') {
       const val = args[idx + 1];
       if (!val || val.startsWith('--')) throw new Error('Missing value for --out');
-      rawOut = val;
+      rawOut = expandTildePath(val, homeDir);
+      idx += 1;
+    } else if (a.startsWith('--out-file=')) {
+      const val = a.slice('--out-file='.length).trim();
+      if (!val) throw new Error('Invalid --out-file value');
+      rawOutFile = expandTildePath(val, homeDir);
+    } else if (a === '--out-file') {
+      const val = args[idx + 1];
+      if (!val || val.startsWith('--')) throw new Error('Missing value for --out-file');
+      rawOutFile = expandTildePath(val, homeDir);
       idx += 1;
     } else if (a.startsWith('--session=')) {
       const val = a.slice('--session='.length).trim();
@@ -205,7 +219,7 @@ export function parseStorageArgs(argv = []) {
       throw new Error('backup command requires --out=<dir>');
     }
   } else if (opts.command === 'export') {
-    opts.outFile = rawOut;
+    opts.outFile = rawOutFile || rawOut;
     if (!opts.help && !opts.sessionId) {
       throw new Error('export command requires --session=<id>');
     }
@@ -362,7 +376,7 @@ function inspectSqliteStatus(resolvedDir, discoveredDbPaths = []) {
 }
 
 export function auditAntigravityStorage({ dataDir = DEFAULT_DATA_DIR, topN = 10 } = {}) {
-  const resolvedDir = path.resolve(dataDir || DEFAULT_DATA_DIR);
+  const resolvedDir = path.resolve(expandTildePath(dataDir || DEFAULT_DATA_DIR));
   const topLimit = Number.isInteger(topN) && topN > 0 ? topN : 10;
 
   let rootStat = null;
@@ -686,7 +700,7 @@ export function exportSanitizedSession({
     throw new Error(`Unsupported export format "${format}" (expected md | json)`);
   }
 
-  const resolvedDataDir = path.resolve(dataDir || DEFAULT_DATA_DIR);
+  const resolvedDataDir = path.resolve(expandTildePath(dataDir || DEFAULT_DATA_DIR));
   const brainDir = path.join(resolvedDataDir, 'brain');
   const brainStat = safeLstat(brainDir);
   if (brainStat && brainStat.isSymbolicLink()) {
@@ -705,16 +719,14 @@ export function exportSanitizedSession({
     throw new Error(`Unable to resolve real path for dataDir/brain directory: ${sid}`);
   }
 
-  const realDataPrefix = realDataDir.endsWith(path.sep) ? realDataDir : realDataDir + path.sep;
-  if (!realBrainDir.startsWith(realDataPrefix)) {
+  if (!isPathWithinBase(realBrainDir, realDataDir)) {
     throw new Error(`Resolved brain directory escapes dataDir: ${sid}`);
   }
 
   const sessionDir = path.resolve(brainDir, sid);
 
   // Defense-in-depth containment check
-  const brainPrefix = brainDir.endsWith(path.sep) ? brainDir : brainDir + path.sep;
-  if (!sessionDir.startsWith(brainPrefix)) {
+  if (!isPathWithinBase(sessionDir, brainDir)) {
     throw new Error(`Resolved session path escapes brain directory: ${sid}`);
   }
 
@@ -759,8 +771,7 @@ export function exportSanitizedSession({
   }
 
   const realTranscriptPath = fs.realpathSync(transcriptPath);
-  const realBrainPrefix = realBrainDir.endsWith(path.sep) ? realBrainDir : realBrainDir + path.sep;
-  if (!realTranscriptPath.startsWith(realDataPrefix) || !realTranscriptPath.startsWith(realBrainPrefix)) {
+  if (!isPathWithinBase(realTranscriptPath, realDataDir) || !isPathWithinBase(realTranscriptPath, realBrainDir)) {
     throw new Error(`Resolved transcript path escapes dataDir for session: ${sid}`);
   }
 
@@ -810,11 +821,13 @@ export function exportSanitizedSession({
   }
 
   if (outFile) {
-    const resolvedOut = path.resolve(String(outFile));
+    const resolvedOut = path.resolve(expandTildePath(String(outFile)));
     if (isPathInsideOrEqual(resolvedOut, resolvedDataDir)) {
       throw new Error('Refusing to write export file inside source dataDir');
     }
+    assertNoSymlinkAncestors(resolvedOut);
     fs.mkdirSync(path.dirname(resolvedOut), { recursive: true });
+    assertNoSymlinkAncestors(resolvedOut);
     fs.writeFileSync(resolvedOut, output, 'utf8');
     return {
       ok: true,
@@ -840,8 +853,8 @@ export function createStorageBackup({
     throw new Error('createStorageBackup requires a non-empty outDir');
   }
 
-  const resolvedSrc = path.resolve(dataDir || DEFAULT_DATA_DIR);
-  const resolvedOut = path.resolve(String(outDir));
+  const resolvedSrc = path.resolve(expandTildePath(dataDir || DEFAULT_DATA_DIR));
+  const resolvedOut = path.resolve(expandTildePath(String(outDir)));
 
   // Prevent infinite recursion when outDir is equal to or inside dataDir
   if (isPathInsideOrEqual(resolvedOut, resolvedSrc)) {
@@ -933,20 +946,62 @@ export function createStorageBackup({
     };
   }
 
+  assertNoSymlinkAncestors(resolvedOut);
+  const preOutStat = safeLstat(resolvedOut);
+  if (preOutStat && (preOutStat.isSymbolicLink() || !preOutStat.isDirectory())) {
+    throw new Error(`Security violation: backup outDir must not be a symlink or non-directory (${resolvedOut})`);
+  }
   fs.mkdirSync(resolvedOut, { recursive: true });
+  assertNoSymlinkAncestors(resolvedOut);
+  const realDestRoot = fs.realpathSync(resolvedOut);
+
   let copiedFiles = 0;
   let copiedBytes = 0;
   const copiedList = [];
 
   for (const f of files) {
     const destPath = path.join(resolvedOut, ...f.relPath.split('/'));
+    if (!isPathWithinBase(destPath, resolvedOut)) {
+      throw new Error(`Security violation: backup destination escapes outDir (${destPath})`);
+    }
+    // Check every directory segment inside destRoot and the target file itself against symlinks/junctions
+    const relParent = path.relative(resolvedOut, path.dirname(destPath));
+    let cur = resolvedOut;
+    if (relParent && relParent !== '.') {
+      for (const seg of relParent.split(path.sep)) {
+        if (!seg || seg === '.') continue;
+        cur = path.join(cur, seg);
+        const segStat = safeLstat(cur);
+        if (segStat && segStat.isSymbolicLink()) {
+          throw new Error(`Security violation: refusing symlink directory inside backup destination (${cur})`);
+        }
+        if (segStat && !segStat.isDirectory()) {
+          throw new Error(`Security violation: non-directory segment inside backup destination (${cur})`);
+        }
+      }
+    }
+    const existingDestStat = safeLstat(destPath);
+    if (existingDestStat && existingDestStat.isSymbolicLink()) {
+      throw new Error(`Security violation: refusing symlink target inside backup destination (${destPath})`);
+    }
+
+    fs.mkdirSync(path.dirname(destPath), { recursive: true });
+    const realParentDir = fs.realpathSync(path.dirname(destPath));
+    if (!isPathWithinBase(realParentDir, realDestRoot)) {
+      throw new Error(`Security violation: resolved backup parent escapes destRoot (${destPath})`);
+    }
+    const postDestStat = safeLstat(destPath);
+    if (postDestStat && postDestStat.isSymbolicLink()) {
+      throw new Error(`Security violation: refusing symlink target inside backup destination (${destPath})`);
+    }
+
     try {
-      fs.mkdirSync(path.dirname(destPath), { recursive: true });
-      fs.copyFileSync(f.srcPath, destPath);
+      copyFileSafeAtomic(f.srcPath, destPath, realDestRoot);
       copiedFiles += 1;
       copiedBytes += f.bytes;
       copiedList.push({ relPath: f.relPath, bytes: f.bytes });
     } catch (err) {
+      if (/Security violation/i.test(err?.message || '')) throw err;
       skipped.push({ relPath: f.relPath, bytes: f.bytes, reason: `copy-failed: ${err?.code || err?.message || 'error'}` });
     }
   }
@@ -1111,7 +1166,7 @@ async function runCli() {
   }
 }
 
-const isEntry = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+const isEntry = isCliEntry(import.meta.url);
 if (isEntry) {
   runCli().catch((err) => {
     console.error('[agy-Sag:storage-doctor]', err?.message || err);

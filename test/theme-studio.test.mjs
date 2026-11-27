@@ -249,14 +249,16 @@ test('ThemeStudio: sanitizeCustomCss defeats multi-pass escape/splice/nested-par
   const relUrl = themeStudio.sanitizeCustomCss('.rel { background: url(assets/leak.png); }');
   assert.equal(/\burl\s*\(/i.test(relUrl), false);
 
-  // 6. @charset, @namespace, -moz-binding, and :has() removal
+  // 6. @charset, @namespace, -moz-binding, and full :has() rule removal (never leaves broadened base selector)
   const extraBlocked = themeStudio.sanitizeCustomCss(
-    '@charset "UTF-8";\n@namespace svg url(http://www.w3.org/2000/svg);\ndiv:has(> .a:not(.b)) { -moz-binding: url(#x); color: red; }\ndiv:\\68as(.c) { opacity: 0.5; }'
+    '@charset "UTF-8";\n@namespace svg url(http://www.w3.org/2000/svg);\ndiv:has(> .a:not(.b)) { -moz-binding: url(#x); color: red; }\ndiv:\\68 as(.c) { opacity: 0.5; }\n.kept { color: green; }'
   );
   assert.equal(/@\s*(?:charset|namespace)/i.test(extraBlocked), false);
   assert.equal(/:has\s*\(/i.test(extraBlocked), false);
   assert.equal(/-moz-binding/i.test(extraBlocked), false);
-  assert.ok(extraBlocked.includes('color: red;'));
+  assert.equal(extraBlocked.includes('color: red;'), false);
+  assert.equal(extraBlocked.includes('opacity: 0.5;'), false);
+  assert.ok(extraBlocked.includes('.kept { color: green; }'));
 
   // 7. Non-convergent adversarial nesting (> 8 passes) fails closed to ''
   let deepNested = '@import;';

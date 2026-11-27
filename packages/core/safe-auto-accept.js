@@ -12,6 +12,7 @@
   const DEFAULT_COOLDOWN_MS = 1500;
   const MAX_SNIPPET_CHARS = 160;
   const MAX_CARD_TEXT_CHARS = 8192;
+  const MAX_CUSTOM_MATCH_CHARS = 4096;
   const MAX_BUTTON_TEXT_CHARS = 256;
   const MAX_CUSTOM_PATTERN_CHARS = 200;
   const MAX_READONLY_PROMPT_CHARS = 300;
@@ -602,68 +603,173 @@
     return null;
   }
 
-  function hasUnsafeCustomRegex(source) {
-    if (typeof source !== 'string' || !source || source.length > MAX_CUSTOM_PATTERN_CHARS) {
-      return true;
-    }
-    // Reject classic nested quantifier patterns immediately
-    if (/\([^)]*[+*][^)]*\)[+*?{]/.test(source)) return true;
-    if (/\([^)]*\{\d+,\d*\}[^)]*\)[+*?{]/.test(source)) return true;
-    // Reject backreferences which can trigger exponential matching
-    if (/(?:^|[^\\])\\[1-9]/.test(source)) return true;
+  function mkMask(all = false) {
+    return all ? { m: [-1, -1, -1, -1], na: true } : { m: [0, 0, 0, 0], na: false };
+  }
 
-    // Linear-time group stack check for nested quantifiers across arbitrary nesting depths
-    const groupStack = [];
-    let inCharClass = false;
-    for (let i = 0; i < source.length; i++) {
-      const ch = source[i];
-      if (ch === '\\') {
-        i += 1;
-        continue;
+  function setCode(mk, c) {
+    if (c >= 0 && c < 128) mk.m[c >>> 5] |= 1 << (c & 31);
+    else if (c >= 128) mk.na = true;
+  }
+
+  function addShort(mk, ch) {
+    if (ch === 'd' || ch === 'w') for (let c = 48; c <= 57; c += 1) setCode(mk, c);
+    if (ch === 'w') {
+      for (let c = 65; c <= 90; c += 1) setCode(mk, c);
+      for (let c = 97; c <= 122; c += 1) setCode(mk, c);
+      setCode(mk, 95);
+    } else if (ch === 's') {
+      for (const c of [9, 10, 11, 12, 13, 32]) setCode(mk, c);
+      mk.na = true;
+    } else if (ch === 'D' || ch === 'W' || ch === 'S') {
+      const b = mkMask(false);
+      addShort(b, ch.toLowerCase());
+      for (let i = 0; i < 4; i += 1) mk.m[i] |= ~b.m[i];
+      mk.na = true;
+    } else setCode(mk, ch.charCodeAt(0));
+  }
+
+  function parseClassMask(src, idx) {
+    let i = idx + 1;
+    const neg = src[i] === '^';
+    if (neg) i += 1;
+    const mk = mkMask(false);
+    let prev = -1;
+    let range = false;
+    while (i < src.length) {
+      const ch = src[i];
+      if (ch === ']' && i > idx + (neg ? 2 : 1)) {
+        if (neg) {
+          for (let k = 0; k < 4; k += 1) mk.m[k] = ~mk.m[k];
+          mk.na = true;
+        }
+        return { mk, end: i };
       }
-      if (inCharClass) {
-        if (ch === ']') inCharClass = false;
-        continue;
-      }
-      if (ch === '[') {
-        inCharClass = true;
-        continue;
-      }
-      if (ch === '(') {
-        groupStack.push({ hasQuantifier: false, hasAlternation: false });
-        // Skip non-capturing/lookaround prefix markers like (?:, (?=, (?!, (?<=, (?<!
-        if (source[i + 1] === '?') {
-          i += 1;
-          if (source[i + 1] === ':' || source[i + 1] === '=' || source[i + 1] === '!') {
-            i += 1;
-          } else if (source[i + 1] === '<' && (source[i + 2] === '=' || source[i + 2] === '!')) {
-            i += 2;
+      if (ch === '\\' && i + 1 < src.length) {
+        const e = src[i + 1];
+        i += 2;
+        if ('dDwWsS'.includes(e)) {
+          addShort(mk, e);
+          prev = -1;
+          range = false;
+        } else {
+          const c = e === 'n' ? 10 : e === 'r' ? 13 : e === 't' ? 9 : e.charCodeAt(0);
+          if (range && prev >= 0 && c >= prev) {
+            for (let k = prev; k <= Math.min(127, c); k += 1) setCode(mk, k);
+            if (c >= 128) mk.na = true;
+            range = false;
+            prev = -1;
+          } else {
+            setCode(mk, c);
+            prev = c;
           }
         }
         continue;
       }
-      if (ch === '|' && groupStack.length > 0) {
-        groupStack[groupStack.length - 1].hasAlternation = true;
+      if (ch === '-' && prev >= 0 && i + 1 < src.length && src[i + 1] !== ']') {
+        range = true;
+        i += 1;
         continue;
       }
-      if (ch === ')') {
-        const frame = groupStack.pop();
-        if (!frame) continue;
-        const next = source[i + 1] || '';
-        const hasOuterQuantifier = next === '+' || next === '*' || next === '?' || next === '{';
-        const hasOuterRepeat = next === '+' || next === '*' || next === '{';
-        if (frame.hasQuantifier && hasOuterQuantifier) return true;
-        if (frame.hasAlternation && hasOuterRepeat) return true;
-        if (groupStack.length > 0 && (frame.hasQuantifier || hasOuterRepeat)) {
-          groupStack[groupStack.length - 1].hasQuantifier = true;
+      const c = ch.charCodeAt(0);
+      if (range && prev >= 0 && c >= prev) {
+        for (let k = prev; k <= Math.min(127, c); k += 1) setCode(mk, k);
+        if (c >= 128) mk.na = true;
+        range = false;
+        prev = -1;
+      } else {
+        setCode(mk, c);
+        prev = c;
+      }
+      i += 1;
+    }
+    return { mk: mkMask(true), end: src.length - 1 };
+  }
+
+  function masksHit(a, b) {
+    if (!a || !b || (a.na && b.na)) return true;
+    for (let i = 0; i < 4; i += 1) if ((a.m[i] & b.m[i]) !== 0) return true;
+    return false;
+  }
+
+  function readQuant(src, pos) {
+    const ch = src[pos];
+    if (ch === '*' || ch === '+') return { ex: true, v: true, u: true, n: src[pos + 1] === '?' ? pos + 2 : pos + 1 };
+    if (ch === '?') return { ex: true, v: true, u: false, n: src[pos + 1] === '?' ? pos + 2 : pos + 1 };
+    if (ch === '{') {
+      const m = /^\{(\d+)(?:,(\d*))?\}/.exec(src.slice(pos));
+      if (m) {
+        const min = Number(m[1]);
+        const max = m[2] === undefined || m[2] === '' ? (m[0].includes(',') ? Infinity : min) : Number(m[2]);
+        const n = pos + m[0].length + (src[pos + m[0].length] === '?' ? 1 : 0);
+        return { ex: true, v: max > min, u: max === Infinity, n };
+      }
+    }
+    return { ex: false, v: false, u: false, n: pos };
+  }
+
+  function hasUnsafeCustomRegex(source) {
+    if (typeof source !== 'string' || !source || source.length > MAX_CUSTOM_PATTERN_CHARS) return true;
+    if (/\([^)]*[+*][^)]*\)[+*?{]/.test(source) || /\([^)]*\{\d+,\d*\}[^)]*\)[+*?{]/.test(source)) return true;
+    if (/(?:^|[^\\])\\[1-9]/.test(source)) return true;
+
+    const stk = [{ q: false, alt: false, prev: null }];
+    let wilds = 0;
+    let i = 0;
+    while (i < source.length) {
+      const ch = source[i];
+      const top = stk[stk.length - 1];
+      if (ch === '(') {
+        stk.push({ q: false, alt: false, prev: null });
+        i += 1;
+        if (source[i] === '?') {
+          i += 1;
+          if (':=!'.includes(source[i] || '')) i += 1;
+          else if (source[i] === '<' && '=!'.includes(source[i + 1] || '')) i += 2;
         }
         continue;
       }
-      if ((ch === '+' || ch === '*' || ch === '{') && groupStack.length > 0) {
-        groupStack[groupStack.length - 1].hasQuantifier = true;
+      if (ch === '|') { top.alt = true; top.prev = null; i += 1; continue; }
+      if (ch === ')') {
+        if (stk.length === 1) { i += 1; continue; }
+        const f = stk.pop();
+        const p = stk[stk.length - 1];
+        const q = readQuant(source, i + 1);
+        if ((f.q && q.ex) || (f.alt && (q.v || q.u))) return true;
+        if (stk.length > 1 && (f.q || q.v || q.u)) p.q = true;
+        if (q.v && p.prev?.v) return true;
+        p.prev = { v: q.v, mk: null };
+        i = q.n;
+        continue;
       }
+      if (ch === '^' || ch === '$') { top.prev = null; i += 1; continue; }
+
+      let mk = null;
+      let wild = false;
+      let end = i + 1;
+      if (ch === '.') { wild = true; mk = mkMask(true); }
+      else if (ch === '[') { const p = parseClassMask(source, i); mk = p.mk; end = p.end + 1; }
+      else if (ch === '\\') {
+        if (i + 1 >= source.length) { i += 1; continue; }
+        const e = source[i + 1];
+        end = i + 2;
+        if (e === 'b' || e === 'B') { top.prev = null; i = end; continue; }
+        mk = mkMask(false);
+        addShort(mk, e);
+      } else { mk = mkMask(false); setCode(mk, ch.charCodeAt(0)); }
+
+      const q = readQuant(source, end);
+      if (wild && q.u && ++wilds >= 3) return true;
+      if (stk.length > 1 && (q.v || q.u)) top.q = true;
+      if (q.v && top.prev?.v && masksHit(top.prev.mk, mk)) return true;
+      top.prev = { v: q.v, mk };
+      i = q.n;
     }
     return false;
+  }
+
+  function validateCustomPattern(entry) {
+    return Boolean(compileCustomPattern(entry));
   }
 
   function compileCustomPattern(entry) {
@@ -870,13 +976,45 @@
       };
     }
 
-    // 2. Custom policy: check user allowlist patterns (invalid/unsafe regex safely ignored).
+    // 2. Reject unsafe shell redirection / background chaining / process substitution / multi-line commands / unsafe flags across ALL policies (including custom).
+    if (hasUnsafeShellSyntax(card) || hasUnsafeBuiltinCommandFlags(card)) {
+      return {
+        allowed: false,
+        decision: 'skipped-policy',
+        reason: 'unsafe-shell-operator',
+        matchedRule: null,
+        policy: resolvedPolicy,
+      };
+    }
+
+    // 3. Custom policy: require recognizable action content (never approve solely by button text)
+    // and match user allowlist patterns only against bounded action content.
     if (resolvedPolicy === 'custom') {
+      const effectiveLines = getEffectiveLines(card);
+      const isButtonOnly = Boolean(btn && card.toLowerCase() === btn.toLowerCase());
+      if (!card || effectiveLines.length === 0 || isButtonOnly) {
+        return {
+          allowed: false,
+          decision: 'skipped-policy',
+          reason: 'missing-action-content:custom',
+          matchedRule: null,
+          policy: resolvedPolicy,
+        };
+      }
+      if (card.length > MAX_CUSTOM_MATCH_CHARS) {
+        return {
+          allowed: false,
+          decision: 'skipped-policy',
+          reason: 'card-too-long:custom',
+          matchedRule: null,
+          policy: resolvedPolicy,
+        };
+      }
       const patterns = Array.isArray(customAllowPatterns) ? customAllowPatterns : [];
       for (let i = 0; i < patterns.length; i++) {
         const compiled = compileCustomPattern(patterns[i]);
         if (!compiled) continue;
-        if (compiled.regex.test(combined) || (card && compiled.regex.test(card)) || (btn && compiled.regex.test(btn))) {
+        if (compiled.regex.test(card)) {
           return {
             allowed: true,
             decision: 'accepted',
@@ -896,17 +1034,6 @@
     }
 
     const allowDevFlow = resolvedPolicy === 'dev-flow';
-
-    // 3. Reject unsafe shell redirection / background chaining / process substitution / multi-line commands / unsafe flags.
-    if (hasUnsafeShellSyntax(card) || hasUnsafeBuiltinCommandFlags(card)) {
-      return {
-        allowed: false,
-        decision: 'skipped-policy',
-        reason: 'unsafe-shell-operator',
-        matchedRule: null,
-        policy: resolvedPolicy,
-      };
-    }
 
     // 4. Match command segments strictly (all chained segments must be allowlisted).
     const segments = extractCommandSegments(card);
@@ -1062,9 +1189,7 @@
       }
     };
     walk(container);
-    const joined = parts.join('\n').trim();
-    if (joined) return joined;
-    return String(container.textContent || '').trim();
+    return parts.join('\n').trim();
   }
 
   function findApprovalContainers(doc, win) {
@@ -1372,8 +1497,11 @@
     POLICY_PRESETS,
     MAX_AUDIT_ENTRIES,
     MAX_CARD_TEXT_CHARS,
+    MAX_CUSTOM_MATCH_CHARS,
     MAX_BUTTON_TEXT_CHARS,
     MAX_CUSTOM_PATTERN_CHARS,
+    hasUnsafeCustomRegex,
+    validateCustomPattern,
     classifyApprovalCard,
     createSafeAutoAcceptController,
   };

@@ -16,6 +16,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readCoreSources } from '../cli/bundle.mjs';
+import { isCliEntry } from '../cli/platform-utils.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_PORT = 4179;
@@ -1433,8 +1434,13 @@ export function startWorkbenchServer(port = DEFAULT_PORT) {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Not found');
   });
-  return new Promise((resolve) => {
-    server.listen(port, '127.0.0.1', () => resolve(server));
+  return new Promise((resolve, reject) => {
+    const onError = (err) => reject(err);
+    server.once('error', onError);
+    server.listen(port, '127.0.0.1', () => {
+      server.removeListener('error', onError);
+      resolve(server);
+    });
   });
 }
 
@@ -1471,7 +1477,7 @@ export async function runWorkbenchCli(argv = process.argv.slice(2)) {
   return srv;
 }
 
-const isEntry = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+const isEntry = isCliEntry(import.meta.url);
 if (isEntry) {
   runWorkbenchCli(process.argv.slice(2)).catch((err) => {
     console.error('[agy-Sag] Workbench failed:', err?.message || err);
