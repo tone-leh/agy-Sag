@@ -68,6 +68,10 @@
   - Wired `spec.writeLockActive` into `promptQueue` dispatch circuit-breaker (`spec-write-lock`), surfaced `NOV 🔒` / `NOV · ΔN` on the HUD `nov` segment and Live NOV Feed in Settings `nov`, and added a per-turn `↺` rollback prompt filler (only when `agy-NOV guard` is connected; appends safely, never overwrites drafts or auto-submits).
   - *Phase 7 Evaluation*: Kept cross-session bookmark search in `BookmarkVault` (`Ctrl/Cmd+Shift+B`) and full offline session archival in `storage-doctor` CLI without adding extra renderer bloat, keeping `ru` injection comfortably under the 1.6 MiB hard cap.
   - *IA Simplification Check (PASS)*: Still 13 modules in `Overview`, zero duplicate controls, zero `:has()` / `.ag-cs-` rules, zero `"Prism"` leaks, `186/186` tests passing, and `ru` bundle size `1,604,340 B` (`<= 1,677,721 B`).
+- **v1.3 Phase 13 — Optical Theme & Atmosphere Studio 2.0 + Obsidian Prism Parity (`packages/core/theme-studio.js`, `packages/core/coexist.js`, `packages/core/prism-bridge.js`, `packages/core/styles.js`, `packages/core/i18n.js`, `packages/core/index.js`, `packages/core/prompt-library.js`, `packages/core/reading-nav.js`, `cli/bundle.mjs`, `workbench/server.mjs`, `test/phase13-theme-atmosphere-prism-parity.test.mjs`)**:
+  - Upgraded `themeStudio` to 16 total presets (`native` + 15 dark/light/stylized skins covering Obsidian Prism aesthetics, classic dark/light palettes, and Matcha/Phantom/Doodle/Pixel/Aurora stylized skins), 8 one-click visual looks, automatic dark/light host pairing (`themeAutoPair`), 7 accent overrides, 4 surface materials (`clean`, `smoked`, `paper`, `glass`), 4 corner styles, 6 code font stacks (`sarasa` included) + ligatures, Browser Hole transparency guard, `CSS.highlights` 5-step velvet stream feathering, FastDOM smooth typing caret, and 0fps CSS semantic horizon glow (reusing `compactGuard` callbacks when active, with a throttled standalone DOM state fallback when `compactGuard` is disabled and 100% lossless cleanup).
+  - Rebuilt Settings `ui` tab with a 3-dot visual swatch gallery, `Restore Host Native` accent reset, and 8 one-click look pills while preserving **0 new top-level module switches**; added `/btw` & `/plan` to standalone `promptLibrary` context menu (yielding to Prism), smooth scroll-to-bottom (`⤓`) to `readingNav`, Phase 13 interactive controls to `workbench/server.mjs`, and lexer-safe code whitespace compaction in `cli/bundle.mjs`.
+  - *IA Simplification Check (PASS)*: Strictly 13 master switches exclusively in `Overview`, zero `:has()` / `.ag-cs-` CSS rules, 100% `SAG_UI_PACKS` key parity with zero `"Prism"` leaks, 100% WCAG AA contrast across all 15 skins & 6 accents, `211/211` tests passing, `ru` sync bundle `1,532,357 B` (`<= 1,550,000 B` headroom / `<= 1,677,721 B` hard cap, >145 KB headroom) & Watch deferred `918,911 B`.
 - **v1.2 Phases 8–12 — Zero-Bloat Cockpit Upgrades (`cli/bundle.mjs`, `cli/watch-daemon.mjs`, `packages/core/*.js`, `workbench/server.mjs`, `test/phase8–12*.test.mjs`)**:
   - **Phase 8**: Added zero-dependency lexer-aware `compactCoreSource()` & Watch `deferExtPack` (`ru` sync `1,513,738 B`, Watch deferred `900,292 B`) plus zero-port read-only `sag:storage_audit` card inside Settings `advanced`.
   - **Phase 9**: Added pure-DOM `analyzeContextBreakdown()` 3-segment bar + Top-3 heavy turns jump, `lastTurnElapsedSec` timing badge, 5h quota bar, and `Export MD` in HUD quick card.
@@ -86,9 +90,9 @@
 
 Run inside repository root:
 ```bash
-npm test                                  # 199/199 tests passing (node --test)
+npm test                                  # 211/211 tests passing (node --test)
 npm run i18n:validate                     # 10 built-in + 9 extended packs, 0 errors
-npm run workbench:smoke                   # HTTP 200, 1133039 B, 19 markers verified
+npm run workbench:smoke                   # HTTP 200, 1233586 B, 22 markers verified
 node cli/sag-cli.mjs launch --dry-run --json  # Read-only launch plan + Prism yield check
 ```
 

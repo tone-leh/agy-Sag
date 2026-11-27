@@ -79,10 +79,21 @@ function createMockDocument({ prismStyle = null } = {}) {
 test('ThemeStudio: exposes expected exports and mounts root.__agSagThemeStudio in browser UMD mode', () => {
   assert.equal(themeStudio.STYLE_ID, 'ag-sag-theme-css');
   assert.deepEqual(Object.keys(themeStudio.THEME_PRESETS).sort(), [
+    'aurora-glass',
+    'catppuccin-mocha',
+    'crystal-day',
+    'doodle-sketch',
+    'matcha-journal',
     'midnight-ink',
     'native',
     'nord-frost',
+    'obsidian-prism',
     'oled-pure',
+    'phantom-crimson',
+    'pixel-terminal',
+    'rose-dawn',
+    'tokyo-night',
+    'warm-basalt',
     'warm-paper',
   ]);
   assert.deepEqual(Object.keys(themeStudio.DENSITY_PRESETS).sort(), ['balanced', 'comfortable', 'compact']);

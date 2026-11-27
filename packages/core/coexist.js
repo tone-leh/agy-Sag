@@ -36,8 +36,30 @@
   ]);
   const ALLOWED_CONFLICT_POLICIES = Object.freeze(['yield', 'takeover']);
   const ALLOWED_AUTO_ACCEPT_POLICIES = Object.freeze(['readonly-safe', 'dev-flow', 'custom']);
-  const ALLOWED_THEME_PRESETS = Object.freeze(['native', 'midnight-ink', 'nord-frost', 'warm-paper', 'oled-pure']);
+  const ALLOWED_THEME_PRESETS = Object.freeze([
+    'native',
+    'obsidian-prism',
+    'warm-basalt',
+    'midnight-ink',
+    'nord-frost',
+    'oled-pure',
+    'tokyo-night',
+    'catppuccin-mocha',
+    'crystal-day',
+    'warm-paper',
+    'rose-dawn',
+    'matcha-journal',
+    'phantom-crimson',
+    'doodle-sketch',
+    'pixel-terminal',
+    'aurora-glass',
+  ]);
   const ALLOWED_THEME_DENSITIES = Object.freeze(['compact', 'balanced', 'comfortable']);
+  const ALLOWED_THEME_ACCENTS = Object.freeze(['follow', 'cobalt', 'iris', 'amber', 'emerald', 'rose', 'mono']);
+  const ALLOWED_THEME_CORNERS = Object.freeze(['sharp', 'balanced', 'soft', 'pill']);
+  const ALLOWED_THEME_SURFACES = Object.freeze(['clean', 'smoked', 'paper', 'glass']);
+  const ALLOWED_THEME_CODE_FONTS = Object.freeze(['default', 'jetbrains', 'cascadia', 'fira', 'sfmono', 'sarasa']);
+  const ALLOWED_THEME_AMBIENT_GLOWS = Object.freeze(['off', 'subtle', 'vivid']);
   const ALLOWED_RADAR_AUDIO_MODES = Object.freeze(['off', 'chime', 'tts', 'both']);
   const QUIET_HOURS_RE = /^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)$/;
 
@@ -97,7 +119,16 @@
     autoAcceptPolicy: 'readonly-safe', // 'readonly-safe' | 'dev-flow' | 'custom'
     autoAcceptCustomPatterns: Object.freeze([]), // string[] allow patterns (always subordinate to HARD_DENY_PATTERNS)
     autoAcceptDryRun: false, // audit-only simulation mode
-    themePreset: 'native', // 'native' | 'midnight-ink' | 'nord-frost' | 'warm-paper' | 'oled-pure'
+    themePreset: 'native', // 16 presets: native + 15 dark/light/stylized optical skins
+    themeAutoPair: false, // opt-in automatic dark/light skin pairing with host color scheme
+    themeAccent: 'follow', // 'follow' | 'cobalt' | 'iris' | 'amber' | 'emerald' | 'rose' | 'mono'
+    themeCorners: 'balanced', // 'sharp' | 'balanced' | 'soft' | 'pill'
+    themeSurface: 'smoked', // 'clean' | 'smoked' | 'paper' | 'glass'
+    themeCodeFont: 'default', // 'default' | 'jetbrains' | 'cascadia' | 'fira' | 'sfmono' | 'sarasa'
+    themeCodeLigatures: false, // enable programming ligatures (calt/liga)
+    themeAmbientGlow: 'subtle', // 'off' | 'subtle' | 'vivid' (0fps CSS semantic horizon glow)
+    themeStreamFade: true, // CSS.highlights 5-step velvet stream feathering (zero DOM wrap)
+    themeSmoothCaret: true, // FastDOM device-pixel smooth typing caret
     themeCjkFont: true, // CJK + monospace font stack polish
     themeDensity: 'balanced', // 'compact' | 'balanced' | 'comfortable'
     themeCompactSidebar: false,
@@ -295,6 +326,40 @@
       ? src.themePreset
       : fallback.themePreset || 'native';
 
+    const themeAutoPair =
+      src.themeAutoPair !== undefined ? Boolean(src.themeAutoPair) : Boolean(fallback.themeAutoPair);
+
+    const themeAccent = ALLOWED_THEME_ACCENTS.includes(src.themeAccent)
+      ? src.themeAccent
+      : fallback.themeAccent || 'follow';
+
+    const themeCorners = ALLOWED_THEME_CORNERS.includes(src.themeCorners)
+      ? src.themeCorners
+      : fallback.themeCorners || 'balanced';
+
+    const themeSurface = ALLOWED_THEME_SURFACES.includes(src.themeSurface)
+      ? src.themeSurface
+      : fallback.themeSurface || 'smoked';
+
+    const themeCodeFont = ALLOWED_THEME_CODE_FONTS.includes(src.themeCodeFont)
+      ? src.themeCodeFont
+      : fallback.themeCodeFont || 'default';
+
+    const themeCodeLigatures =
+      src.themeCodeLigatures !== undefined
+        ? Boolean(src.themeCodeLigatures)
+        : Boolean(fallback.themeCodeLigatures);
+
+    const themeAmbientGlow = ALLOWED_THEME_AMBIENT_GLOWS.includes(src.themeAmbientGlow)
+      ? src.themeAmbientGlow
+      : fallback.themeAmbientGlow || 'subtle';
+
+    const themeStreamFade =
+      src.themeStreamFade !== undefined ? Boolean(src.themeStreamFade) : fallback.themeStreamFade !== false;
+
+    const themeSmoothCaret =
+      src.themeSmoothCaret !== undefined ? Boolean(src.themeSmoothCaret) : fallback.themeSmoothCaret !== false;
+
     const themeCjkFont =
       src.themeCjkFont !== undefined ? Boolean(src.themeCjkFont) : fallback.themeCjkFont !== false;
 
@@ -375,6 +440,15 @@
       autoAcceptCustomPatterns,
       autoAcceptDryRun,
       themePreset,
+      themeAutoPair,
+      themeAccent,
+      themeCorners,
+      themeSurface,
+      themeCodeFont,
+      themeCodeLigatures,
+      themeAmbientGlow,
+      themeStreamFade,
+      themeSmoothCaret,
       themeCjkFont,
       themeDensity,
       themeCompactSidebar,
@@ -530,6 +604,11 @@
     ALLOWED_AUTO_ACCEPT_POLICIES,
     ALLOWED_THEME_PRESETS,
     ALLOWED_THEME_DENSITIES,
+    ALLOWED_THEME_ACCENTS,
+    ALLOWED_THEME_CORNERS,
+    ALLOWED_THEME_SURFACES,
+    ALLOWED_THEME_CODE_FONTS,
+    ALLOWED_THEME_AMBIENT_GLOWS,
     MODULE_CATALOG,
     MODULE_GROUPS,
     MODULE_META,

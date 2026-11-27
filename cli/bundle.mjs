@@ -77,8 +77,9 @@ export const REMOVE_EXPRESSION = `(() => {
   try { document.getElementById('ag-sg-core-css')?.remove(); } catch {}
   try { document.getElementById('ag-sag-theme-css')?.remove(); } catch {}
   try { document.getElementById('ag-sag-queue-css')?.remove(); } catch {}
-  try { document.querySelectorAll('[data-ag-sg-owned="1"], [data-ag-sag-owned="1"]').forEach((n) => n.remove()); } catch {}
-  try { document.querySelectorAll('[data-ag-sag-code-folded], [data-ag-sag-code-enhanced], [data-ag-sag-code-wrap]').forEach((n) => { n.removeAttribute('data-ag-sag-code-folded'); n.removeAttribute('data-ag-sag-code-enhanced'); n.removeAttribute('data-ag-sag-code-wrap'); }); } catch {}
+  try { document.querySelectorAll('[data-ag-sg-owned="1"], [data-ag-sag-owned="1"], .ag-sag-smooth-caret, .ag-sag-ambient-glow, .ag-sag-ctx-toast').forEach((n) => n.remove()); } catch {}
+  try { document.querySelectorAll('[data-ag-sag-code-folded], [data-ag-sag-code-enhanced], [data-ag-sag-code-wrap], [data-ag-sag-smooth-caret], [data-ag-sag-caret-host]').forEach((n) => { n.removeAttribute('data-ag-sag-code-folded'); n.removeAttribute('data-ag-sag-code-enhanced'); n.removeAttribute('data-ag-sag-code-wrap'); n.removeAttribute('data-ag-sag-smooth-caret'); n.removeAttribute('data-ag-sag-caret-host'); }); } catch {}
+  try { if (typeof CSS !== 'undefined' && CSS.highlights && CSS.highlights.delete) { for (const h of ['ag-sag-sf0','ag-sag-sf1','ag-sag-sf2','ag-sag-sf3','ag-sag-sf4']) CSS.highlights.delete(h); } } catch {}
   try { document.querySelectorAll('#ag-prism-pulse-bar, [data-ag-prism-pulse-bar="true"], #ag-pulse-status-bar, [data-ag-pulse-bar="true"]').forEach((h) => { h?.shadowRoot?.querySelectorAll?.('[data-ag-sg-owned="1"], [data-ag-sag-owned="1"]')?.forEach?.((n) => n.remove()); }); } catch {}
   try {
     const html = document.documentElement;
@@ -95,12 +96,21 @@ export const REMOVE_EXPRESSION = `(() => {
         'data-ag-sag-lang',
         'data-ag-sag-theme',
         'data-ag-sag-theme-preset',
+        'data-ag-sag-theme-resolved',
+        'data-ag-sag-theme-scheme',
         'data-ag-sag-theme-density',
+        'data-ag-sag-theme-accent',
+        'data-ag-sag-theme-corners',
+        'data-ag-sag-theme-surface',
+        'data-ag-sag-theme-code-font',
+        'data-ag-sag-theme-ligatures',
+        'data-ag-sag-theme-glow',
         'data-ag-sag-theme-policy',
         'data-ag-sag-theme-colors',
         'data-ag-sag-theme-cjk',
         'data-ag-sag-theme-sidebar',
         'data-ag-sag-theme-wide',
+        'data-ag-sag-conv-state',
       ]) {
         if (!toRemove.includes(fallbackAttr)) toRemove.push(fallbackAttr);
       }
@@ -157,10 +167,27 @@ const REGEX_PRECEDING_PUNCT = new Set([
   '+',
   '-',
   '*',
+  '/',
   '%',
   '<',
   '>',
 ]);
+
+const isIdentChar = (ch) => Boolean(ch) && /[\p{ID_Continue}$_\u200C\u200D]/u.test(ch);
+
+function needsCodeSpace(prevCh, nextCh) {
+  if (!prevCh || !nextCh || prevCh === '\n' || prevCh === ' ') return false;
+  if (isIdentChar(prevCh) && isIdentChar(nextCh)) return true;
+  if ((/[0-9]/.test(prevCh) && nextCh === '.') || (prevCh === '.' && /[0-9]/.test(nextCh))) return true;
+  if (prevCh === nextCh && '+-*/&|?<>=.'.includes(prevCh)) return true;
+  if (prevCh === '/' && (nextCh === '*' || nextCh === '/')) return true;
+  if (prevCh === '?' && nextCh === '.') return true;
+  if (prevCh === '<' && nextCh === '!') return true;
+  if (prevCh === '-' && nextCh === '>') return true;
+  if (prevCh === '=' && nextCh === '>') return true;
+  if (nextCh === '=' && '+-*/%&|^!<>?='.includes(prevCh)) return true;
+  return false;
+}
 
 function scanAndCompactJs(src) {
   const s = String(src ?? '').replace(/\r\n/g, '\n');
@@ -168,14 +195,28 @@ function scanAndCompactJs(src) {
 
   let mode = 'code'; // 'code' | 'sq' | 'dq' | 'lineComment' | 'blockComment' | 'regex' | 'tpl'
   let inRegexClass = false;
+  let blockCommentHasNewline = false;
   const tplStack = []; // stack of open '{' counts inside each nested ${...}
   let lastSigChar = '';
   let lastIdent = '';
   let curIdent = '';
-  let prevWasNewline = true;
   let lineHasCode = false;
   let pendingSpace = false;
+  let lastOutChar = '';
   const chunks = [];
+
+  const pushRaw = (ch) => {
+    chunks.push(ch);
+    lastOutChar = ch;
+  };
+
+  const flushPendingSpace = (nextCh, force = false) => {
+    if (!pendingSpace) return;
+    if (force || needsCodeSpace(lastOutChar, nextCh)) {
+      pushRaw(' ');
+    }
+    pendingSpace = false;
+  };
 
   const flushIdent = () => {
     if (curIdent) {
@@ -195,9 +236,8 @@ function scanAndCompactJs(src) {
       flushIdent();
       pendingSpace = false;
       if (lineHasCode) {
-        chunks.push('\n');
+        pushRaw('\n');
         lineHasCode = false;
-        prevWasNewline = true;
       }
       return;
     }
@@ -206,13 +246,9 @@ function scanAndCompactJs(src) {
       if (lineHasCode) pendingSpace = true;
       return;
     }
-    if (pendingSpace) {
-      chunks.push(' ');
-      pendingSpace = false;
-    }
-    chunks.push(ch);
+    flushPendingSpace(ch);
+    pushRaw(ch);
     lineHasCode = true;
-    prevWasNewline = false;
   };
 
   const len = s.length;
@@ -229,18 +265,25 @@ function scanAndCompactJs(src) {
     }
 
     if (mode === 'blockComment') {
-      if (ch === '*' && next === '/') {
+      if (ch === '\n') {
+        blockCommentHasNewline = true;
+      } else if (ch === '*' && next === '/') {
         mode = 'code';
         i += 1;
-        if (lineHasCode) pendingSpace = true;
+        if (blockCommentHasNewline) {
+          emitCodeChar('\n');
+        } else if (lineHasCode) {
+          pendingSpace = true;
+        }
+        blockCommentHasNewline = false;
       }
       continue;
     }
 
     if (mode === 'sq' || mode === 'dq') {
-      chunks.push(ch);
+      pushRaw(ch);
       if (ch === '\\' && i + 1 < len) {
-        chunks.push(s[i + 1]);
+        pushRaw(s[i + 1]);
         i += 1;
         continue;
       }
@@ -253,9 +296,9 @@ function scanAndCompactJs(src) {
     }
 
     if (mode === 'regex') {
-      chunks.push(ch);
+      pushRaw(ch);
       if (ch === '\\' && i + 1 < len) {
-        chunks.push(s[i + 1]);
+        pushRaw(s[i + 1]);
         i += 1;
         continue;
       }
@@ -272,19 +315,18 @@ function scanAndCompactJs(src) {
     }
 
     if (mode === 'tpl') {
-      chunks.push(ch);
+      pushRaw(ch);
       if (ch === '\\' && i + 1 < len) {
-        chunks.push(s[i + 1]);
+        pushRaw(s[i + 1]);
         i += 1;
         continue;
       }
       if (ch === '$' && next === '{') {
-        chunks.push('{');
+        pushRaw('{');
         i += 1;
         tplStack.push(1);
         mode = 'code';
         lineHasCode = true;
-        prevWasNewline = false;
         lastSigChar = '{';
         lastIdent = '';
         curIdent = '';
@@ -293,7 +335,6 @@ function scanAndCompactJs(src) {
       if (ch === '`') {
         mode = 'code';
         lineHasCode = true;
-        prevWasNewline = false;
         lastSigChar = ')';
         lastIdent = '';
       }
@@ -310,43 +351,32 @@ function scanAndCompactJs(src) {
     if (ch === '/' && next === '*') {
       flushIdent();
       mode = 'blockComment';
+      blockCommentHasNewline = false;
       i += 1;
       continue;
     }
     if (ch === "'" || ch === '"') {
       flushIdent();
-      if (pendingSpace) {
-        chunks.push(' ');
-        pendingSpace = false;
-      }
-      chunks.push(ch);
+      flushPendingSpace(ch);
+      pushRaw(ch);
       lineHasCode = true;
-      prevWasNewline = false;
       mode = ch === "'" ? 'sq' : 'dq';
       continue;
     }
     if (ch === '`') {
       flushIdent();
-      if (pendingSpace) {
-        chunks.push(' ');
-        pendingSpace = false;
-      }
-      chunks.push(ch);
+      flushPendingSpace(ch);
+      pushRaw(ch);
       lineHasCode = true;
-      prevWasNewline = false;
       mode = 'tpl';
       continue;
     }
     if (ch === '/') {
       flushIdent();
       if (canStartRegex()) {
-        if (pendingSpace) {
-          chunks.push(' ');
-          pendingSpace = false;
-        }
-        chunks.push(ch);
+        flushPendingSpace('/', isIdentChar(lastOutChar) || lastOutChar === '/');
+        pushRaw(ch);
         lineHasCode = true;
-        prevWasNewline = false;
         mode = 'regex';
         inRegexClass = false;
         continue;
@@ -364,19 +394,15 @@ function scanAndCompactJs(src) {
       if (tplStack[tplStack.length - 1] === 0) {
         tplStack.pop();
         flushIdent();
-        if (pendingSpace) {
-          chunks.push(' ');
-          pendingSpace = false;
-        }
-        chunks.push('}');
+        flushPendingSpace('}');
+        pushRaw('}');
         lineHasCode = true;
-        prevWasNewline = false;
         mode = 'tpl';
         continue;
       }
     }
 
-    if (/[A-Za-z0-9_$]/.test(ch)) {
+    if (isIdentChar(ch)) {
       emitCodeChar(ch);
       curIdent += ch;
       continue;
@@ -395,7 +421,7 @@ function scanAndCompactJs(src) {
 
   return {
     code: chunks.join('').replace(/\n+$/, ''),
-    mode,
+    mode: mode === 'lineComment' ? 'code' : mode,
     tplDepth: tplStack.length,
   };
 }
@@ -458,10 +484,24 @@ export function readExtendedPackFile(locale, repoRoot = path.resolve(__dirname, 
   }
 }
 
+function compactCorePart(part) {
+  let code = compactCoreSource(part.code);
+  if (part.file === 'styles.js') {
+    code = code.replace(/const CORE_CSS\s*=\s*`([\s\S]*?)`\.trim\(\)/, (_m, css) => {
+      const minCss = css
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/^[ \t]+|[ \t]+$/gm, '')
+        .replace(/\n+/g, '');
+      return `const CORE_CSS=\`${minCss}\`.trim()`;
+    });
+  }
+  return code;
+}
+
 export function computeCoreHash(parts = readCoreSources(), opts = {}) {
   const useCompact = opts.compact !== false;
   const combined = parts
-    .map((p) => `/* ${p.file} */\n${useCompact ? compactCoreSource(p.code) : p.code}`)
+    .map((p) => `/* ${p.file} */\n${useCompact ? compactCorePart(p) : p.code}`)
     .join('\n;\n');
   return crypto.createHash('sha256').update(combined).digest('hex').slice(0, 16);
 }
@@ -470,7 +510,7 @@ export function buildInjectExpression(config = null, opts = {}) {
   const parts = readCoreSources();
   const useCompact = opts.compact !== false;
   const combined = parts
-    .map((p) => `/* ${p.file} */\n${useCompact ? compactCoreSource(p.code) : p.code}`)
+    .map((p) => `/* ${p.file} */\n${useCompact ? compactCorePart(p) : p.code}`)
     .join('\n;\n');
   const codeHash = crypto.createHash('sha256').update(combined).digest('hex').slice(0, 16);
   const cfgJson = JSON.stringify(config && typeof config === 'object' ? config : null);

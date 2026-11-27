@@ -163,16 +163,33 @@
       }
 
       if (themeStudio) {
-        themeStudio.updateSettings?.({
-          preset: nextCfg.themePreset || 'native',
-          cjkFontTuning: nextCfg.themeCjkFont !== false,
-          density: nextCfg.themeDensity || 'balanced',
-          compactSidebar: Boolean(nextCfg.themeCompactSidebar),
-          wideReadable: Boolean(nextCfg.themeWideReadable),
-          customCss: nextCfg.themeCustomCss || '',
-          conflictPolicy: nextCfg.themeConflictPolicy || 'yield',
-        });
-        themeStudio.setEnabled?.(Boolean(nextCfg.modules?.themeStudio));
+        const nextThemeEnabled = Boolean(nextCfg.modules?.themeStudio);
+        const wasThemeEnabled = Boolean(themeStudio.getDebugState?.()?.enabled);
+        themeStudio.setExternalConvStateSource?.(Boolean(nextCfg.modules?.compactGuard), { silent: true });
+        themeStudio.updateSettings?.(
+          {
+            preset: nextCfg.themePreset || 'native',
+            autoPair: Boolean(nextCfg.themeAutoPair),
+            accent: nextCfg.themeAccent || 'follow',
+            corners: nextCfg.themeCorners || 'balanced',
+            surface: nextCfg.themeSurface || 'smoked',
+            codeFont: nextCfg.themeCodeFont || 'default',
+            codeLigatures: Boolean(nextCfg.themeCodeLigatures),
+            ambientGlow: nextCfg.themeAmbientGlow || 'subtle',
+            streamFade: nextCfg.themeStreamFade !== false,
+            smoothCaret: nextCfg.themeSmoothCaret !== false,
+            cjkFontTuning: nextCfg.themeCjkFont !== false,
+            density: nextCfg.themeDensity || 'balanced',
+            compactSidebar: Boolean(nextCfg.themeCompactSidebar),
+            wideReadable: Boolean(nextCfg.themeWideReadable),
+            customCss: nextCfg.themeCustomCss || '',
+            conflictPolicy: nextCfg.themeConflictPolicy || 'yield',
+          },
+          { silent: true }
+        );
+        if (nextThemeEnabled || wasThemeEnabled) {
+          themeStudio.setEnabled?.(nextThemeEnabled);
+        }
       }
 
       if (quotaPulse) {
@@ -223,6 +240,22 @@
         }
         if (promptQueue && compactGuard.getConfig().modules?.promptQueue && !snap?.streaming) {
           promptQueue.sync?.();
+        }
+        if (themeStudio && compactGuard.getConfig().modules?.themeStudio) {
+          const convState = themeStudioMod?.detectConvStateFromDom
+            ? themeStudioMod.detectConvStateFromDom(doc, { streaming: Boolean(snap?.streaming) })
+            : Boolean(
+                  doc?.querySelector?.(
+                    '[data-testid="interaction-takeover-card"], [data-testid="permission-card"], [data-testid="tool-approval-card"]'
+                  )
+                )
+              ? 'awaiting'
+              : Boolean(doc?.querySelector?.('[data-testid="agent-error"], [role="alert"][data-error="true"]'))
+                ? 'error'
+                : snap?.streaming
+                  ? 'running'
+                  : 'idle';
+          themeStudio.setConvState?.(convState);
         }
         syncStatusPill();
       },
@@ -508,7 +541,18 @@
           doc,
           coexist,
           enabled: Boolean(cfg.modules?.themeStudio),
+          externalConvStateSource: Boolean(cfg.modules?.compactGuard),
+          convStateThrottleMs: options.convStateThrottleMs,
           preset: cfg.themePreset || 'native',
+          autoPair: Boolean(cfg.themeAutoPair),
+          accent: cfg.themeAccent || 'follow',
+          corners: cfg.themeCorners || 'balanced',
+          surface: cfg.themeSurface || 'smoked',
+          codeFont: cfg.themeCodeFont || 'default',
+          codeLigatures: Boolean(cfg.themeCodeLigatures),
+          ambientGlow: cfg.themeAmbientGlow || 'subtle',
+          streamFade: cfg.themeStreamFade !== false,
+          smoothCaret: cfg.themeSmoothCaret !== false,
           cjkFontTuning: cfg.themeCjkFont !== false,
           density: cfg.themeDensity || 'balanced',
           compactSidebar: Boolean(cfg.themeCompactSidebar),

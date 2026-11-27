@@ -48,12 +48,37 @@ test('Phase 8A: compactCoreSource preserves JS syntax across all core files, reg
     assert.doesNotThrow(() => new Function(compactCoreSource(p.code)), `Syntax valid for ${p.file}`);
   }
 
-  // Adversarial lexer cases (regex with odd backticks, block comment before template, nested templates, inline comment with backtick)
+  // Adversarial lexer cases (regex with odd backticks, block comment before template, nested templates, inline comment with backtick, operator spacing & calc CSS)
   const advCases = [
     { name: 'regex-odd-backtick', code: 'const r = /`[^`]+`/; const s = `\n  // keep-1\n`; return s;', expect: '// keep-1' },
     { name: 'leading-block-comment-tpl', code: '/* hdr */ const s = `\n  // keep-2\n`; return s;', expect: '// keep-2' },
     { name: 'nested-template', code: 'const a = 1; const s = `${a ? `x\n  // keep-3\n` : 1}`; return s;', expect: '// keep-3' },
     { name: 'inline-block-comment-backtick', code: 'const a = 1; /* ` */\nconst s = `\n  // keep-4\n`; return s;', expect: '// keep-4' },
+    {
+      name: 'operator-token-boundaries',
+      code: 'const a = 2, b = 3; const r1 = a + +b; const r2 = a - -b; const r3 = true ? .5 : 1; const r4 = 1 .toString(); const r5 = returnRegex(); function returnRegex() { return /ok/.test("ok"); } const css = `width: calc(100% + 10px);`; return [r1, r2, r3, r4, r5, css].join("|");',
+      expect: '5|5|0.5|1|true|width: calc(100% + 10px);',
+    },
+    {
+      name: 'multiline-block-comment-asi',
+      code: 'const a = 1 /*\n*/ const b = 2\nreturn String(a + b);',
+      expect: '3',
+    },
+    {
+      name: 'div-before-regex-with-quote',
+      code: "const n = 10 / /'/.source.length; return String(n);",
+      expect: '10',
+    },
+    {
+      name: 'unicode-identifier-spacing',
+      code: 'const 变量 = 4; return String(变量 + 1);',
+      expect: '5',
+    },
+    {
+      name: 'trailing-line-comment-eof',
+      code: 'const x = 9; return String(x); // eof',
+      expect: '9',
+    },
   ];
   for (const c of advCases) {
     assert.deepEqual(inspectCoreLexState(c.code), { mode: 'code', tplDepth: 0 }, `EOF clean for ${c.name}`);
@@ -62,18 +87,20 @@ test('Phase 8A: compactCoreSource preserves JS syntax across all core files, reg
     assert.ok(val.includes(c.expect), `Template content preserved for ${c.name}`);
   }
 
-  // Sync ru bundle shrinks well below 1.58 MB (saves >120 KB vs raw, keeping ample headroom under 1.6 MiB hard cap)
+  // Sync ru bundle shrinks well below 1.55 MB (ample headroom below 1.58 MB gate & 1.6 MiB hard cap)
   const rawRu = Buffer.byteLength(buildInjectExpression({ hostI18nLocale: 'ru' }, { compact: false }), 'utf8');
-  const compactRu = Buffer.byteLength(buildInjectExpression({ hostI18nLocale: 'ru' }), 'utf8');
-  assert.ok(rawRu - compactRu > 120_000, `Expected >120 KB savings, got ${rawRu - compactRu}`);
-  assert.ok(compactRu < 1_580_000, `Compact sync ru bundle must stay < 1.58 MB, got ${compactRu}`);
+  const compactRuExpr = buildInjectExpression({ hostI18nLocale: 'ru' });
+  const compactRu = Buffer.byteLength(compactRuExpr, 'utf8');
+  assert.ok(rawRu - compactRu > 160_000, `Expected >160 KB savings, got ${rawRu - compactRu}`);
+  assert.ok(compactRu <= 1_550_000, `Compact sync ru bundle must stay <= 1.55 MB, got ${compactRu}`);
+  assert.ok(compactRuExpr.includes('calc(100% + 10px)'), 'CSS calc() spacing must remain intact in compacted bundle');
 
-  // Watch deferred ext-pack mode stays < 1.0 MB
+  // Watch deferred ext-pack mode stays well under 960 KB
   const deferredRu = Buffer.byteLength(
     buildInjectExpression({ hostI18nLocale: 'ru' }, { deferExtPack: true }),
     'utf8'
   );
-  assert.ok(deferredRu < 1_000_000, `Deferred Watch bundle must stay < 1.0 MB, got ${deferredRu}`);
+  assert.ok(deferredRu < 960_000, `Deferred Watch bundle must stay < 960 KB, got ${deferredRu}`);
   assert.ok(!buildInjectExpression({ hostI18nLocale: 'ru' }, { deferExtPack: true }).includes('window.__agSagExtPacks["ru"]'));
 
   // computeCoreHash matches buildInjectExpression targetHash

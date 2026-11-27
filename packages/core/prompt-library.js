@@ -1155,11 +1155,54 @@
     let selectionContext = '';
     let selPillEl = null;
     let ctxMenuEl = null;
+    let ctxToastEl = null;
+    let ctxToastTimer = null;
     let extraListenersOff = [];
 
     function removeSelectionPill() {
       try { selPillEl?.remove?.(); } catch {}
       selPillEl = null;
+    }
+
+    function removeCtxToast() {
+      if (ctxToastTimer) {
+        clearTimeout(ctxToastTimer);
+        ctxToastTimer = null;
+      }
+      try { ctxToastEl?.remove?.(); } catch {}
+      ctxToastEl = null;
+    }
+
+    function showCtxToast(msg) {
+      if (destroyed || !doc?.body || !msg) return;
+      ensureStyle();
+      removeCtxToast();
+      const el = coexist?.markOwnedNoTranslate
+        ? coexist.markOwnedNoTranslate(doc.createElement('div'))
+        : doc.createElement('div');
+      el.className = 'ag-sag-ctx-toast';
+      el.setAttribute('data-testid', 'ag-sag-ctx-toast');
+      el.setAttribute('role', 'status');
+      el.setAttribute('aria-live', 'polite');
+      el.textContent = String(msg);
+      doc.body.appendChild(el);
+      ctxToastEl = el;
+      ctxToastTimer = setTimeout(() => {
+        ctxToastTimer = null;
+        if (ctxToastEl === el) removeCtxToast();
+      }, 2400);
+      ctxToastTimer?.unref?.();
+    }
+
+    function insertSlashSafely(cmdText) {
+      const scope = getScope();
+      const existing = ctxSrc?.readComposerDraft ? String(ctxSrc.readComposerDraft(doc, scope) || '').trim() : '';
+      const isSingleLineSlashPlaceholder = existing.startsWith('/') && !existing.includes('\n');
+      if (existing && !isSingleLineSlashPlaceholder) {
+        showCtxToast(t('plCtxDraftBusy', 'Composer has an unsent draft; send or clear it first'));
+        return { ok: false, reason: 'draft-occupied' };
+      }
+      return insertIntoComposer(cmdText, 'replace');
     }
 
     function removeContextMenu() {
@@ -1256,10 +1299,10 @@
       selPillEl = pill;
     }
 
-    function openContextMenu({ selection = '', filePath = '', x = 0, y = 0 } = {}) {
+    function openContextMenu({ selection = '', filePath = '', allowQuickSlash = false, x = 0, y = 0 } = {}) {
       if (destroyed || !enabled || !doc?.body) return false;
       if (hasPrismContextMenu()) return false;
-      if (!selection && !filePath) return false;
+      if (!selection && !filePath && !allowQuickSlash) return false;
       ensureStyle();
       removeContextMenu();
 
@@ -1269,9 +1312,15 @@
       menu.className = 'ag-sag-ctx-menu';
       menu.setAttribute('data-testid', 'ag-sag-ctx-menu');
       menu.setAttribute('role', 'menu');
+      const vw = Number(win?.innerWidth) || 0;
+      const vh = Number(win?.innerHeight) || 0;
+      const estW = 228;
+      const estH = 220;
+      const clampedX = vw > estW + 16 ? Math.min(Math.max(8, x), vw - estW - 8) : Math.max(8, x);
+      const clampedY = vh > estH + 16 ? Math.min(Math.max(8, y), vh - estH - 8) : Math.max(8, y);
       if (menu.style) {
-        menu.style.left = `${Math.max(8, x)}px`;
-        menu.style.top = `${Math.max(8, y)}px`;
+        menu.style.left = `${clampedX}px`;
+        menu.style.top = `${clampedY}px`;
       }
 
       const addItem = (label, act, fn) => {
@@ -1302,12 +1351,30 @@
         addItem(t('plCtxQuoteSel', 'Quote into composer'), 'quote-sel', () => {
           insertIntoComposer(`> ${selection.replace(/\r?\n/g, '\n> ')}\n\n`, 'append');
         });
+        addItem(t('plCtxBtw', '/btw Ask quick side question'), 'btw-sel', () => {
+          const brief = selection.replace(/\s+/g, ' ').trim().slice(0, 160);
+          insertSlashSafely(`/btw ${brief} `);
+        });
+        addItem(t('plCtxPlan', '/plan Switch to planning mode'), 'plan-sel', () => {
+          const brief = selection.replace(/\s+/g, ' ').trim().slice(0, 160);
+          insertSlashSafely(`/plan ${brief} `);
+        });
         addItem(t('plCtxUseTpl', 'Fill into Prompt Template…'), 'tpl-sel', () => {
           open({ selection });
         });
         addItem(t('plCtxCompactFocus', 'Fill /compact focusing on this'), 'compact-sel', () => {
           const brief = selection.replace(/\s+/g, ' ').trim().slice(0, 140);
-          insertIntoComposer(`/compact Focus on: ${brief}`, 'replace');
+          insertSlashSafely(`/compact Focus on: ${brief}`);
+        });
+      } else if (allowQuickSlash) {
+        addItem(t('plCtxBtw', '/btw Ask quick side question'), 'btw-quick', () => {
+          insertSlashSafely('/btw ');
+        });
+        addItem(t('plCtxPlan', '/plan Switch to planning mode'), 'plan-quick', () => {
+          insertSlashSafely('/plan ');
+        });
+        addItem(t('plCtxOpenPalette', 'Open Prompt Library…'), 'open-palette', () => {
+          open();
         });
       }
       if (filePath) {
@@ -1333,6 +1400,7 @@
       selectedIndex = 0;
       removeSelectionPill();
       removeContextMenu();
+      removeCtxToast();
       renderModal();
       void refreshNovTemplates();
       return true;
@@ -1466,13 +1534,24 @@
       const onContextMenu = (ev) => {
         if (destroyed || !enabled || !ev) return;
         if (hasPrismContextMenu()) return;
+        // Shift+Right-Click or right-clicking while menu is already open yields cleanly to native menu
+        if (ev.shiftKey || ctxMenuEl) {
+          removeContextMenu();
+          return;
+        }
         const target = ev.target;
         if (!target || isOwnedMutationNode(target) || isEditableTarget(target)) return;
         if (typeof target.closest === 'function' && !target.closest('[data-testid="conversation-view"]')) return;
-        const selText = getConversationSelectionText();
         const filePath = extractPathFromTarget(target);
-        if (!selText && !filePath) return;
-        if (openContextMenu({ selection: selText, filePath, x: Number(ev.clientX) || 0, y: Number(ev.clientY) || 0 })) {
+        if (
+          !filePath &&
+          typeof target.closest === 'function' &&
+          target.closest('a[href], button, [role="button"], img, video, audio, canvas, iframe, [role="dialog"], [role="menu"]')
+        ) {
+          return;
+        }
+        const selText = getConversationSelectionText();
+        if (openContextMenu({ selection: selText, filePath, allowQuickSlash: true, x: Number(ev.clientX) || 0, y: Number(ev.clientY) || 0 })) {
           ev.preventDefault?.();
           ev.stopPropagation?.();
         }
@@ -1528,6 +1607,7 @@
       }
       removeSelectionPill();
       removeContextMenu();
+      removeCtxToast();
       if (domObserver) {
         try { domObserver.disconnect(); } catch {}
         domObserver = null;
@@ -1584,6 +1664,7 @@
       destroyed = true;
       enabled = false;
       close();
+      removeCtxToast();
       detachListeners();
       removeTrigger();
       removeModalShell();

@@ -811,65 +811,406 @@
       );
       pane.appendChild(mkSuiteRow(t('hostI18nLabel', 'Native UI Translation'), t('hostI18nDesc', ''), langCtrl, { searchExtra: 'hostI18n locale language' }));
 
-      // 2. Optical Theme Studio: skins + CJK font + density
-      const thGrid = doc.createElement('div');
-      thGrid.className = 'ag-sag-ext-grid';
-      for (const [tid, tLbl] of [
-        ['native', t('themeNative', 'Native')],
-        ['midnight-ink', t('themeMidnight', 'Midnight')],
-        ['nord-frost', t('themeNord', 'Nord')],
-        ['warm-paper', t('themeWarmPaper', 'Warm Paper')],
-        ['oled-pure', t('themeOled', 'OLED')],
-      ]) {
-        thGrid.appendChild(
-          mkChip({
-            label: tLbl,
-            active: Boolean(cfg.modules?.themeStudio) && (cfg.themePreset || 'native') === tid,
-            attr: 'data-ag-sag-theme',
-            val: tid,
-            onClick: () =>
-              updateConfig({
-                themePreset: tid,
-                modules: { ...cfg.modules, themeStudio: tid !== 'native' ? true : Boolean(cfg.modules?.themeStudio) },
-              }),
-          })
-        );
+      // 2. One-Click Visual Atmosphere Looks (8 curated combinations) + Auto Dark/Light Pairing
+      const themeStudioMod = resolveDep('__agSagThemeStudio', './theme-studio.js');
+      const themeOn = Boolean(cfg.modules?.themeStudio);
+      const hostScheme = themeStudioMod?.detectHostColorScheme ? themeStudioMod.detectHostColorScheme(doc, win) : 'dark';
+      const resolvedSpec = themeStudioMod?.resolveEffectivePreset
+        ? themeStudioMod.resolveEffectivePreset(cfg.themePreset || 'native', Boolean(cfg.themeAutoPair), hostScheme)
+        : null;
+      const lookRow = doc.createElement('div');
+      lookRow.className = 'ag-sag-look-row';
+      const lookDefs = [
+        ['prism-obsidian', t('lookPrismObsidian', 'Obsidian Optics'), ['#0b0b0e', '#669df6']],
+        ['claude-warm', t('lookClaudeWarm', 'Warm Study'), ['#141413', '#d97757']],
+        ['daylight-studio', t('lookDaylightStudio', 'Daylight Crystal'), ['#f4f7fb', '#2563eb']],
+        ['matcha-note', t('lookMatchaNote', 'Matcha Journal'), ['#f6f8f3', '#437352']],
+        ['phantom-pop', t('lookPhantomPop', 'Phantom Pop'), ['#101014', '#e11d48']],
+        ['doodle-ink', t('lookDoodleInk', 'Doodle Ink'), ['#fdfcf7', '#d43544']],
+        ['pixel-geek', t('lookPixelGeek', 'Pixel Geek'), ['#0e1117', '#38f28b']],
+        ['aurora-liquid', t('lookAuroraLiquid', 'Aurora Liquid'), ['#0b1120', '#70d6ff']],
+      ];
+      for (const [lid, lLbl, dots] of lookDefs) {
+        const patch = themeStudioMod?.resolveLookPresetPatch ? themeStudioMod.resolveLookPresetPatch(lid) : null;
+        const isLookMatch = themeStudioMod?.matchesLookPreset ? themeStudioMod.matchesLookPreset(cfg, lid) : false;
+        const btn = doc.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ag-sag-look-chip';
+        btn.setAttribute('data-ag-sag-look', lid);
+        btn.setAttribute('aria-pressed', String(isLookMatch));
+        const dotWrap = doc.createElement('span');
+        dotWrap.className = 'ag-sag-swatch-dots';
+        for (const color of dots) {
+          const d = doc.createElement('span');
+          d.className = 'ag-sag-swatch-dot';
+          if (d.style) d.style.background = color;
+          dotWrap.appendChild(d);
+        }
+        const lbl = doc.createElement('span');
+        lbl.textContent = lLbl;
+        btn.appendChild(dotWrap);
+        btn.appendChild(lbl);
+        btn.addEventListener('click', () => {
+          if (!patch) return;
+          updateConfig({
+            ...patch,
+            modules: { ...cfg.modules, themeStudio: true },
+          });
+        });
+        lookRow.appendChild(btn);
       }
-      thGrid.appendChild(
+      lookRow.appendChild(
         mkChip({
-          label: t('themeCjk', 'CJK Fonts'),
-          active: cfg.themeCjkFont !== false,
-          attr: 'data-ag-sag-theme-cjk',
-          val: '1',
+          label: t('themeAutoPairLabel', 'Auto Dark/Light Pairing'),
+          active: themeOn && Boolean(cfg.themeAutoPair),
+          attr: 'data-ag-sag-theme-autopair',
+          val: cfg.themeAutoPair ? '1' : '0',
           onClick: () =>
             updateConfig({
-              themeCjkFont: cfg.themeCjkFont === false,
+              themeAutoPair: !cfg.themeAutoPair,
               modules: { ...cfg.modules, themeStudio: true },
             }),
         })
       );
-      for (const [did, dLbl] of [
-        ['compact', t('densityCompact', 'Compact')],
-        ['balanced', t('densityBalanced', 'Balanced')],
-        ['comfortable', t('densityComfortable', 'Comfortable')],
+      pane.appendChild(
+        mkSuiteRow(t('themeLookLabel', 'One-Click Visual Looks'), t('themeLookDesc', ''), lookRow, {
+          stacked: true,
+          searchExtra: 'look preset obsidian matcha phantom doodle pixel aurora autoPair',
+        })
+      );
+
+      // 3. Visual Theme Swatch Gallery (Standalone Restore Native + 15 grouped dark / light / stylized skins)
+      const gallery = doc.createElement('div');
+      gallery.className = 'ag-sag-theme-gallery';
+      const themeLabels = {
+        native: t('themeNative', 'Native'),
+        'obsidian-prism': t('themeObsidianPrism', 'Obsidian Dark'),
+        'warm-basalt': t('themeWarmBasalt', 'Warm Basalt'),
+        'midnight-ink': t('themeMidnight', 'Midnight Ink'),
+        'nord-frost': t('themeNord', 'Nord Frost'),
+        'oled-pure': t('themeOled', 'OLED Pure'),
+        'tokyo-night': t('themeTokyoNight', 'Tokyo Night'),
+        'catppuccin-mocha': t('themeCatppuccin', 'Catppuccin Mocha'),
+        'crystal-day': t('themeCrystalDay', 'Crystal Day'),
+        'warm-paper': t('themeWarmPaper', 'Warm Paper'),
+        'rose-dawn': t('themeRoseDawn', 'Rosé Dawn'),
+        'matcha-journal': t('themeMatchaJournal', 'Matcha Journal'),
+        'phantom-crimson': t('themePhantomCrimson', 'Phantom Crimson'),
+        'doodle-sketch': t('themeDoodleSketch', 'Doodle Sketch'),
+        'pixel-terminal': t('themePixelTerminal', 'Pixel Terminal'),
+        'aurora-glass': t('themeAuroraGlass', 'Aurora Glass'),
+      };
+      const themePresetMap = themeStudioMod?.THEME_PRESETS || {};
+
+      // Dedicated top action bar: Restore Host Native + live Auto-Pair transparency indicator
+      const galleryBar = doc.createElement('div');
+      galleryBar.className = 'ag-sag-gallery-bar';
+      galleryBar.appendChild(
+        mkChip({
+          label: t('themeNativeRestore', 'Restore Host Native'),
+          active: !themeOn || (cfg.themePreset || 'native') === 'native',
+          attr: 'data-ag-sag-theme',
+          val: 'native',
+          onClick: () =>
+            updateConfig({
+              themePreset: 'native',
+              themeAutoPair: false,
+              themeAccent: 'follow',
+              modules: { ...cfg.modules, themeStudio: Boolean(cfg.modules?.themeStudio) },
+            }),
+        })
+      );
+      if (themeOn && cfg.themeAutoPair && resolvedSpec && resolvedSpec.id && resolvedSpec.id !== (cfg.themePreset || 'native')) {
+        const pairHint = doc.createElement('span');
+        pairHint.className = 'ag-sag-pair-hint';
+        pairHint.setAttribute('data-testid', 'ag-sag-pair-hint');
+        const resolvedName = themeLabels[resolvedSpec.id] || resolvedSpec.id;
+        pairHint.textContent = t('themePairActiveHint', 'Auto-pair active: showing {name}').replace('{name}', resolvedName);
+        galleryBar.appendChild(pairHint);
+      }
+      gallery.appendChild(galleryBar);
+
+      const gallerySections = [
+        [t('themeGroupDark', 'Classic Dark'), ['obsidian-prism', 'warm-basalt', 'midnight-ink', 'nord-frost', 'oled-pure', 'tokyo-night', 'catppuccin-mocha']],
+        [t('themeGroupLight', 'Classic Light'), ['crystal-day', 'warm-paper', 'rose-dawn']],
+        [t('themeGroupStyle', 'Stylized Aesthetics'), ['matcha-journal', 'phantom-crimson', 'doodle-sketch', 'pixel-terminal', 'aurora-glass']],
+      ];
+      for (const [grpTitle, ids] of gallerySections) {
+        const gLbl = doc.createElement('div');
+        gLbl.className = 'ag-sag-theme-group-label';
+        gLbl.textContent = grpTitle;
+        gallery.appendChild(gLbl);
+        const grid = doc.createElement('div');
+        grid.className = 'ag-sag-swatch-grid';
+        for (const tid of ids) {
+          const spec = themePresetMap[tid];
+          const swatches = spec?.swatches || ['#18181b', '#27272a', '#38bdf8'];
+          const card = doc.createElement('button');
+          card.type = 'button';
+          card.className = 'ag-sag-swatch-card';
+          card.setAttribute('data-ag-sag-theme', tid);
+          card.setAttribute('aria-pressed', String(themeOn && (cfg.themePreset || 'native') === tid));
+          const dots = doc.createElement('span');
+          dots.className = 'ag-sag-swatch-dots';
+          for (const hex of swatches) {
+            const dot = doc.createElement('span');
+            dot.className = 'ag-sag-swatch-dot';
+            if (dot.style) dot.style.background = hex;
+            dots.appendChild(dot);
+          }
+          const nameEl = doc.createElement('span');
+          nameEl.className = 'ag-sag-swatch-name';
+          nameEl.textContent = themeLabels[tid] || tid;
+          card.appendChild(dots);
+          card.appendChild(nameEl);
+          card.addEventListener('click', () => {
+            const patch = {
+              themePreset: tid,
+              modules: { ...cfg.modules, themeStudio: true },
+            };
+            // Clicking a skin whose light/dark scheme differs from host disables autoPair so what you click is what you see
+            if (spec?.colorScheme && spec.colorScheme !== hostScheme && cfg.themeAutoPair) {
+              patch.themeAutoPair = false;
+            }
+            updateConfig(patch);
+          });
+          grid.appendChild(card);
+        }
+        gallery.appendChild(grid);
+      }
+      pane.appendChild(
+        mkSuiteRow(t('themeLabel', 'Optical Theme & Aesthetic Skins'), t('themeDesc', ''), gallery, {
+          stacked: true,
+          searchExtra: 'theme skin palette obsidian warm midnight nord oled tokyo catppuccin crystal paper matcha phantom doodle pixel aurora',
+        })
+      );
+
+      // 4. Accent Tone Override (7 options with color dots)
+      const accRow = doc.createElement('div');
+      accRow.className = 'ag-sag-ext-grid';
+      for (const [aid, aLbl, hex] of [
+        ['follow', t('accentFollow', 'Theme Default'), null],
+        ['cobalt', t('accentCobalt', 'Cobalt'), '#3b82f6'],
+        ['iris', t('accentIris', 'Iris'), '#8b5cf6'],
+        ['amber', t('accentAmber', 'Amber'), '#f59e0b'],
+        ['emerald', t('accentEmerald', 'Emerald'), '#10b981'],
+        ['rose', t('accentRose', 'Rose'), '#f43f5e'],
+        ['mono', t('accentMono', 'Titanium Mono'), '#94a3b8'],
       ]) {
-        thGrid.appendChild(
+        const chip = mkChip({
+          label: aLbl,
+          active: themeOn && (cfg.themeAccent || 'follow') === aid,
+          attr: 'data-ag-sag-theme-accent',
+          val: aid,
+          onClick: () =>
+            updateConfig({
+              themeAccent: aid,
+              modules: { ...cfg.modules, themeStudio: true },
+            }),
+        });
+        if (hex) {
+          const dot = doc.createElement('span');
+          dot.className = 'ag-sag-accent-dot';
+          if (dot.style) dot.style.background = hex;
+          chip.insertBefore ? chip.insertBefore(dot, chip.firstChild) : chip.appendChild(dot);
+        }
+        accRow.appendChild(chip);
+      }
+      pane.appendChild(
+        mkSuiteRow(t('themeAccentLabel', 'Accent Tone Override'), t('themeAccentDesc', ''), accRow, {
+          stacked: true,
+          searchExtra: 'themeAccent accent cobalt iris amber emerald rose mono',
+        })
+      );
+
+      // Helper for clearly labeled sub-rows (prevents chip soup & duplicate labels)
+      const mkLabeledSubRow = (subTitle, chips) => {
+        const wrap = doc.createElement('div');
+        wrap.className = 'ag-sag-subrow';
+        const lbl = doc.createElement('span');
+        lbl.className = 'ag-sag-subrow-label';
+        lbl.textContent = subTitle;
+        const grid = doc.createElement('div');
+        grid.className = 'ag-sag-ext-grid';
+        for (const c of chips) grid.appendChild(c);
+        wrap.appendChild(lbl);
+        wrap.appendChild(grid);
+        return wrap;
+      };
+
+      // 5. Surface Material, Corners & Density (3 cleanly separated labeled sub-rows)
+      const surfWrap = doc.createElement('div');
+      surfWrap.className = 'ag-sag-theme-gallery';
+      surfWrap.appendChild(
+        mkLabeledSubRow(
+          t('themeSubSurface', 'Surface'),
+          [
+            ['clean', t('surfaceClean', 'Clean Native')],
+            ['smoked', t('surfaceSmoked', 'Smoked Facets')],
+            ['paper', t('surfacePaper', 'Paper & Ink')],
+            ['glass', t('surfaceGlass', 'Aurora Glass')],
+          ].map(([sid, sLbl]) =>
+            mkChip({
+              label: sLbl,
+              active: themeOn && (cfg.themeSurface || 'smoked') === sid,
+              attr: 'data-ag-sag-theme-surface',
+              val: sid,
+              onClick: () =>
+                updateConfig({
+                  themeSurface: sid,
+                  modules: { ...cfg.modules, themeStudio: true },
+                }),
+            })
+          )
+        )
+      );
+      surfWrap.appendChild(
+        mkLabeledSubRow(
+          t('themeSubCorners', 'Corners'),
+          [
+            ['sharp', t('cornerSharp', 'Sharp')],
+            ['balanced', t('cornerBalanced', 'Balanced')],
+            ['soft', t('cornerSoft', 'Soft')],
+            ['pill', t('cornerPill', 'Pill')],
+          ].map(([cid, cLbl]) =>
+            mkChip({
+              label: cLbl,
+              active: themeOn && (cfg.themeCorners || 'balanced') === cid,
+              attr: 'data-ag-sag-theme-corners',
+              val: cid,
+              onClick: () =>
+                updateConfig({
+                  themeCorners: cid,
+                  modules: { ...cfg.modules, themeStudio: true },
+                }),
+            })
+          )
+        )
+      );
+      surfWrap.appendChild(
+        mkLabeledSubRow(
+          t('themeSubDensity', 'Density'),
+          [
+            ['compact', t('densityCompact', 'Compact')],
+            ['balanced', t('densityBalanced', 'Balanced')],
+            ['comfortable', t('densityComfortable', 'Comfortable')],
+          ].map(([did, dLbl]) =>
+            mkChip({
+              label: dLbl,
+              active: themeOn && (cfg.themeDensity || 'balanced') === did,
+              attr: 'data-ag-sag-theme-density',
+              val: did,
+              onClick: () =>
+                updateConfig({
+                  themeDensity: did,
+                  modules: { ...cfg.modules, themeStudio: true },
+                }),
+            })
+          )
+        )
+      );
+      pane.appendChild(
+        mkSuiteRow(t('themeSurfaceLabel', 'Surface Material, Corners & Density'), t('themeSurfaceDesc', ''), surfWrap, {
+          stacked: true,
+          searchExtra: 'themeSurface smoked paper glass themeCorners sharp balanced soft pill themeDensity',
+        })
+      );
+
+      // 6. Code Font, Reading Motion Toggles & 0fps Horizon Glow (3 cleanly separated labeled sub-rows)
+      const fmWrap = doc.createElement('div');
+      fmWrap.className = 'ag-sag-theme-gallery';
+      fmWrap.appendChild(
+        mkLabeledSubRow(
+          t('themeSubCodeFont', 'Code Font'),
+          [
+            ['default', t('codeFontDefault', 'Default Mono')],
+            ['jetbrains', t('codeFontJetbrains', 'JetBrains')],
+            ['cascadia', t('codeFontCascadia', 'Cascadia')],
+            ['fira', t('codeFontFira', 'Fira Code')],
+            ['sfmono', t('codeFontSfmono', 'SF Mono')],
+            ['sarasa', t('codeFontSarasa', 'Sarasa SC')],
+          ].map(([fid, fLbl]) =>
+            mkChip({
+              label: fLbl,
+              active: themeOn && (cfg.themeCodeFont || 'default') === fid,
+              attr: 'data-ag-sag-theme-code-font',
+              val: fid,
+              onClick: () =>
+                updateConfig({
+                  themeCodeFont: fid,
+                  modules: { ...cfg.modules, themeStudio: true },
+                }),
+            })
+          )
+        )
+      );
+      fmWrap.appendChild(
+        mkLabeledSubRow(t('themeSubMotion', 'Motion Toggles'), [
           mkChip({
-            label: dLbl,
-            active: (cfg.themeDensity || 'balanced') === did,
-            attr: 'data-ag-sag-theme-density',
-            val: did,
+            label: t('themeLigatures', 'Ligatures'),
+            active: themeOn && Boolean(cfg.themeCodeLigatures),
+            attr: 'data-ag-sag-theme-ligatures',
+            val: cfg.themeCodeLigatures ? '1' : '0',
             onClick: () =>
               updateConfig({
-                themeDensity: did,
+                themeCodeLigatures: !cfg.themeCodeLigatures,
                 modules: { ...cfg.modules, themeStudio: true },
               }),
-          })
-        );
-      }
-      pane.appendChild(mkSuiteRow(t('themeLabel', 'Theme & Typography'), t('themeDesc', ''), thGrid, { searchExtra: 'theme preset density cjk' }));
+          }),
+          mkChip({
+            label: t('themeStreamFade', 'Velvet Stream Fade'),
+            active: themeOn && cfg.themeStreamFade !== false,
+            attr: 'data-ag-sag-theme-stream-fade',
+            val: cfg.themeStreamFade !== false ? '1' : '0',
+            onClick: () =>
+              updateConfig({
+                themeStreamFade: cfg.themeStreamFade === false,
+                modules: { ...cfg.modules, themeStudio: true },
+              }),
+          }),
+          mkChip({
+            label: t('themeSmoothCaret', 'Smooth Caret'),
+            active: themeOn && cfg.themeSmoothCaret !== false,
+            attr: 'data-ag-sag-theme-smooth-caret',
+            val: cfg.themeSmoothCaret !== false ? '1' : '0',
+            onClick: () =>
+              updateConfig({
+                themeSmoothCaret: cfg.themeSmoothCaret === false,
+                modules: { ...cfg.modules, themeStudio: true },
+              }),
+          }),
+        ])
+      );
+      fmWrap.appendChild(
+        mkLabeledSubRow(
+          t('themeSubGlow', 'Horizon Glow'),
+          [
+            ['off', t('themeGlowOff', 'Glow: Off')],
+            ['subtle', t('themeGlowSubtle', 'Glow: Subtle')],
+            ['vivid', t('themeGlowVivid', 'Glow: Vivid')],
+          ].map(([gid, gLbl]) =>
+            mkChip({
+              label: gLbl,
+              active: themeOn && (cfg.themeAmbientGlow || 'subtle') === gid,
+              attr: 'data-ag-sag-theme-glow',
+              val: gid,
+              onClick: () =>
+                updateConfig({
+                  themeAmbientGlow: gid,
+                  modules: { ...cfg.modules, themeStudio: true },
+                }),
+            })
+          )
+        )
+      );
+      pane.appendChild(
+        mkSuiteRow(t('themeFontMotionLabel', 'Code Font & Reading Motion'), t('themeFontMotionDesc', ''), fmWrap, {
+          stacked: true,
+          searchExtra: 'themeCodeFont jetbrains cascadia fira sfmono sarasa ligatures streamFade smoothCaret ambientGlow',
+        })
+      );
 
-      // 3. Advanced Appearance (<details>): compactSidebar, wideReadable, themeConflictPolicy, customCss
+      // 7. Advanced Appearance (<details>): CJK font, compactSidebar, wideReadable, themeConflictPolicy, customCss, readingCollapseLines
       const advThemeDetails = doc.createElement('details');
       advThemeDetails.className = 'ag-sag-details';
       advThemeDetails.setAttribute('data-testid', 'ag-sag-adv-appearance');
@@ -879,6 +1220,44 @@
 
       const advThemeBody = doc.createElement('div');
       advThemeBody.className = 'ag-sag-details-body';
+
+      advThemeBody.appendChild(
+        mkSuiteRow(
+          t('themeCjk', 'CJK Font Tuning'),
+          '',
+          mkSwitch({
+            checked: cfg.themeCjkFont !== false,
+            attr: 'data-ag-sag-theme-cjk',
+            val: '1',
+            title: t('themeCjk', 'CJK Font Tuning'),
+            onClick: () =>
+              updateConfig({
+                themeCjkFont: cfg.themeCjkFont === false,
+                modules: { ...cfg.modules, themeStudio: true },
+              }),
+          }),
+          { searchExtra: 'themeCjkFont cjk' }
+        )
+      );
+
+      advThemeBody.appendChild(
+        mkSuiteRow(
+          t('themeConflictPolicyLabel', 'External Theme Policy'),
+          '',
+          mkChip({
+            label: cfg.themeConflictPolicy === 'takeover' ? t('conflictTakeover', 'Takeover') : t('conflictYield', 'Auto Yield'),
+            active: cfg.themeConflictPolicy === 'takeover',
+            attr: 'data-ag-sag-theme-policy',
+            val: cfg.themeConflictPolicy || 'yield',
+            onClick: () =>
+              updateConfig({
+                themeConflictPolicy: cfg.themeConflictPolicy === 'takeover' ? 'yield' : 'takeover',
+                modules: { ...cfg.modules, themeStudio: true },
+              }),
+          }),
+          { searchExtra: 'themeConflictPolicy yield takeover' }
+        )
+      );
 
       advThemeBody.appendChild(
         mkSuiteRow(

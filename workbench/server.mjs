@@ -42,6 +42,9 @@ export const SMOKE_REQUIRED_MARKERS = Object.freeze([
   '__agSagReadingNav',
   'sag:nov_feed',
   'sag:storage_audit',
+  'ag-sag-ambient-glow',
+  'ag-sag-smooth-caret',
+  'detectConvStateFromDom',
 ]);
 
 export function buildHtmlPage() {
@@ -50,7 +53,7 @@ export function buildHtmlPage() {
     .join('\n;\n');
 
   return `<!doctype html>
-<html lang="zh-CN" data-ag-cs-lang="zh-CN">
+<html lang="zh-CN" data-ag-cs-lang="zh-CN" data-color-scheme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -118,11 +121,17 @@ export function buildHtmlPage() {
     button.ctl.approve{background:var(--primary);border-color:var(--primary);color:var(--primary-foreground);font-weight:600;font-size:11.5px;padding:4px 10px;}
     button.ctl.danger{border-color:color-mix(in srgb,var(--error) 55%,var(--border));color:var(--error);}
     .hud-box{padding:7px 9px;border-radius:8px;border:1px solid var(--border);background:var(--background);font-size:11.5px;color:var(--muted-foreground);font-variant-numeric:tabular-nums;}
-    .chat{flex:1;display:flex;flex-direction:column;gap:12px;border:1px solid var(--border);border-radius:14px;padding:16px;background:var(--card);}
+    .chat{flex:1;display:flex;flex-direction:column;gap:12px;border:1px solid var(--border);border-radius:14px;padding:16px;background:var(--card);max-height:460px;overflow-y:auto;}
     .bubble-u{align-self:flex-end;display:flex;align-items:center;gap:6px;background:color-mix(in srgb,var(--primary) 16%,transparent);border:1px solid color-mix(in srgb,var(--primary) 34%,transparent);padding:10px 13px;border-radius:12px;max-width:84%;}
     .bubble-a{align-self:flex-start;background:var(--secondary);border:1px solid var(--border);padding:10px 13px;border-radius:12px;max-width:88%;}
     .composer-wrap{margin-top:auto;}
     [data-testid="agent-input-box"]{border:1px solid var(--border);border-radius:14px;padding:10px 12px;background:var(--card);display:flex;flex-direction:column;gap:8px;}
+    .rich-caret-box{position:relative;border:1px dashed var(--border);border-radius:8px;padding:6px 8px;background:color-mix(in srgb,var(--background) 55%,transparent);}
+    .rich-caret-ed{min-height:24px;outline:none;font-size:12.5px;line-height:1.45;color:var(--foreground);}
+    .sim-signal-strip{display:flex;flex-direction:column;gap:6px;}
+    .sim-signal-strip:empty{display:none;}
+    .sim-signal-card{padding:8px 11px;border-radius:9px;border:1px solid color-mix(in srgb,var(--warning) 55%,var(--border));background:color-mix(in srgb,var(--warning) 10%,var(--card));font-size:12px;}
+    .sim-signal-card[data-error="true"]{border-color:color-mix(in srgb,var(--error) 60%,var(--border));background:color-mix(in srgb,var(--error) 12%,var(--card));}
     textarea{width:100%;min-height:58px;background:transparent;border:0;outline:none;color:var(--foreground);font:inherit;resize:vertical;}
     .composer-foot{display:flex;justify-content:space-between;align-items:center;font-size:11.5px;color:var(--muted-foreground);}
     pre.md-out{margin:0;padding:9px;border-radius:9px;border:1px solid var(--border);background:var(--background);color:var(--foreground);font:11px/1.45 ui-monospace,SFMono-Regular,monospace;max-height:190px;overflow:auto;white-space:pre-wrap;}
@@ -240,12 +249,42 @@ export function buildHtmlPage() {
       <label>光学主题预设
         <select id="theme-studio-sel">
           <option value="native" selected>native (宿主默认)</option>
+          <option value="obsidian-prism">obsidian-prism (黑曜深空)</option>
+          <option value="warm-basalt">warm-basalt (暖炭玄岩)</option>
           <option value="midnight-ink">midnight-ink (午夜墨蓝)</option>
-          <option value="nord-frost">nord-frost (北欧霜蓝)</option>
-          <option value="warm-paper">warm-paper (暖纸护眼)</option>
+          <option value="nord-frost">nord-frost (北欧冰霜)</option>
           <option value="oled-pure">oled-pure (纯黑 OLED)</option>
+          <option value="tokyo-night">tokyo-night (东京之夜)</option>
+          <option value="catppuccin-mocha">catppuccin-mocha (摩卡可可)</option>
+          <option value="crystal-day">crystal-day (白昼冷晶)</option>
+          <option value="warm-paper">warm-paper (暖白画册)</option>
+          <option value="rose-dawn">rose-dawn (玫瑰晨曦)</option>
+          <option value="matcha-journal">matcha-journal (抹茶手帐)</option>
+          <option value="phantom-crimson">phantom-crimson (怪盗猩红)</option>
+          <option value="doodle-sketch">doodle-sketch (线稿素描)</option>
+          <option value="pixel-terminal">pixel-terminal (像素极客)</option>
+          <option value="aurora-glass">aurora-glass (极光玻璃)</option>
         </select>
       </label>
+      <div class="ctl-row">
+        <select id="theme-look-sel" aria-label="一键外观方案">
+          <option value="">一键外观方案…</option>
+          <option value="prism-obsidian">黑曜光学 (prism-obsidian)</option>
+          <option value="claude-warm">暖炭书房 (claude-warm)</option>
+          <option value="daylight-studio">白昼晶透 (daylight-studio)</option>
+          <option value="matcha-note">抹茶手帐 (matcha-note)</option>
+          <option value="phantom-pop">怪盗波普 (phantom-pop)</option>
+          <option value="doodle-ink">线稿手绘 (doodle-ink)</option>
+          <option value="pixel-geek">复古像素 (pixel-geek)</option>
+          <option value="aurora-liquid">极光液态 (aurora-liquid)</option>
+        </select>
+        <select id="theme-surface-sel" aria-label="表面材质">
+          <option value="smoked" selected>黑曜切面</option>
+          <option value="clean">清爽原态</option>
+          <option value="paper">纸墨手帐</option>
+          <option value="glass">极光玻璃</option>
+        </select>
+      </div>
       <div class="ctl-row">
         <label style="flex-direction:row;align-items:center;gap:6px">
           <input id="cjk-font-chk" type="checkbox" checked /> CJK 字体优化
@@ -256,6 +295,32 @@ export function buildHtmlPage() {
           <option value="comfortable">舒展</option>
         </select>
       </div>
+      <div class="ctl-row">
+        <select id="theme-glow-sel" aria-label="底部环境光">
+          <option value="off">环境光: 关</option>
+          <option value="subtle" selected>环境光: 柔和</option>
+          <option value="vivid">环境光: 鲜明</option>
+        </select>
+        <label style="flex-direction:row;align-items:center;gap:4px"><input id="stream-fade-chk" type="checkbox" checked /> 流式羽化</label>
+        <label style="flex-direction:row;align-items:center;gap:4px"><input id="smooth-caret-chk" type="checkbox" checked /> 丝滑光标</label>
+      </div>
+      <div class="ctl-row">
+        <label style="flex-direction:row;align-items:center;gap:6px">
+          <input id="compact-guard-chk" type="checkbox" checked /> 启用 CompactGuard（取消可测独立环境光兜底）
+        </label>
+      </div>
+      <div class="ctl-row">
+        <button class="ctl" data-glow-sim="idle">光晕: 空闲</button>
+        <button class="ctl" data-glow-sim="running">光晕: 运行</button>
+        <button class="ctl" data-glow-sim="awaiting">光晕: 待批</button>
+        <button class="ctl danger" data-glow-sim="error">光晕: 报错</button>
+      </div>
+      <div class="ctl-row">
+        <button class="ctl" id="btn-sim-stream-fade">流式羽化演示</button>
+        <button class="ctl" id="btn-sim-btw-menu">/btw 右键菜单</button>
+        <button class="ctl" id="btn-scroll-top-demo">滚至顶测 ⤓</button>
+      </div>
+      <div class="hud-box" id="theme-motion-hud">环境光状态：idle（独立检测器：关闭）</div>
     </div>
 
     <div class="ctl-group" id="quota-pulse-panel">
@@ -359,10 +424,16 @@ export function buildHtmlPage() {
     <!-- 规则化自动审批演练舞台 -->
     <div id="sim-approval-stage" class="approval-stage"></div>
 
+    <!-- 独立环境光兜底演示信号容器（供 compactGuard 关闭态实测 awaiting/error） -->
+    <div id="sim-glow-signals" class="sim-signal-strip" data-ag-no-i18n="1"></div>
+
     <div class="chat" id="conv-view" data-testid="conversation-view" data-cascade-id="11111111-2222-4333-8444-555555555555"></div>
     <div class="composer-wrap">
       <div data-testid="agent-input-box">
         <textarea id="composer" placeholder="在此输入草稿可测试“草稿零覆盖保护”与提示词队列防抢占互锁..."></textarea>
+        <div class="rich-caret-box" data-side-panel-focus-scope="true" data-ag-no-i18n="1">
+          <div id="sim-rich-composer" class="rich-caret-ed" contenteditable="true" spellcheck="false">在此富文本预览槽输入或移动光标，可实时体验 FastDOM Smooth Caret（中文 IME 组词自动避让）</div>
+        </div>
         <div class="composer-foot" data-ag-no-i18n="1">
           <span id="ctx-status">Context: 82% (420K / 512K)</span>
           <div style="display:flex;gap:8px;align-items:center">
@@ -392,8 +463,16 @@ ${coreScript}
     const autoAcceptChk = document.getElementById('auto-accept-chk');
     const hostLangSel = document.getElementById('host-lang-sel');
     const themeStudioSel = document.getElementById('theme-studio-sel');
+    const themeLookSel = document.getElementById('theme-look-sel');
+    const themeSurfaceSel = document.getElementById('theme-surface-sel');
     const cjkFontChk = document.getElementById('cjk-font-chk');
     const densitySel = document.getElementById('density-sel');
+    const themeGlowSel = document.getElementById('theme-glow-sel');
+    const streamFadeChk = document.getElementById('stream-fade-chk');
+    const smoothCaretChk = document.getElementById('smooth-caret-chk');
+    const compactGuardChk = document.getElementById('compact-guard-chk');
+    const themeMotionHud = document.getElementById('theme-motion-hud');
+    const glowSignals = document.getElementById('sim-glow-signals');
     const stopBtn = document.getElementById('stop-btn');
     const logOut = document.getElementById('log-out');
     const composer = document.getElementById('composer');
@@ -402,6 +481,9 @@ ${coreScript}
     const quotaAlertEl = document.getElementById('sim-quota-alert');
     let clockOffsetMs = 0;
     let demoTaskSeq = 0;
+    function clearChildren(el) {
+      while (el && el.firstChild) el.removeChild(el.firstChild);
+    }
 
     const DEMO_QUEUE_TASKS = [
       '运行全部单测并汇总失败用例',
@@ -636,6 +718,13 @@ ${coreScript}
       }
 
       radarChk.checked = Boolean(cfg.modules?.sessionRadar);
+      compactGuardChk.checked = Boolean(cfg.modules?.compactGuard);
+      const ts = dbg.themeStudio;
+      if (ts && themeMotionHud) {
+        const modeTxt = ts.convStateWatcherActive ? '独立兜底观测中' : ts.externalConvStateSource ? '复用 CompactGuard' : '待机';
+        themeMotionHud.textContent =
+          '环境光: ' + (ts.convState || 'idle') + ' (' + modeTxt + ') | 羽化=' + (ts.streamFadeActive ? 'ON' : 'OFF') + ' | 光标=' + (ts.smoothCaretActive ? 'ON' : 'OFF');
+      }
     }
 
     function spawnDemoApprovalCard(kind) {
@@ -904,11 +993,15 @@ ${coreScript}
           hostI18nLocale: hostLangSel.value,
           autoAcceptPolicy: 'dev-flow',
           themePreset: themeStudioSel.value,
+          themeSurface: themeSurfaceSel.value,
+          themeAmbientGlow: themeGlowSel.value,
+          themeStreamFade: streamFadeChk.checked,
+          themeSmoothCaret: smoothCaretChk.checked,
           themeCjkFont: cjkFontChk.checked,
           themeDensity: densitySel.value,
           modules: {
             hostI18n: hostLangSel.value !== 'en',
-            compactGuard: true,
+            compactGuard: compactGuardChk.checked,
             precompactExport: true,
             draftGuard: true,
             promptQueue: true,
@@ -918,7 +1011,7 @@ ${coreScript}
             sessionRadar: radarChk.checked,
             sessionWatchdog: true,
             safeAutoAccept: autoAcceptChk.checked,
-            themeStudio: themeStudioSel.value !== 'native',
+            themeStudio: themeStudioSel.value !== 'native' || Boolean(themeLookSel.value),
             quotaPulse: true,
           },
         },
@@ -1062,7 +1155,7 @@ ${coreScript}
         guard.promptQueue.enqueue(DEMO_QUEUE_TASKS[0]);
       }
       composer.value = '';
-      approvalStage.innerHTML = '';
+      clearChildren(approvalStage);
       streamChk.checked = false;
       stopBtn.hidden = true;
       guard.evaluateNow().then(refreshModuleHuds);
@@ -1085,7 +1178,7 @@ ${coreScript}
     document.getElementById('btn-spawn-safe-card').addEventListener('click', () => spawnDemoApprovalCard('safe'));
     document.getElementById('btn-spawn-danger-card').addEventListener('click', () => spawnDemoApprovalCard('danger'));
     document.getElementById('btn-clear-demo-cards').addEventListener('click', () => {
-      approvalStage.innerHTML = '';
+      clearChildren(approvalStage);
       guard.promptQueue?.sync?.();
       refreshModuleHuds();
     });
@@ -1094,16 +1187,109 @@ ${coreScript}
       const cur = guard.getConfig();
       guard.updateConfig({
         themePreset: themeStudioSel.value,
+        themeSurface: themeSurfaceSel.value,
         themeCjkFont: cjkFontChk.checked,
         themeDensity: densitySel.value,
+        themeAmbientGlow: themeGlowSel.value,
+        themeStreamFade: streamFadeChk.checked,
+        themeSmoothCaret: smoothCaretChk.checked,
         modules: { ...cur.modules, themeStudio: true },
       });
       refreshModuleHuds();
-      appendLog('[THEME STUDIO] preset=' + themeStudioSel.value + ' | cjk=' + cjkFontChk.checked + ' | density=' + densitySel.value);
+      appendLog('[THEME STUDIO] preset=' + themeStudioSel.value + ' | surface=' + themeSurfaceSel.value + ' | glow=' + themeGlowSel.value);
     }
     themeStudioSel.addEventListener('change', applyThemeStudioControls);
+    themeSurfaceSel.addEventListener('change', applyThemeStudioControls);
     cjkFontChk.addEventListener('change', applyThemeStudioControls);
     densitySel.addEventListener('change', applyThemeStudioControls);
+    themeGlowSel.addEventListener('change', applyThemeStudioControls);
+    streamFadeChk.addEventListener('change', applyThemeStudioControls);
+    smoothCaretChk.addEventListener('change', applyThemeStudioControls);
+    themeLookSel.addEventListener('change', () => {
+      const lookId = themeLookSel.value;
+      const patch = window.__agSagThemeStudio?.resolveLookPresetPatch?.(lookId);
+      if (!patch) return;
+      const cur = guard.getConfig();
+      guard.updateConfig({ ...patch, modules: { ...cur.modules, themeStudio: true } });
+      themeStudioSel.value = patch.themePreset || 'native';
+      themeSurfaceSel.value = patch.themeSurface || 'smoked';
+      densitySel.value = patch.themeDensity || 'balanced';
+      themeGlowSel.value = patch.themeAmbientGlow || 'subtle';
+      streamFadeChk.checked = patch.themeStreamFade !== false;
+      smoothCaretChk.checked = patch.themeSmoothCaret !== false;
+      refreshModuleHuds();
+      appendLog('[THEME STUDIO] look=' + lookId + ' -> ' + patch.themePreset);
+    });
+    compactGuardChk.addEventListener('change', () => {
+      const cur = guard.getConfig();
+      guard.updateConfig({
+        modules: { ...cur.modules, compactGuard: compactGuardChk.checked, themeStudio: true },
+      });
+      refreshModuleHuds();
+      appendLog('[COMPACT GUARD] 已' + (compactGuardChk.checked ? '开启（环境光复用 onEvaluated）' : '关闭（ThemeStudio 独立兜底环境光检测器已接管）'));
+    });
+    document.querySelectorAll('[data-glow-sim]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const mode = btn.getAttribute('data-glow-sim');
+        const cur = guard.getConfig();
+        if (!cur.modules?.themeStudio || cur.themeAmbientGlow === 'off') {
+          themeGlowSel.value = 'vivid';
+          guard.updateConfig({
+            themeAmbientGlow: 'vivid',
+            modules: { ...cur.modules, themeStudio: true },
+          });
+        }
+        clearChildren(glowSignals);
+        streamChk.checked = mode === 'running';
+        stopBtn.hidden = mode !== 'running';
+        if (mode === 'awaiting') {
+          const c = document.createElement('div');
+          c.className = 'sim-signal-card';
+          c.setAttribute('data-testid', 'permission-card');
+          c.textContent = '⏳ 模拟待审批信号（用于验证底部琥珀色地平线环境光）';
+          glowSignals.appendChild(c);
+        } else if (mode === 'error') {
+          const c = document.createElement('div');
+          c.className = 'sim-signal-card';
+          c.setAttribute('role', 'alert');
+          c.setAttribute('data-error', 'true');
+          c.textContent = '⚠ 模拟运行报错信号（用于验证底部红色地平线环境光）';
+          glowSignals.appendChild(c);
+        }
+        guard.evaluateNow().then(() => {
+          setTimeout(refreshModuleHuds, 200);
+        });
+        appendLog('[AMBIENT GLOW SIM] state=' + mode + ' | compactGuard=' + Boolean(guard.getConfig().modules?.compactGuard));
+      });
+    });
+    document.getElementById('btn-sim-stream-fade').addEventListener('click', () => {
+      const cur = guard.getConfig();
+      if (!cur.modules?.themeStudio || cur.themeStreamFade === false) {
+        streamFadeChk.checked = true;
+        guard.updateConfig({ themeStreamFade: true, modules: { ...cur.modules, themeStudio: true } });
+      }
+      const replies = convView.querySelectorAll('[data-testid="agent-response"]');
+      const lastReply = replies[replies.length - 1];
+      if (!lastReply) return;
+      const p = document.createElement('p');
+      p.textContent = '正在以 CSS Custom Highlight 5 阶羽化流式输出：';
+      lastReply.appendChild(p);
+      const chunks = [' 零 DOM 包裹、', '零重排、', '纯渲染层墨水淡入效果。'];
+      chunks.forEach((txt, idx) => {
+        setTimeout(() => {
+          p.firstChild.nodeValue += txt;
+        }, (idx + 1) * 140);
+      });
+      appendLog('[VELVET STREAM FADE] 已触发增量文本流，可在最后一条回复末尾观察 5 阶羽化淡入。');
+    });
+    document.getElementById('btn-sim-btw-menu').addEventListener('click', () => {
+      guard.promptLibrary?.openContextMenu?.({ selection: '为什么这个接口需要限流？', x: 320, y: 240 });
+      appendLog('[CONTEXT MENU] 已打开独立 /btw & /plan 选区右键菜单（亦可在对话正文直接右键，Shift+右键直通原生菜单）。');
+    });
+    document.getElementById('btn-scroll-top-demo').addEventListener('click', () => {
+      convView.scrollTop = 0;
+      appendLog('[SCROLL-TO-BOTTOM] 已滚至顶部，可点击右侧阅读导轨底部的 ⤓ 按钮一键平滑回底。');
+    });
 
     document.getElementById('btn-sim-429').addEventListener('click', () => {
       const cur = guard.getConfig();
@@ -1162,7 +1348,9 @@ ${coreScript}
       guard.evaluateNow().then(refreshModuleHuds);
     });
     document.getElementById('theme-sel').addEventListener('change', (e) => {
-      document.documentElement.setAttribute('data-theme', e.target.value);
+      const val = e.target.value;
+      document.documentElement.setAttribute('data-theme', val);
+      document.documentElement.setAttribute('data-color-scheme', val === 'crystal' || val === 'alabaster' ? 'light' : 'dark');
     });
     document.getElementById('btn-sim-step').addEventListener('click', () => {
       const next = Math.min(115, Number(slider.value) + 9);

@@ -872,7 +872,39 @@
       nextBtn.addEventListener('click', () => jumpRelative(1));
       railEl.appendChild(nextBtn);
 
+      const bottomBtn = doc.createElement('button');
+      bottomBtn.type = 'button';
+      bottomBtn.className = 'ag-sag-rnav-step';
+      bottomBtn.setAttribute('data-ag-sag-rnav-step', 'bottom');
+      bottomBtn.textContent = '⤓';
+      bottomBtn.title = t('rnavBottomTip', 'Scroll to bottom');
+      bottomBtn.addEventListener('click', () => scrollToBottom());
+      railEl.appendChild(bottomBtn);
+
       if (outlineOpen) renderOutlinePopover(false);
+    }
+
+    function scrollToBottom() {
+      if (destroyed || !enabled) return false;
+      const conv = getConversationContainer();
+      const vp =
+        conv?.querySelector?.('[data-testid="autoscroll-viewport"]') ||
+        doc?.querySelector?.('[data-testid="autoscroll-viewport"]') ||
+        conv;
+      if (!vp) return false;
+      const targetTop = Math.max(0, Number(vp.scrollHeight) || 0);
+      if (typeof vp.scrollTo === 'function') {
+        try {
+          vp.scrollTo({ top: targetTop, behavior: 'smooth' });
+          return true;
+        } catch {}
+      }
+      try {
+        vp.scrollTop = targetTop;
+        return true;
+      } catch {
+        return false;
+      }
     }
 
     function onKeyDown(ev) {
@@ -1052,6 +1084,7 @@
       setCollapseLines,
       jumpToTurn,
       jumpRelative,
+      scrollToBottom,
       openOutlineSearch,
       toggleFoldAllStepsAndCode,
       openMermaidZoom,

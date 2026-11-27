@@ -57,13 +57,13 @@ Every module in **`agy-Sag`** is independently toggleable from the `Overview` ta
 | Layer | Module | Default | Risk / Isolation | What It Does |
 | :---: | :--- | :---: | :--- | :--- |
 | **L1** | **Native UI Translation** (`hostI18n`) | **ON** | 100% Offline · Lossless | Real-time multi-language localization for Antigravity 2.x UI across **10 languages** (`zh-CN`, `zh-TW`, `ja`, `ko`, `es`, `fr`, `de`, `ru`, `pt-BR`, `en`). ~5,400 entries per target locale (465 core + layered extended packs + 424 regex patterns), physical skip isolation for code / inputs / chat bubbles / slash command names, Shadow DOM recursion, instant hot-switch, and custom JSON pack import. |
-| **L1** | **Theme & Typography** (`themeStudio`) | OFF | 100% Offline | Zero-`:has()` CSS variable layer with 5 curated presets (`native`, `midnight-ink`, `nord-frost`, `warm-paper`, `oled-pure`), CJK + monospace font tuning, density controls, compact sidebar, wide reading column, sanitized custom CSS injection, and allowlisted `plugin://` extension iframe theme variable sync. |
-| **L1** | **Reading Navigation** (`readingNav`) | OFF | 100% Offline | Streaming-safe auto-folding for long code blocks (`>= 40` lines default, configurable `20/40/60/80`, covering both chat & `artifact-view`) with `scrollTop` fold compensation, sticky line-count/expand/wrap/copy bar, `Alt+↑/↓` turn navigation, uncapped rail with `Alt+F` searchable outline & 1-click fold-all code/steps, and zero-`innerHTML` Mermaid zoom + SVG export modal (auto-yields to Prism outline nav). |
+| **L1** | **Theme & Aesthetics** (`themeStudio`) | OFF | 100% Offline | Zero-`:has()` full-surface optical theme & motion engine: **15 dark/light/stylized skins** (7 classic dark incl. Obsidian Dark / Warm Basalt / Midnight / Nord / OLED / Tokyo Night / Catppuccin Mocha, 3 classic light incl. Crystal Day / Warm Paper / Rosé Dawn, 5 stylized incl. Matcha Journal / Phantom Crimson / Doodle Sketch / Pixel Terminal / Aurora Glass), **8 one-click visual looks**, automatic dark/light host pairing, 7 accent overrides, 4 surface materials (Clean / Smoked Facets / Paper & Ink / Aurora Glass), 4 corner styles, 6 monospace stacks (incl. Sarasa SC) + ligatures, CJK tuning, `CSS.highlights` 5-step velvet stream fade, FastDOM smooth typing caret, 0fps semantic horizon glow (Browser-Hole safe), sanitized custom CSS, and `plugin://` extension iframe sync. |
+| **L1** | **Reading Navigation** (`readingNav`) | OFF | 100% Offline | Streaming-safe auto-folding for long code blocks (`>= 40` lines default, configurable `20/40/60/80`, covering both chat & `artifact-view`) with `scrollTop` fold compensation, sticky line-count/expand/wrap/copy bar, `Alt+↑/↓` turn navigation, uncapped rail with smooth scroll-to-bottom (`⤓`), `Alt+F` searchable outline & 1-click fold-all code/steps, and zero-`innerHTML` Mermaid zoom + SVG export modal (auto-yields to Prism outline nav). |
 | **L2** | **Auto-Compact Guard** (`compactGuard`) | **ON** | 100% Offline | Configurable compaction threshold (`off` or `50%–98%`, default `80%`), silent auto-compact with viewport scroll shield, Lexical two-step slash menu support, `/clear` clean-slate restart, and post-compact anchor recovery. |
 | **L2** | **Pre-Compact Export** (`precompactExport`) | **ON** | 100% Offline | Nested under `compactGuard`: secret-redacted Markdown copy and `.md` file download before compaction (masks PEM private keys, API keys, Bearer tokens & JWTs) plus condensed denoised summary mode. |
 | **L2** | **Draft Guard** (`draftGuard`) | **ON** | 100% Offline | Debounced per-session auto-save for unsent composer prompts (7-day TTL, 16 KB cap) with one-line restore plus a 30-item redacted sent prompt history recalled via `Ctrl+↑/↓` in empty composers. |
 | **L2** | **Prompt Queue** (`promptQueue`) | **ON** | 100% Offline | Queue 1–20 follow-up prompts while the Agent is streaming with inline editing, 1-click jump-to-top priority (`⏫`), and **4 safety circuit-breakers** (streaming active, composer draft occupied, blocking approval card, or `agy-NOV spec` write-lock active). |
-| **L2** | **Prompt Library** (`promptLibrary`) | OFF | 100% Offline · Read-Only NOV | Composer button, `Ctrl/Cmd+Alt+P` palette & empty-composer `//` trigger featuring slash shortcuts, 6 bilingual `{{var=default}}` templates, local snippets (CRUD + 128 KB import/export), read-only `agy-NOV` `ops` templates, selection quote/template pill, and a Prism-yielding standalone conversation/path context menu. Never overwrites drafts or auto-submits. |
+| **L2** | **Prompt Library** (`promptLibrary`) | OFF | 100% Offline · Read-Only NOV | Composer button, `Ctrl/Cmd+Alt+P` palette & empty-composer `//` trigger featuring slash shortcuts, 6 bilingual `{{var=default}}` templates, local snippets (CRUD + 128 KB import/export), read-only `agy-NOV` `ops` templates, selection quote/template pill, and a Prism-yielding standalone conversation/path context menu (with `/btw` side question, `/plan`, `/compact`, template fill & `@path` insertion). Never overwrites drafts or auto-submits. |
 | **L2** | **Turn Bookmarks & Vault** (`outlineBookmarks`) | OFF | 100% Offline | Inline star button, per-turn `⤺` 3-way recovery menu (NOV rollback / `/compact` focus / up-to-turn handoff copy), floating `★ N` quick-jump drawer, and `Ctrl/Cmd+Shift+B` searchable cross-session archive with redacted Markdown export. |
 | **L3** | **Stall & Burn Watchdog** (`sessionWatchdog`) | **ON** | 100% Offline | Rolling burn-rate estimator (`≈N turns` in HUD), single-turn spike indicator, and streaming stall detector (default 3 min) with `+5m` snooze. |
 | **L3** | **Sidebar Radar & Alerts** (`sessionRadar`) | OFF | 100% Offline | Sidebar `All / Running / Awaiting` filter bar with blurred-window OS notifications, opt-in zero-network WebAudio synthesized chimes, local browser `speechSynthesis` voice alerts, and `HH:MM-HH:MM` quiet hours. |
@@ -120,7 +120,7 @@ cd agy-Sag
 npm run workbench
 ```
 
-Opens `http://127.0.0.1:4179` with an interactive offline sandbox covering the 6-Tab Settings Hub, `Ctrl/Cmd+Alt+,` drawer, segmented HUD capsule, `Ctrl/Cmd+Alt+P` Prompt Library, 10-language live UI translation, prompt queue, safe auto-accept (`npm test` allow vs `rm -rf` hard-deny demo), optical themes, quota pulse, `agy-NOV` v0.5 bidirectional synergy, and zero-residue teardown verification.
+Opens `http://127.0.0.1:4179` with an interactive offline sandbox covering the 6-Tab Settings Hub, `Ctrl/Cmd+Alt+,` drawer, segmented HUD capsule, `Ctrl/Cmd+Alt+P` Prompt Library, 10-language live UI translation, prompt queue, safe auto-accept (`npm test` allow vs `rm -rf` hard-deny demo), 15 optical themes & 8 one-click visual looks, quota pulse, `agy-NOV` bidirectional synergy, and zero-residue teardown verification.
 
 ### 3. Unified CLI Reference
 
@@ -181,10 +181,10 @@ Antigravity 2.0 Host (Electron 44 + language_server localhost UI)
       ├── prompt-library.js      — Ctrl/Cmd+Alt+P command palette, {{var}} snippets & read-only agy-NOV templates
       ├── reading-nav.js         — Long code block auto-folding, sticky copy bar & Alt+↑/↓ mini turn rail
       ├── safe-auto-accept.js    — Policy-gated auto-accept + non-bypassable hard deny blacklist
-      ├── theme-studio.js        — Zero-:has() optical themes, CJK typography & sanitized custom CSS
+      ├── theme-studio.js        — Zero-:has() 15 optical skins, 8 looks, surfaces, stream fade & smooth caret
       ├── quota-pulse.js         — Read-only 5h/7d quota tracker & rate-limit signal parser
       ├── status-pill.js         — Unified segmented composer HUD capsule & Prism context card embed
-      └── prism-bridge.js        — Single-source 6-Tab Settings Hub, cross-tab search & Ctrl/Cmd+Alt+, drawer
+      └── prism-bridge.js        — Single-source 6-Tab Settings Hub, swatch gallery, cross-tab search & Ctrl/Cmd+Alt+, drawer
 ```
 
 **Hard Safety Boundaries**:
@@ -199,9 +199,9 @@ Antigravity 2.0 Host (Electron 44 + language_server localhost UI)
 ## Development & Verification
 
 ```bash
-npm test                 # Run full native node:test suite (199/199 passing, zero external deps)
+npm test                 # Run full native node:test suite (211/211 passing, zero external deps)
 npm run i18n:validate    # Validate all 10 built-in + 9 extended UI translation packs (0 errors)
-npm run workbench:smoke  # Run automated HTTP smoke check against the offline workbench (19 markers)
+npm run workbench:smoke  # Run automated HTTP smoke check against the offline workbench (22 markers)
 npm run doctor           # Read-only local environment diagnostics
 ```
 
