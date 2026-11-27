@@ -687,6 +687,38 @@
     let lastError = null;
     let lastUpdatedAt = 0;
     let currentState = normalizeNovState(options.initialState || null, false);
+    const normalizeNovFeed = (raw) => {
+      const f = raw && typeof raw === 'object' ? raw : {};
+      return {
+        guard: {
+          blockedCount: Math.max(0, Number(f.guard?.blockedCount) || 0),
+          snapshotCount: Math.max(0, Number(f.guard?.snapshotCount) || 0),
+          latestSnapshotId: typeof f.guard?.latestSnapshotId === 'string' ? f.guard.latestSnapshotId : null,
+          latestBlocked: f.guard?.latestBlocked && typeof f.guard.latestBlocked === 'object'
+            ? {
+                ts: String(f.guard.latestBlocked.ts || ''),
+                tool: String(f.guard.latestBlocked.tool || ''),
+                reason: String(f.guard.latestBlocked.reason || ''),
+              }
+            : null,
+        },
+        radar: {
+          awaitingCount: Math.max(0, Number(f.radar?.awaitingCount) || 0),
+          runningCount: Math.max(0, Number(f.radar?.runningCount) || 0),
+          headline: String(f.radar?.headline || ''),
+        },
+        mem: {
+          totalCount: Math.max(0, Number(f.mem?.totalCount) || 0),
+          driftedCount: Math.max(0, Number(f.mem?.driftedCount) || 0),
+        },
+        spec: {
+          writeLockActive: Boolean(f.spec?.writeLockActive),
+          activeSpecId: typeof f.spec?.activeSpecId === 'string' ? f.spec.activeSpecId : null,
+          activeSpecTitle: String(f.spec?.activeSpecTitle || ''),
+        },
+      };
+    };
+    let currentFeed = normalizeNovFeed(options.initialFeed || null);
     const pending = new Map(); // reqId -> { resolve, timer, type }
     const subscribers = new Set();
     let unsubscribeTransport = null;
@@ -770,6 +802,14 @@
       const msg = parseIncomingMessage(rawMsg);
       if (!msg) return false;
       const ev = String(msg.event || msg.type || '');
+      if (ev === 'nov:feed') {
+        const feedObj = msg.feed || msg.data?.feed || null;
+        if (feedObj && typeof feedObj === 'object') {
+          currentFeed = normalizeNovFeed(feedObj);
+          notifyStateChange();
+          return true;
+        }
+      }
       if (ev === 'nov:state' || ev === 'nov:state_changed') {
         const stateObj = extractStateFromPayload(msg);
         if (stateObj) {
@@ -990,13 +1030,45 @@
       void refresh();
     }
 
+    async function fetchFeed() {
+      if (destroyed || !isBridgeAvailable()) {
+        return { ok: false, feed: getFeed(), error: 'Bridge unavailable' };
+      }
+      try {
+        const res = await requestRaw('sag:nov_feed', {});
+        const feedObj = res?.raw?.data?.feed || res?.data?.feed || res?.raw?.feed || null;
+        if (res?.ok && feedObj && typeof feedObj === 'object') {
+          currentFeed = normalizeNovFeed(feedObj);
+          notifyStateChange();
+          return { ok: true, feed: getFeed(), error: null };
+        }
+        return { ok: false, feed: getFeed(), error: res?.error || 'Invalid agy-NOV feed response' };
+      } catch (err) {
+        return { ok: false, feed: getFeed(), error: err?.message || String(err) };
+      }
+    }
+
+    function getFeed() {
+      return {
+        guard: {
+          ...currentFeed.guard,
+          latestBlocked: currentFeed.guard.latestBlocked ? { ...currentFeed.guard.latestBlocked } : null,
+        },
+        radar: { ...currentFeed.radar },
+        mem: { ...currentFeed.mem },
+        spec: { ...currentFeed.spec },
+      };
+    }
+
     return {
       refresh,
+      fetchFeed,
       setModule,
       applyPreset,
       setLocale,
       requestRaw,
       getState,
+      getFeed,
       getSynergyEffects,
       isBridgeAvailable,
       isConnected: () => Boolean(!destroyed && bridgeConnected && currentState.installed),

@@ -713,6 +713,216 @@ export function readNovOpsTemplates(opts = {}) {
   }
 }
 
+function readSafeNovSubJson(dataDir, homeDir, subDir, fileName, maxBytes = NOV_TEMPLATES_MAX_BYTES) {
+  const dirPath = path.join(dataDir, subDir);
+  const filePath = path.join(dirPath, fileName);
+
+  const dirViolation = findSymlinkViolation(dirPath, homeDir);
+  if (dirViolation) return { ok: false, exists: false, data: null, error: dirViolation };
+
+  const dirStat = safeLstat(dirPath);
+  if (!dirStat) return { ok: true, exists: false, data: null };
+  if (dirStat.isSymbolicLink() || !dirStat.isDirectory()) {
+    return { ok: false, exists: false, data: null, error: `Refusing to read symlink/non-directory ${subDir}` };
+  }
+
+  const fileStat = safeLstat(filePath);
+  if (!fileStat) return { ok: true, exists: false, data: null };
+  if (fileStat.isSymbolicLink() || !fileStat.isFile()) {
+    return { ok: false, exists: false, data: null, error: `Refusing to read symlink/non-regular ${subDir}/${fileName}` };
+  }
+  if (fileStat.size > maxBytes) {
+    return { ok: false, exists: false, data: null, error: `${subDir}/${fileName} exceeds ${maxBytes} bytes limit` };
+  }
+
+  const realDir = safeRealpath(dirPath);
+  const realFile = safeRealpath(filePath);
+  if (!realDir || !realFile || !isPathWithinBase(realFile, realDir)) {
+    return { ok: false, exists: false, data: null, error: `Refusing to read ${subDir}/${fileName} outside real dir` };
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(realFile, 'utf8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Object.keys(parsed).some((k) => NOV_FORBIDDEN_KEYS.has(k))) {
+      return { ok: false, exists: false, data: null, error: `Prototype key rejected in ${subDir}/${fileName}` };
+    }
+    return { ok: true, exists: true, data: parsed };
+  } catch {
+    return { ok: false, exists: false, data: null, error: `Failed to parse ${subDir}/${fileName}` };
+  }
+}
+
+function toSafeNonNegInt(val) {
+  const n = Number(val);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+export function redactNovFeedText(raw, maxLen = 120) {
+  if (typeof raw !== 'string') return '';
+  let s = raw;
+  s = s.replace(/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g, '[REDACTED]');
+  s = s.replace(/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/g, '[REDACTED]');
+  s = s.replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, 'Bearer [REDACTED]');
+  s = s.replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '[REDACTED]');
+  s = s.replace(
+    /\b(?:sk-proj-|sk-ant-|sk_(?:live|test)_|sk-|gh[pousr]_|github_pat_|glpat-|AIza|AKIA|ASIA|xox[baprs]-|npm_)[A-Za-z0-9_-]{8,}\b/g,
+    '[REDACTED]'
+  );
+  s = s.replace(/\b(api[_-]?key|secret|token|password|passwd|auth)\s*[:=]\s*["']?[A-Za-z0-9._~+/=-]{8,}["']?/gi, '$1=[REDACTED]');
+  return s.replace(/\s+/g, ' ').trim().slice(0, maxLen);
+}
+
+const NOV_FEED_FILES = Object.freeze([
+  ['guard', 'audit.json'],
+  ['guard', 'snapshots.json'],
+  ['radar', 'status-capsule.json'],
+  ['mem', 'memories.json'],
+  ['spec', 'state.json'],
+]);
+
+/**
+ * Strictly read-only stat signature across the 5 agy-NOV feed files.
+ * Never creates directories or follows symlinks.
+ */
+export function computeNovFeedSignature(opts = {}) {
+  const homeDir = opts.homeDir || os.homedir();
+  const paths = resolveNovPaths(opts);
+  const dataDir = paths.dataDir;
+  if (!dataDir || findSymlinkViolation(dataDir, homeDir)) return 'invalid-dir';
+  const dirStat = safeLstat(dataDir);
+  if (!dirStat) return NOV_FEED_FILES.map(() => 'missing').join('|');
+  if (dirStat.isSymbolicLink() || !dirStat.isDirectory()) return 'invalid-dir';
+
+  const parts = [];
+  for (const [subDir, fileName] of NOV_FEED_FILES) {
+    const subPath = path.join(dataDir, subDir);
+    const subStat = safeLstat(subPath);
+    if (!subStat) {
+      parts.push('missing');
+      continue;
+    }
+    if (subStat.isSymbolicLink() || !subStat.isDirectory()) {
+      parts.push('unsafe');
+      continue;
+    }
+    const filePath = path.join(subPath, fileName);
+    const fStat = safeLstat(filePath);
+    if (!fStat) {
+      parts.push('missing');
+      continue;
+    }
+    if (fStat.isSymbolicLink() || !fStat.isFile()) {
+      parts.push('unsafe');
+      continue;
+    }
+    parts.push(`${fStat.ino || 0}:${Math.trunc(fStat.mtimeMs || 0)}:${fStat.size || 0}`);
+  }
+  return parts.join('|');
+}
+
+/**
+ * Strictly read-only aggregator for agy-NOV live module feeds (guard, radar, mem, spec).
+ * Enforces symlink guards, 256 KB per-file cap, realpath containment, and redacted summary output.
+ */
+export function readNovFeed(opts = {}) {
+  const homeDir = opts.homeDir || os.homedir();
+  const paths = resolveNovPaths(opts);
+  const errors = [];
+
+  const auditRes = readSafeNovSubJson(paths.dataDir, homeDir, 'guard', 'audit.json');
+  const snapRes = readSafeNovSubJson(paths.dataDir, homeDir, 'guard', 'snapshots.json');
+  const radarRes = readSafeNovSubJson(paths.dataDir, homeDir, 'radar', 'status-capsule.json');
+  const memRes = readSafeNovSubJson(paths.dataDir, homeDir, 'mem', 'memories.json');
+  const specRes = readSafeNovSubJson(paths.dataDir, homeDir, 'spec', 'state.json');
+
+  for (const r of [auditRes, snapRes, radarRes, memRes, specRes]) {
+    if (!r.ok && r.error) errors.push(r.error);
+  }
+
+  // 1) Guard summary (redacted: only decision/tool/reason prefix, zero raw secrets)
+  const auditArr = Array.isArray(auditRes.data)
+    ? auditRes.data
+    : Array.isArray(auditRes.data?.events)
+      ? auditRes.data.events
+      : [];
+  const blocked = auditArr.filter((e) => {
+    const d = String(e?.decision || e?.action || e?.outcome || '').toLowerCase();
+    return d === 'block' || d === 'blocked' || d === 'deny' || d === 'denied';
+  });
+  const latestBlk = blocked.length ? blocked[blocked.length - 1] : null;
+  const snapArr = Array.isArray(snapRes.data)
+    ? snapRes.data
+    : Array.isArray(snapRes.data?.snapshots)
+      ? snapRes.data.snapshots
+      : [];
+  const latestSnap = snapArr.length ? snapArr[snapArr.length - 1] : null;
+
+  // 2) Radar capsule summary
+  const rData = radarRes.data && typeof radarRes.data === 'object' ? radarRes.data : {};
+  const awaitingCount = toSafeNonNegInt(rData.awaitingCount ?? rData.awaiting ?? rData.counts?.awaiting ?? 0);
+  const runningCount = toSafeNonNegInt(rData.runningCount ?? rData.running ?? rData.counts?.running ?? 0);
+  const headline = redactNovFeedText(rData.headline, 80);
+
+  // 3) Memory drift summary
+  const memArr = Array.isArray(memRes.data)
+    ? memRes.data
+    : Array.isArray(memRes.data?.memories)
+      ? memRes.data.memories
+      : Array.isArray(memRes.data?.entries)
+        ? memRes.data.entries
+        : [];
+  const driftedCount = memArr.filter((m) => {
+    if (m?.drifted === true) return true;
+    if (Array.isArray(m?.anchors)) {
+      return m.anchors.some((a) => String(a?.driftStatus || '') === 'drifted');
+    }
+    return false;
+  }).length;
+
+  // 4) Spec write-lock summary
+  const sData = specRes.data && typeof specRes.data === 'object' ? specRes.data : {};
+  const specsArr = Array.isArray(sData.specs) ? sData.specs : [];
+  const activeSpec = sData.activeSpecId ? specsArr.find((sp) => sp?.id === sData.activeSpecId) : null;
+  const writeLockActive =
+    typeof sData.writeLockActive === 'boolean'
+      ? sData.writeLockActive
+      : Boolean(activeSpec && String(activeSpec.status || '').toLowerCase() === 'draft');
+
+  return {
+    ok: errors.length === 0,
+    available: Boolean(auditRes.exists || snapRes.exists || radarRes.exists || memRes.exists || specRes.exists),
+    errors,
+    feed: {
+      guard: {
+        blockedCount: blocked.length,
+        snapshotCount: snapArr.length,
+        latestSnapshotId: typeof latestSnap?.id === 'string' ? redactNovFeedText(latestSnap.id, 64) : null,
+        latestBlocked: latestBlk
+          ? {
+              ts: typeof latestBlk.ts === 'string' ? latestBlk.ts.slice(0, 40) : '',
+              tool: redactNovFeedText(latestBlk.tool, 48),
+              reason: redactNovFeedText(latestBlk.reason, 120),
+            }
+          : null,
+      },
+      radar: {
+        awaitingCount,
+        runningCount,
+        headline,
+      },
+      mem: {
+        totalCount: memArr.length,
+        driftedCount,
+      },
+      spec: {
+        writeLockActive,
+        activeSpecId: typeof sData.activeSpecId === 'string' ? redactNovFeedText(sData.activeSpecId, 64) : null,
+        activeSpecTitle: redactNovFeedText(activeSpec?.title, 80),
+      },
+    },
+  };
+}
+
 function validateExplicitDataDirOption(explicitDataDir) {
   if (explicitDataDir === undefined || explicitDataDir === null) return null;
   if (typeof explicitDataDir !== 'string') return 'Invalid explicitDataDir: must be a string';

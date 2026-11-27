@@ -63,6 +63,11 @@
 - **Phase 5 — Non-Visual Alert Center (`packages/core/session-radar.js`, `packages/core/coexist.js`, `packages/core/index.js`, `packages/core/prism-bridge.js`, `packages/core/i18n.js`, `test/session-radar.test.mjs`)**:
   - Enhanced `sessionRadar` with opt-in zero-network WebAudio two-tone chime (`AudioContext`), local `speechSynthesis` TTS, blurred-only gating, `HH:MM-HH:MM` overnight/same-day `radarQuietHours` suppression, compact threshold notification hook, and an inline test button inside Settings `guard`.
   - *IA Simplification Check (PASS)*: Zero new top-level modules added (stays at 13 modules in `Overview`), audio/quiet controls live strictly inside Settings `guard`, zero `:has()` / `.ag-cs-` rules, zero `"Prism"` leaks, `182/182` tests passing, and `ru` bundle size `1,593,755 B` (`<= 1,677,721 B`).
+- **Phase 6 & 7 — Dual-Star Read-Only Live Feed (`sag:nov_feed`) & Phase 7 Scope Evaluation (`cli/nov-bridge.mjs`, `cli/watch-daemon.mjs`, `packages/core/nov-synergy.js`, `packages/core/prompt-queue.js`, `packages/core/status-pill.js`, `packages/core/outline-bookmarks.js`, `packages/core/prism-bridge.js`, `packages/core/index.js`, `workbench/server.mjs`, `test/nov-feed.test.mjs`)**:
+  - Added read-only `readNovFeed()` & `sag:nov_feed` zero-port bridge (symlink-guarded, `<= 256 KB` cap, `realpath` containment, prototype-key rejection) aggregating `agy-NOV` `guard`, `radar`, `mem`, and `spec` signals.
+  - Wired `spec.writeLockActive` into `promptQueue` dispatch circuit-breaker (`spec-write-lock`), surfaced `NOV 🔒` / `NOV · ΔN` on the HUD `nov` segment and Live NOV Feed in Settings `nov`, and added a per-turn `↺` rollback prompt filler (only when `agy-NOV guard` is connected; appends safely, never overwrites drafts or auto-submits).
+  - *Phase 7 Evaluation*: Kept cross-session bookmark search in `BookmarkVault` (`Ctrl/Cmd+Shift+B`) and full offline session archival in `storage-doctor` CLI without adding extra renderer bloat, keeping `ru` injection comfortably under the 1.6 MiB hard cap.
+  - *IA Simplification Check (PASS)*: Still 13 modules in `Overview`, zero duplicate controls, zero `:has()` / `.ag-cs-` rules, zero `"Prism"` leaks, `186/186` tests passing, and `ru` bundle size `1,604,340 B` (`<= 1,677,721 B`).
 - **Layered 9-Locale Extended UI Dictionaries (`packages/core/locales/ext/*.json`, `scripts/i18n/`, `THIRD_PARTY_NOTICES.md`)**: Expanded target-locale coverage to ~5,375–5,491 entries per locale (`zh-CN`: 465 core + 4,602 ext + 424 patterns = 5,491; `zh-TW`: 5,430; `ja`: 5,421; `ko`: 5,422; `es`: 5,407; `fr`: 5,375; `de`: 5,381; `ru`: 5,424; `pt-BR`: 5,399) using strict precedence (`Custom > 465 Core > Extended`), loaded via single-locale CDP preload (`<= 1.6 MB`), zero-port `sag:ext_pack` bridge requests, or Workbench `/ext/<locale>.json`. `zh-CN` adapts MIT-licensed `yiheng8023/antigravity-chinese` (`v3.3.65`); the other 8 locales were independently translated from the deduplicated English source table.
 - **Cross-Platform CDP Launcher & Prism JSON PID Fix (`cli/launcher.mjs`, `cli/watch-daemon.mjs`)**: Fixed `isPrismDaemonActive()` to parse JSON `.daemon.pid` files and added safe cross-platform `launch` / `keepalive` automation.
 - **Visual & Accessibility Fixes (7 items, see `CHANGELOG.md`)**: Keyboard `Enter`/`Space` header toggle with focus retention across re-renders, removal of redundant `✦` prefix adjacent to status dots, `168px` minimum column width on `.ag-sag-nov-grid` eliminating English label truncation, pure-CSS dropdown indicator on `.ag-sag-select`, high-contrast light-theme active chips, unified `:focus-visible` focus rings, and workbench multi-locale sync.
@@ -74,9 +79,9 @@
 
 Run inside repository root:
 ```bash
-npm test                                  # 182/182 tests passing (node --test)
+npm test                                  # 186/186 tests passing (node --test)
 npm run i18n:validate                     # 10 built-in + 9 extended packs, 0 errors
-npm run workbench:smoke                   # HTTP 200, 1035672 B, 17 markers verified
+npm run workbench:smoke                   # HTTP 200, 1046940 B, 18 markers verified
 node cli/sag-cli.mjs launch --dry-run --json  # Read-only launch plan + Prism yield check
 ```
 

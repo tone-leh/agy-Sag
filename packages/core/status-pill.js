@@ -180,15 +180,32 @@
       });
     }
 
-    // 7. nov segment
+    // 7. nov segment (enriched with read-only sag:nov_feed lock/drift/guard signals)
     if (nov && nov.connected) {
       const on = Number(nov.enabledCount) || 0;
       const total = Number(nov.total) || 13;
+      const locked = Boolean(nov.specWriteLocked);
+      const drifted = Math.max(0, Number(nov.memDrifted) || 0);
+      const blocked = Math.max(0, Number(nov.guardBlocked) || 0);
+      let text = 'NOV';
+      let tone = 'accent';
+      if (locked) {
+        text = 'NOV 🔒';
+        tone = 'warn';
+      } else if (drifted > 0) {
+        text = `NOV · Δ${drifted}`;
+        tone = 'warn';
+      }
+      const extras = [];
+      if (locked) extras.push('Spec Lock');
+      if (drifted > 0) extras.push(`Mem drift ${drifted}`);
+      if (blocked > 0) extras.push(`Guard blocked ${blocked}`);
+      const baseTitle = formatTpl(strings.hudNovTitle || 'agy-NOV connected · {on}/{total} modules', { on, total });
       segs.push({
         id: 'nov',
-        text: 'NOV',
-        tone: 'accent',
-        title: formatTpl(strings.hudNovTitle || 'agy-NOV connected · {on}/{total} modules', { on, total }),
+        text,
+        tone,
+        title: extras.length ? `${baseTitle} · ${extras.join(' · ')}` : baseTitle,
       });
     }
 
@@ -389,10 +406,15 @@
         lastState.synergyConnected || (typeof options.novSynergy?.isConnected === 'function' && options.novSynergy.isConnected())
       );
       const ns = options.novSynergy?.getState?.();
+      const nf = options.novSynergy?.getFeed?.();
       return {
         connected,
         enabledCount: Number(ns?.enabledCount) || 0,
         total: 13,
+        specWriteLocked: Boolean(nf?.spec?.writeLockActive),
+        memDrifted: Number(nf?.mem?.driftedCount) || 0,
+        guardBlocked: Number(nf?.guard?.blockedCount) || 0,
+        radarAwaiting: Number(nf?.radar?.awaitingCount) || 0,
       };
     }
 
@@ -772,13 +794,13 @@
       }
 
       // Priority 2: Standalone user -> render unified multi-segment HUD capsule in composer footer
-      const el = ensureStandalonePill();
-      if (!el || !pillBtn || !segsEl) return;
-
       const cfg = getConfig();
       const strings = S();
       const segs = getCurrentSegments(cfg, strings);
       lastSegments = segs;
+
+      const el = ensureStandalonePill();
+      if (!el || !pillBtn || !segsEl) return;
 
       const ctxSeg = segs.find((s) => s.id === 'ctx');
       const pillTone = ctxSeg ? ctxSeg.tone : 'idle';
@@ -922,6 +944,7 @@
           synergyConnected: Boolean(buildNovInput(getConfig()).connected),
           label: segsEl?.textContent || '',
           segments: lastSegments.map((s) => s.id),
+          novText: lastSegments.find((s) => s.id === 'nov')?.text || '',
         };
       },
       destroy,

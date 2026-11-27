@@ -26,7 +26,13 @@ import {
   validateHostLang,
   validatePresetName,
 } from './cdp-attach.mjs';
-import { handleBridgePayload, readNovOpsTemplates, readNovState } from './nov-bridge.mjs';
+import {
+  computeNovFeedSignature,
+  handleBridgePayload,
+  readNovFeed,
+  readNovOpsTemplates,
+  readNovState,
+} from './nov-bridge.mjs';
 
 export const HOST_BRIDGE_BINDING_NAME = '__agSagHostBridge';
 
@@ -646,6 +652,8 @@ export class SagWatchDaemon {
     this.bridgeSessions = new Map(); // targetKey -> HostBridgeSession
     this.lastNovSignature = null;
     this._novSignatureInitialized = false;
+    this.lastNovFeedSignature = null;
+    this._novFeedSignatureInitialized = false;
   }
 
   emit(type, data = {}) {
@@ -687,6 +695,10 @@ export class SagWatchDaemon {
         targets: 1,
         reason: 'initial',
       });
+      try {
+        this.lastNovFeedSignature = computeNovFeedSignature(this.novBridgeOpts);
+        this._novFeedSignatureInitialized = true;
+      } catch {}
       return true;
     }
     return false;
@@ -719,6 +731,14 @@ export class SagWatchDaemon {
             return { reqId, ok: false, error: tplRes.error || 'Failed to read agy-NOV templates' };
           }
           return { reqId, ok: true, data: { available: tplRes.available, templates: tplRes.templates } };
+        }
+        if (parsed && typeof parsed === 'object' && parsed.type === 'sag:nov_feed') {
+          const reqId = typeof parsed.reqId === 'string' && parsed.reqId.length <= 128 ? parsed.reqId : null;
+          const feedRes = readNovFeed(this.novBridgeOpts);
+          if (!feedRes.ok) {
+            return { reqId, ok: false, error: (feedRes.errors || ['Failed to read agy-NOV feed']).join('; ') };
+          }
+          return { reqId, ok: true, data: { available: feedRes.available, feed: feedRes.feed } };
         }
       } catch {}
     }
@@ -853,6 +873,62 @@ export class SagWatchDaemon {
       });
     }
     return { pushed, changed: pushed > 0 || forcePush, signature: sig, state };
+  }
+
+  syncNovFeedToBridges({ forcePush = false } = {}) {
+    if (this._stopped || !this.enableHostBridge || this.bridgeSessions.size === 0) {
+      return { pushed: 0, changed: false };
+    }
+    let sig;
+    try {
+      sig = computeNovFeedSignature(this.novBridgeOpts);
+    } catch {
+      return { pushed: 0, changed: false };
+    }
+    if (!this._novFeedSignatureInitialized) {
+      const hasReadySession = [...this.bridgeSessions.values()].some((s) =>
+        typeof s?.isMainContextReady === 'function' ? s.isMainContextReady() : Boolean(s?.isOpen?.())
+      );
+      if (!hasReadySession && !forcePush) {
+        return { pushed: 0, changed: false, signature: sig };
+      }
+      this.lastNovFeedSignature = sig;
+      this._novFeedSignatureInitialized = true;
+      if (!forcePush) {
+        return { pushed: 0, changed: false, signature: sig };
+      }
+    }
+    if (!forcePush && sig === this.lastNovFeedSignature) {
+      return { pushed: 0, changed: false, signature: sig };
+    }
+
+    let feedRes;
+    try {
+      feedRes = readNovFeed(this.novBridgeOpts);
+    } catch {
+      return { pushed: 0, changed: false, signature: sig };
+    }
+    if (!feedRes || !feedRes.ok) {
+      return { pushed: 0, changed: false, signature: sig, error: feedRes?.errors?.join('; ') || 'Invalid feed' };
+    }
+
+    let pushed = 0;
+    for (const session of this.bridgeSessions.values()) {
+      if (session?.push?.('nov:feed', { feed: feedRes.feed })) {
+        pushed += 1;
+      }
+    }
+    if (pushed > 0 || forcePush) {
+      this.lastNovFeedSignature = sig;
+    }
+    if (pushed > 0) {
+      this.emit('nov-feed-pushed', {
+        signature: sig,
+        writeLockActive: Boolean(feedRes.feed?.spec?.writeLockActive),
+        targets: pushed,
+      });
+    }
+    return { pushed, changed: pushed > 0 || forcePush, signature: sig, feed: feedRes.feed };
   }
 
   async reconcileOnce() {
@@ -1057,6 +1133,7 @@ export class SagWatchDaemon {
 
     if (this.enableHostBridge && this.bridgeSessions.size > 0) {
       this.syncNovStateToBridges();
+      this.syncNovFeedToBridges();
     }
 
     const nextDelayMs = changed ? this._resetBackoff() : this._bumpBackoff(1.5);

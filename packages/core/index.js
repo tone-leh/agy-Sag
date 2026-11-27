@@ -101,6 +101,7 @@
       const aaState = safeAutoAccept?.getDebugState?.() || null;
       const hiState = hostI18n?.getDebugState?.() || null;
       const novState = novSynergy?.getState?.() || null;
+      const novFeed = novSynergy?.getFeed?.() || null;
       const novConnected = Boolean(novSynergy?.isConnected?.());
       statusPill.sync({
         snap: cgState.lastSnapshot || null,
@@ -116,6 +117,10 @@
           connected: novConnected,
           enabledCount: Number(novState?.enabledCount) || 0,
           total: novSynergyMod?.NOV_MODULE_IDS?.length || 13,
+          specWriteLocked: Boolean(novFeed?.spec?.writeLockActive),
+          memDrifted: Number(novFeed?.mem?.driftedCount) || 0,
+          guardBlocked: Number(novFeed?.guard?.blockedCount) || 0,
+          radarAwaiting: Number(novFeed?.radar?.awaitingCount) || 0,
         },
         hostLocale: hiState?.locale || 'en',
         synergyConnected: novConnected,
@@ -272,6 +277,26 @@
       },
       onExportMarkdown: options.onExportMarkdown,
       onDownloadMarkdown: options.onDownloadMarkdown,
+      isRollbackAvailable: () => Boolean(novSynergy?.isConnected?.() && novSynergy?.getState?.()?.config?.modules?.guard),
+      onRollbackTurn: ({ turnNum, snippet }) => {
+        const prompt = `Please use agy-NOV guard to list snapshots before turn #${turnNum}${snippet ? ` ("${snippet}")` : ''} and confirm before rolling back workspace files.`;
+        if (promptLibrary?.insertIntoComposer) {
+          return promptLibrary.insertIntoComposer(prompt, { mode: 'append' });
+        }
+        const ctxSrc = resolveDep('__agSgContextSource', './context-source.js');
+        const ed = ctxSrc?.findComposerEditor?.(doc);
+        if (!ed) return { ok: false, reason: 'no-editor' };
+        const existing = String(ctxSrc?.readComposerDraft?.(doc) || '');
+        const finalText = existing.trim() ? `${existing}\n\n${prompt}` : prompt;
+        const tag = String(ed.tagName || '').toUpperCase();
+        if (tag === 'TEXTAREA' || tag === 'INPUT') {
+          ed.value = finalText;
+        } else {
+          ed.textContent = finalText;
+        }
+        try { ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true })); } catch {}
+        return { ok: true };
+      },
     });
 
     bookmarkVault = vaultMod?.createBookmarkVaultController
@@ -435,6 +460,7 @@
           dispatchDelayMs: options.promptQueueDispatchDelayMs,
           getLang: options.getLang,
           isStreaming: () => Boolean(compactGuard.getDebugState()?.lastSnapshot?.streaming),
+          isSpecWriteLocked: () => Boolean(novSynergy?.isConnected?.() && novSynergy?.getFeed?.()?.spec?.writeLockActive),
           onDispatch: options.onPromptQueueDispatch,
           onQueueChange: (ev) => {
             syncStatusPill();
@@ -490,12 +516,15 @@
         })
       : null;
 
+    let novFeedFetched = false;
+    let novFeedInFlight = false;
     novSynergy = novSynergyMod?.createNovSynergyController
       ? novSynergyMod.createNovSynergyController({
           win,
           doc,
           novTransport: options.novTransport,
           initialState: options.novInitialState,
+          initialFeed: options.novInitialFeed,
           requestTimeoutMs: options.novRequestTimeoutMs,
           autoRefresh: options.novAutoRefresh,
           now: options.now,
@@ -507,9 +536,22 @@
                 void hostI18n.ensureExtendedPack?.();
               }
             }
+            if (novState?.bridgeConnected && !novFeedFetched && !novFeedInFlight) {
+              novFeedInFlight = true;
+              Promise.resolve(novSynergy?.fetchFeed?.())
+                .then((res) => {
+                  if (res?.ok) novFeedFetched = true;
+                })
+                .catch(() => {})
+                .finally(() => {
+                  novFeedInFlight = false;
+                });
+            }
             if (novState?.bridgeConnected && promptLibrary?.getDebugState?.()?.enabled) {
               void promptLibrary.refreshNovTemplates?.();
             }
+            outlineBookmarks?.sync?.();
+            promptQueue?.sync?.();
             prismBridge?.sync?.();
             syncStatusPill();
             if (typeof options.onNovStateChange === 'function') options.onNovStateChange(novState);

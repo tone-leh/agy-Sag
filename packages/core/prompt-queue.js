@@ -299,6 +299,7 @@
         statusStreaming: '等待当前回复完成',
         statusDraft: '输入框有草稿，已自动暂停',
         statusApproval: '等待审批处理，已自动暂停',
+        statusSpecLock: 'agy-NOV Spec 写锁生效，队列暂停',
         statusReady: '空闲后自动发送',
       };
     }
@@ -318,6 +319,7 @@
       statusStreaming: 'Waiting for stream',
       statusDraft: 'Paused: composer has draft',
       statusApproval: 'Paused: approval pending',
+      statusSpecLock: 'Paused: agy-NOV Spec write-lock active',
       statusReady: 'Auto-send when idle',
     };
   }
@@ -532,6 +534,9 @@
       }
       if (checkBlockingApproval(scope)) {
         return { ready: false, reason: 'blocking-approval' };
+      }
+      if (typeof options.isSpecWriteLocked === 'function' && options.isSpecWriteLocked()) {
+        return { ready: false, reason: 'spec-write-lock' };
       }
       return { ready: true, reason: null, scope };
     }
@@ -798,6 +803,7 @@
       else if (lastSkipReason === 'streaming') statusEl.textContent = s.statusStreaming;
       else if (lastSkipReason === 'composer-occupied') statusEl.textContent = s.statusDraft;
       else if (lastSkipReason === 'blocking-approval') statusEl.textContent = s.statusApproval;
+      else if (lastSkipReason === 'spec-write-lock') statusEl.textContent = s.statusSpecLock || 'Spec write-lock active, paused';
       else statusEl.textContent = s.statusReady;
 
       pauseBtn.textContent = paused ? s.resume : s.pause;
@@ -1196,7 +1202,10 @@
         itemCount: items.length,
         items: cloneItems(items),
         lastSkipReason,
-        autoPaused: lastSkipReason === 'composer-occupied' || lastSkipReason === 'blocking-approval',
+        autoPaused:
+          lastSkipReason === 'composer-occupied' ||
+          lastSkipReason === 'blocking-approval' ||
+          lastSkipReason === 'spec-write-lock',
         dispatchedCount,
         lastDispatchedItem: lastDispatchedItem ? { ...lastDispatchedItem } : null,
         barMounted: Boolean(barEl && barEl.isConnected !== false),
@@ -1249,6 +1258,7 @@
     loadQueue,
     saveQueue,
     clearQueue,
+    getUiStrings,
     createPromptQueueController,
   };
 });

@@ -27,6 +27,7 @@ When both **`agy-Sag`** and **`agy-NOV`** are installed together, **`agy-Sag`**'
 
 - **Control `agy-NOV` v0.5 directly inside Antigravity Settings**: Toggle all **13 `agy-NOV` modules** organized by 5 categories and switch its **5 presets** (`minimal` 6 / `core` 12 / `power` 32 / `local-all` 43 / `full` 47 tools) in real time. Communication runs over CDP `Runtime.addBinding` (zero extra HTTP ports) to `agy-Sag`'s Watch Sidecar, which atomically updates `agy-NOV`'s `config.json` (`0600`) while `agy-NOV`'s native hot-sync updates `tools/list` live without adding any CDP code to `agy-NOV`.
 - **Read-Only `agy-NOV` Template Sharing (`promptLibrary` × `agy-NOV ops`)**: Reads `agy-NOV`'s `ops/prompts.json` over the zero-port `sag:nov_templates` channel (strictly read-only, symlink-guarded, `<= 256 KB`) so your engineering templates appear right inside the `Ctrl/Cmd+Alt+P` palette.
+- **Read-Only Live Feed & Per-Turn Rollback (`sag:nov_feed` × `guard` / `spec` / `mem` / `radar`)**: Aggregates read-only snapshots from `agy-NOV` (`<= 256 KB`, symlink-guarded, zero writes) to pause `promptQueue` automatically while `spec` write-lock is active, surface `NOV 🔒` / `NOV · ΔN` memory-drift badges in the HUD and Settings `nov` tab, and add an optional per-turn `↺` rollback prompt filler (only when `agy-NOV guard` is active; appends safely without overwriting drafts).
 - **Safety Shield Synergy (`safeAutoAccept` × `agy-NOV guard` / `verify`)**: Pairs frontend hard-deny auto-accept with `agy-NOV`'s PreToolUse secret shield, pre-edit file snapshots, and Stop verify gate.
 - **Compaction × Memory & X-Ray (`compactGuard` × `agy-NOV mem` / `xray`)**: Coordinates auto-compaction with code-anchored architectural memory and token breakdown.
 - **Zero-Duplicate Alert Arbitration (`sessionRadar` × `agy-NOV radar`)**: Detects when both alert engines are active and offers a 1-click deduplication toggle.
@@ -61,7 +62,7 @@ Every module in **`agy-Sag`** is independently toggleable from the `Overview` ta
 | **L2** | **Auto-Compact Guard** (`compactGuard`) | **ON** | 100% Offline | Configurable compaction threshold (`off` or `50%–98%`, default `80%`), silent auto-compact with viewport scroll shield, Lexical two-step slash menu support, `/clear` clean-slate restart, and post-compact anchor recovery. |
 | **L2** | **Pre-Compact Export** (`precompactExport`) | **ON** | 100% Offline | Nested under `compactGuard`: secret-redacted Markdown copy and `.md` file download before compaction (masks PEM private keys, API keys, Bearer tokens & JWTs). |
 | **L2** | **Draft Guard** (`draftGuard`) | **ON** | 100% Offline | Debounced per-session auto-save for unsent composer prompts (7-day TTL, 16 KB cap) with one-line restore after tab switches or reloads. |
-| **L2** | **Prompt Queue** (`promptQueue`) | **ON** | 100% Offline | Queue 1–20 follow-up prompts while the Agent is streaming. Automatically dispatches when idle with **triple safety circuit-breakers** (streaming active, composer draft occupied, or blocking approval card). |
+| **L2** | **Prompt Queue** (`promptQueue`) | **ON** | 100% Offline | Queue 1–20 follow-up prompts while the Agent is streaming. Automatically dispatches when idle with **4 safety circuit-breakers** (streaming active, composer draft occupied, blocking approval card, or `agy-NOV spec` write-lock active). |
 | **L2** | **Prompt Library** (`promptLibrary`) | OFF | 100% Offline · Read-Only NOV | Composer button + `Ctrl/Cmd+Alt+P` command palette featuring slash shortcuts, 6 bilingual engineering templates with `{{var=default}}` interactive fill forms, local custom snippets (CRUD + 128 KB sanitized JSON import/export), and read-only `agy-NOV` `ops` templates. Appends safely without overwriting drafts and never auto-submits. |
 | **L2** | **Turn Bookmarks & Vault** (`outlineBookmarks`) | OFF | 100% Offline | Inline star button beside message Copy/Undo actions, floating `★ N` quick-jump drawer, and `Ctrl/Cmd+Shift+B` searchable cross-session archive with redacted Markdown export. |
 | **L3** | **Stall & Burn Watchdog** (`sessionWatchdog`) | **ON** | 100% Offline | Rolling burn-rate estimator (`≈N turns` in HUD), single-turn spike indicator, and streaming stall detector (default 3 min) with `+5m` snooze. |
@@ -167,8 +168,8 @@ Antigravity 2.0 Host (Electron 44 + language_server localhost UI)
  ├── Sidecar / CLI Layer (Node.js >= 22, 0 npm dependencies)
  │    ├── cli/sag-cli.mjs        — Unified CLI (launch, keepalive, attach, watch, doctor, i18n, storage, nov, workbench)
  │    ├── cli/launcher.mjs       — Cross-platform CDP launcher/keepalive with Prism yield & 0600 atomic circuit-breaker state
- │    ├── cli/watch-daemon.mjs   — Adaptive-backoff (3s -> 30s) CDP watcher, sag:ext_pack & sag:nov_templates zero-port bridge
- │    ├── cli/nov-bridge.mjs     — Atomic 0600 agy-NOV v0.5 config bridge (13 modules / 5 presets) + read-only ops template loader
+ │    ├── cli/watch-daemon.mjs   — Adaptive-backoff (3s -> 30s) CDP watcher, live nov:feed push & zero-port bridge (sag:ext_pack / sag:nov_templates / sag:nov_feed)
+ │    ├── cli/nov-bridge.mjs     — Atomic 0600 agy-NOV v0.5 config bridge (13 modules / 5 presets) + read-only redacted templates & live feed loader
  │    ├── cli/bundle.mjs         — Deterministic UMD bundler with SHA-256 hash idempotency, <=1.6MB ext preload & clean remove
  │    └── cli/storage-doctor.mjs — Read-only storage audit, WAL lock guard & secret-redacted export
  └── Renderer UMD Modules (packages/core/, 100% lossless destroy())
@@ -176,7 +177,7 @@ Antigravity 2.0 Host (Electron 44 + language_server localhost UI)
       ├── host-i18n*.js          — 10-language WeakMap DOM translator + 465 core + layered ~5k/locale ext packs (locales/ext/)
       ├── compact-guard.js       — Auto-silent /compact, scroll shield, clean-slate /clear & recovery
       ├── draft-guard.js         — Per-session unsent draft vault
-      ├── prompt-queue.js        — Streaming follow-up queue with triple safety circuit-breakers
+      ├── prompt-queue.js        — Streaming follow-up queue with 4 safety circuit-breakers (incl. NOV spec lock)
       ├── prompt-library.js      — Ctrl/Cmd+Alt+P command palette, {{var}} snippets & read-only agy-NOV templates
       ├── reading-nav.js         — Long code block auto-folding, sticky copy bar & Alt+↑/↓ mini turn rail
       ├── safe-auto-accept.js    — Policy-gated auto-accept + non-bypassable hard deny blacklist
@@ -198,9 +199,9 @@ Antigravity 2.0 Host (Electron 44 + language_server localhost UI)
 ## Development & Verification
 
 ```bash
-npm test                 # Run full native node:test suite (182/182 passing, zero external deps)
+npm test                 # Run full native node:test suite (186/186 passing, zero external deps)
 npm run i18n:validate    # Validate all 10 built-in + 9 extended UI translation packs (0 errors)
-npm run workbench:smoke  # Run automated HTTP smoke check against the offline workbench (17 markers)
+npm run workbench:smoke  # Run automated HTTP smoke check against the offline workbench (18 markers)
 npm run doctor           # Read-only local environment diagnostics
 ```
 

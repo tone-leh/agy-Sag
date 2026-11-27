@@ -90,8 +90,10 @@
 - **目标**：`cli/watch-daemon.mjs` 新增受 256 KB 与 symlink 防护限制的 `sag:nov_feed` 只读通道，读取 `agy-NOV` 的 `guard/audit.json`、`radar/status-capsule.json`、`mem/memories.json` 与 `spec/state.json`；前端实现 Guard 拦截 Toast、Radar 待批侧栏高亮、Spec 写锁暂停队列保护、Mem 漂移 HUD 计数及每轮消息栏「回滚到此轮前」快捷提示词填充。
 - **验收**：NOV 未安装/关闭时优雅隐藏，不修改任何 NOV 文件，通过 `auditor` 安全审查。
 
-### 阶段 7：跨会话搜索抽屉与对话内 Todo 探索（P2，阶段 6 后再细化）
-- **目标**：评估通过 `Ctrl/Cmd+Shift+F` 提供跨会话书签与本地只读索引的检索/导出抽屉，并调研对话流内任务进度卡的可行性。
+### 阶段 7：跨会话搜索抽屉与对话内 Todo 探索（P2，评估结论）
+- **评估结论（已完成评审，保持前端克制不盲目膨胀）**：
+  - 跨会话书签与重点检索已由内置 `BookmarkVault`（`Ctrl/Cmd+Shift+B`）覆盖，全量离线会话检索与脱敏归档已由零侵入 CLI `storage-doctor`（`agy-sag storage audit|backup|export`）覆盖；
+  - 经过阶段 1–6 全套升级，单语种 `ru` CDP 注入包体为 `1,604,340 B`（距离 `1,677,721 B` 硬预算余量约 `73 KB`）。为守住 1.6 MiB 注入上限与极简驾驶舱定位，不在主 CDP 注入包内叠加额外重型索引/Todo UI，保留为后续独立按需加载扩展议题。
 
 ---
 
@@ -103,5 +105,5 @@
 - [x] **阶段 3**：`promptLibrary` 提示词库与命令面板
 - [x] **阶段 4**：`readingNav` 长代码折叠与轮次快速导航
 - [x] **阶段 5**：WebAudio 提示音与本地 TTS 提醒中心
-- [ ] **阶段 6**：`sag:nov_feed` 双星只读数据流深度联动与快照回滚入口
-- [ ] **阶段 7**：跨会话全文检索与 Todo 视图评估（待阶段 6 后细化）
+- [x] **阶段 6**：`sag:nov_feed` 双星只读数据流深度联动与快照回滚入口
+- [x] **阶段 7**：跨会话全文检索与 Todo 视图评估（已完成预算与架构评估，维持轻量化边界归档）

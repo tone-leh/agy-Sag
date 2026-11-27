@@ -1783,7 +1783,10 @@
               active: false,
               attr: 'data-ag-nov-refresh',
               val: '1',
-              onClick: () => void novSynergy.refresh(),
+              onClick: () => {
+                void novSynergy.refresh();
+                void novSynergy.fetchFeed?.();
+              },
             })
           );
         }
@@ -1940,6 +1943,35 @@
         }
         synBox.appendChild(synList);
         pane.appendChild(synBox);
+
+        // Dual-Star Live Read-Only Feed (guard / radar / mem / spec)
+        const feed = typeof novSynergy?.getFeed === 'function' ? novSynergy.getFeed() : null;
+        if (feed) {
+          const parts = [];
+          if (feed.guard?.blockedCount > 0 || feed.guard?.snapshotCount > 0) {
+            parts.push(
+              isZh
+                ? `Guard 拦截 ${feed.guard.blockedCount} · 快照 ${feed.guard.snapshotCount}`
+                : `Guard blocked ${feed.guard.blockedCount} · snapshots ${feed.guard.snapshotCount}`
+            );
+          }
+          if (feed.spec?.writeLockActive) {
+            parts.push(isZh ? `Spec 写锁激活（队列已暂停）` : `Spec write-lock active (queue paused)`);
+          }
+          if (feed.mem?.driftedCount > 0) {
+            parts.push(isZh ? `记忆漂移 ${feed.mem.driftedCount}` : `Memory drift ${feed.mem.driftedCount}`);
+          }
+          if (feed.radar?.awaitingCount > 0) {
+            parts.push(isZh ? `Radar 待批 ${feed.radar.awaitingCount}` : `Radar awaiting ${feed.radar.awaitingCount}`);
+          }
+          if (parts.length > 0) {
+            const feedEl = doc.createElement('div');
+            feedEl.className = 'ag-sag-badge-note';
+            feedEl.setAttribute('data-testid', 'ag-sag-nov-live-feed');
+            feedEl.textContent = `${isZh ? '实时双星信号：' : 'Live NOV Feed: '}${parts.join(' · ')}`;
+            pane.appendChild(feedEl);
+          }
+        }
       } else if (novState?.installed && !novState.bridgeConnected) {
         const waitCard = doc.createElement('div');
         waitCard.className = 'ag-sag-nov-promo';

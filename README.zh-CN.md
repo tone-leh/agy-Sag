@@ -27,6 +27,7 @@
 
 - **在 Antigravity 原生设置里直接热控 `agy-NOV` v0.5**：按 5 大分类一键开关全部 **13 个 `agy-NOV` 纯原生模块** 并切换 **5 档场景预设**（`minimal` 6 / `core` 12 / `power` 32 / `local-all` 43 / `full` 47 工具）。通信复用 CDP `Runtime.addBinding`（零额外 HTTP 端口）通知 Sidecar 原子更新 `agy-NOV` 的 `config.json`（`0600`），`agy-NOV` 服务端通过原生文件签名热同步刷新 `tools/list`，全程保持 `agy-NOV` 零 CDP 纯净。
 - **提示词库只读消费 `agy-NOV` 工程模板（`promptLibrary` × `agy-NOV ops`）**：通过零端口 `sag:nov_templates` 只读通道读取 `agy-NOV` 的 `ops/prompts.json`（严格 symlink 拒止、`<= 256 KB` 上限、零磁盘写入），在 `Ctrl/Cmd+Alt+P` 命令面板中一键填表填入输入框。
+- **双星只读数据流与按轮回滚联动（`sag:nov_feed` × `guard` / `spec` / `mem` / `radar`）**：通过零端口只读通道聚合 `agy-NOV` 快照摘要（单文件 `<= 256 KB`、symlink 拒止、零写入）：`spec` 写锁激活时自动暂停 `promptQueue` 出队，底栏 HUD 与 `双星 NOV` 面板实时展示 `NOV 🔒` / `NOV · ΔN` 记忆漂移与 Guard 拦截数，并在每轮消息栏提供按需 `↺` 回滚提示词填充按钮（仅 `agy-NOV guard` 开启时可见，安全追加不覆盖草稿）。
 - **多层安全护盾协同（`safeAutoAccept` × `agy-NOV guard` / `verify`）**：前端铁壁黑名单自动审批与后端 PreToolUse 密钥防火墙、改前文件快照及 Stop 实测校验门形成多层防护。
 - **压缩护航 × 记忆与透视（`compactGuard` × `agy-NOV mem` / `xray`）**：上下文自动压缩与代码锚定长期记忆、Token 透视形成闭环。
 - **通知防重礼让（`sessionRadar` × `agy-NOV radar`）**：自动识别双侧提醒同时开启并提供一键去重。
@@ -61,7 +62,7 @@
 | **L2** | **自动压缩保护**（`compactGuard`） | **开启** | 100% 离线 | 自定义预警与触发阈值（`关闭` 或 `50%–98%`，默认 `80%`），默认静默自动压缩并启用视口滚动盾（阅读历史消息时不跳屏）；兼容 Lexical 两步斜杠选择、`/clear` 轻量重开与压缩后锚点续接条。 |
 | **L2** | **压缩前导出**（`precompactExport`） | **开启** | 100% 离线 | 内嵌于 `compactGuard` 卡片下的子开关：压缩前一键复制或下载 `.md` 复盘档案，自动脱敏 PEM 私钥、API Key、Bearer Token 与 JWT。 |
 | **L2** | **草稿防丢**（`draftGuard`） | **开启** | 100% 离线 | 按会话自动防抖暂存输入框内未发送的长提示词（7 天有效期、16 KB 上限），切会话或意外重载后空框单行一键恢复。 |
-| **L2** | **提示词排队**（`promptQueue`） | **开启** | 100% 离线 | Agent 流式执行长任务时，预先排队 1–20 条后续指令；回合空闲后自动依次发送，内置**三重安全熔断**（流式中、输入框有草稿、存在待审批卡片时绝不盲发）。 |
+| **L2** | **提示词排队**（`promptQueue`） | **开启** | 100% 离线 | Agent 流式执行长任务时，预先排队 1–20 条后续指令；回合空闲后自动依次发送，内置**四重安全熔断**（流式中、输入框有草稿、存在待审批卡片或 `agy-NOV spec` 写锁生效时绝不盲发）。 |
 | **L2** | **提示词库**（`promptLibrary`） | 关闭 | 100% 离线 · 只读 NOV | 输入区入口按钮 + `Ctrl/Cmd+Alt+P` 命令面板：支持斜杠指令速填、6 个中英双语高频工程模板（内置 `{{变量=默认值}}` 表单与实时预览）、自定义片段增删改与 128 KB 校验导入导出、以及只读 `agy-NOV` `ops` 模板；默认安全追加不覆盖已有草稿，绝不自动发送。 |
 | **L2** | **轮次书签与档案库**（`outlineBookmarks`） | 关闭 | 100% 离线 | 在消息操作栏加入收藏星标、悬浮 `★ N` 快速回跳抽屉，以及 `Ctrl/Cmd+Shift+B` 跨会话可搜索档案库与脱敏合集导出。 |
 | **L3** | **卡死与燃尽监测**（`sessionWatchdog`） | **开启** | 100% 离线 | 估算到达阈值的剩余轮数（展示于状态胶囊 HUD）、标记单轮突增，并在流式输出长时间静默（默认 3 分钟）时轻提醒并支持一键 `+5m` 延后。 |
@@ -167,8 +168,8 @@ Antigravity 2.0 宿主（Electron 44 + language_server 本地渲染界面）
  ├── Sidecar / CLI 层（Node.js >= 22，零 npm 运行依赖）
  │    ├── cli/sag-cli.mjs        — 统一命令入口（launch / keepalive / attach / watch / doctor / i18n / storage / nov / workbench）
  │    ├── cli/launcher.mjs       — 跨平台 CDP 启动与保活控制器（Prism 礼让、冷启动保护、0600 原子熔断状态）
- │    ├── cli/watch-daemon.mjs   — 自适应退避（3s -> 30s）CDP 守护进程、sag:ext_pack 与 sag:nov_templates 零端口桥
- │    ├── cli/nov-bridge.mjs     — 0600 原子化 agy-NOV v0.5 配置桥（13 模块 / 5 预设）+ 只读 ops 模板读取器
+ │    ├── cli/watch-daemon.mjs   — 自适应退避（3s -> 30s）CDP 守护进程、实时 nov:feed 推送与零端口桥（sag:ext_pack / sag:nov_templates / sag:nov_feed）
+ │    ├── cli/nov-bridge.mjs     — 0600 原子化 agy-NOV v0.5 配置桥（13 模块 / 5 预设）+ 只读脱敏模板与实时数据流读取器
  │    ├── cli/bundle.mjs         — 零构建 UMD 拼接器（SHA-256 幂等附着、<=1.6MB 扩展包预注入与一键全清）
  │    └── cli/storage-doctor.mjs — 只读存储诊断、WAL 活跃锁防护与密钥脱敏导出
  └── 渲染层模块化 UMD 核心（packages/core/，全部支持 100% 无损 destroy()）
@@ -176,7 +177,7 @@ Antigravity 2.0 宿主（Electron 44 + language_server 本地渲染界面）
       ├── host-i18n*.js          — 10 国语言 WeakMap DOM 翻译引擎 + 465 核心 + ~5k 分层扩展词库（locales/ext/）
       ├── compact-guard.js       — 静默 /compact、视口滚动盾、/clear 轻重开与锚点续接
       ├── draft-guard.js         — 按会话未发送草稿自动保护
-      ├── prompt-queue.js        — 流式排队预写与三重安全熔断出队
+      ├── prompt-queue.js        — 流式排队预写与四重安全熔断出队（含 NOV Spec 写锁）
       ├── prompt-library.js      — Ctrl/Cmd+Alt+P 提示词命令面板、{{变量}} 片段库与只读 NOV 模板
       ├── reading-nav.js         — 长代码块自动折叠、吸顶复制条与 Alt+↑/↓ 迷你轮次导轨
       ├── safe-auto-accept.js    — 策略门控自动审批 + 不可绕过铁壁高危黑名单
@@ -198,9 +199,9 @@ Antigravity 2.0 宿主（Electron 44 + language_server 本地渲染界面）
 ## 本地开发与验证
 
 ```bash
-npm test                 # 运行全量原生 node:test 单测套件（182/182 通过，零外部依赖）
+npm test                 # 运行全量原生 node:test 单测套件（186/186 通过，零外部依赖）
 npm run i18n:validate    # 校验全部 10 国内置 + 9 扩展界面翻译词典与正则模板（0 错误）
-npm run workbench:smoke  # 对离线沙盒执行自动化 HTTP 烟雾校验（17 markers）
+npm run workbench:smoke  # 对离线沙盒执行自动化 HTTP 烟雾校验（18 markers）
 npm run doctor           # 只读本机环境与双星共存诊断
 ```
 

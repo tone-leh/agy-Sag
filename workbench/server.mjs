@@ -40,6 +40,7 @@ export const SMOKE_REQUIRED_MARKERS = Object.freeze([
   'ag-sag-hud-seg',
   '__agSagPromptLibrary',
   '__agSagReadingNav',
+  'sag:nov_feed',
 ]);
 
 export function buildHtmlPage() {
@@ -779,6 +780,21 @@ ${coreScript}
     function simNovTransport(req) {
       const { reqId, type, payload = {} } = req || {};
       const modApi = window.__agSagNovSynergy;
+      if (type === 'sag:nov_feed') {
+        return {
+          ok: true,
+          reqId,
+          data: {
+            available: Boolean(simNov.installed),
+            feed: {
+              guard: { blockedCount: 2, snapshotCount: 5, latestSnapshotId: 'snap-demo-05', latestBlocked: { ts: '2026-11-27T08:00:00Z', tool: 'bash', reason: 'Blocked .env secret read' } },
+              radar: { awaitingCount: 1, runningCount: 1, headline: '1 awaiting approval' },
+              mem: { totalCount: 8, driftedCount: 1 },
+              spec: { writeLockActive: false, activeSpecId: 'spec-demo', activeSpecTitle: 'Stage 6 Dual-Star Feed' },
+            },
+          },
+        };
+      }
       if (type === 'sag:nov_templates') {
         return {
           ok: true,

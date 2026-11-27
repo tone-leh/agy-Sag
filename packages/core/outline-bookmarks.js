@@ -419,13 +419,22 @@
         const host = actionSlot || bubble;
         // Migrate away from legacy in-bubble placement if a native action row exists
         if (actionSlot) {
-          const legacyBtn = bubble.querySelector?.('.ag-sg-bm-star');
-          if (legacyBtn) {
+          const legacyStars = bubble.querySelectorAll?.('.ag-sg-bm-star') || [];
+          const legacyRollbacks = bubble.querySelectorAll?.('.ag-sag-turn-rollback') || [];
+          for (const legacyBtn of new Set([...legacyStars, ...legacyRollbacks])) {
+            if (legacyBtn.parentElement === actionSlot) continue;
             try { legacyBtn.remove?.(); } catch {}
             ownedNodes.delete(legacyBtn);
           }
         }
-        let btn = host.querySelector?.('.ag-sg-bm-star');
+        const hostStars = host.querySelectorAll?.('.ag-sg-bm-star') || [];
+        let btn = null;
+        for (const el of hostStars) {
+          if (!el.classList?.contains?.('ag-sag-turn-rollback')) {
+            btn = el;
+            break;
+          }
+        }
         if (!btn) {
           btn = coexist.markOwnedNoTranslate(doc.createElement('button'));
           btn.type = 'button';
@@ -434,7 +443,8 @@
           btn.addEventListener('click', (ev) => {
             ev?.preventDefault?.();
             ev?.stopPropagation?.();
-            toggleBookmark(turnNum);
+            const liveTurn = Number(btn.getAttribute('data-ag-sg-turn')) || turnNum;
+            toggleBookmark(liveTurn);
           });
           host.appendChild(btn);
           ownedNodes.add(btn);
@@ -449,6 +459,40 @@
         btn.setAttribute('aria-label', tip);
         btn.setAttribute('data-tip', tip);
         renderBookmarkIcon(btn, starred);
+
+        // Optional dual-star agy-NOV guard rollback prompt filler (visible only when NOV guard connected)
+        const rollbackEnabled =
+          typeof options.onRollbackTurn === 'function' &&
+          (typeof options.isRollbackAvailable !== 'function' || Boolean(options.isRollbackAvailable()));
+        let rbBtn = host.querySelector?.('.ag-sag-turn-rollback');
+        if (rollbackEnabled) {
+          if (!rbBtn) {
+            rbBtn = coexist.markOwnedNoTranslate(doc.createElement('button'));
+            rbBtn.type = 'button';
+            rbBtn.className = 'ag-sg-bm-star ag-sag-turn-rollback';
+            rbBtn.setAttribute('data-ag-sag-rollback-turn', String(turnNum));
+            rbBtn.textContent = '↺';
+            rbBtn.title = 'Fill agy-NOV guard rollback prompt for this turn';
+            rbBtn.setAttribute('aria-label', rbBtn.title);
+            rbBtn.addEventListener('click', (ev) => {
+              ev?.preventDefault?.();
+              ev?.stopPropagation?.();
+              const liveTurn = Number(rbBtn.getAttribute('data-ag-sag-rollback-turn')) || turnNum;
+              const rawSnippet = exporter.extractNodeTextWithoutOwned(bubble);
+              const snippet = exporter.redactSecrets(rawSnippet).replace(/\s+/g, ' ').trim().slice(0, 64);
+              options.onRollbackTurn({ turnNum: liveTurn, snippet });
+            });
+            host.appendChild(rbBtn);
+            ownedNodes.add(rbBtn);
+          } else {
+            rbBtn.setAttribute('data-ag-sag-rollback-turn', String(turnNum));
+          }
+          if (actionSlot) rbBtn.setAttribute('data-inline-action', '1');
+          else rbBtn.removeAttribute?.('data-inline-action');
+        } else if (rbBtn) {
+          try { rbBtn.remove?.(); } catch {}
+          ownedNodes.delete(rbBtn);
+        }
       });
       renderNativeJumpDock(bubbles);
     }
