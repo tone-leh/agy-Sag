@@ -252,14 +252,15 @@ export function assertNoSymlinkAncestors(
     lstatSyncFn = fs.lstatSync,
   } = {}
 ) {
-  const resolved = path.resolve(String(targetPath));
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
+  const resolved = pathApi.resolve(String(targetPath));
   const resolvedStop =
-    stopAt && isPathWithinBase(resolved, path.resolve(String(stopAt)), platform)
-      ? path.resolve(String(stopAt))
+    stopAt && isPathWithinBase(resolved, pathApi.resolve(String(stopAt)), platform)
+      ? pathApi.resolve(String(stopAt))
       : null;
 
   let cur = resolved;
-  const root = path.parse(cur).root;
+  const root = pathApi.parse(cur).root;
 
   while (true) {
     if (resolvedStop && normalizePathForCompare(cur, platform) === normalizePathForCompare(resolvedStop, platform)) {
@@ -277,7 +278,7 @@ export function assertNoSymlinkAncestors(
       throw new Error(`Security violation: refusing symlink path ${cur}`);
     }
     if (cur === root) return;
-    const parent = path.dirname(cur);
+    const parent = pathApi.dirname(cur);
     if (parent === cur) return;
     cur = parent;
   }
