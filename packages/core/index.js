@@ -96,16 +96,25 @@
       const qpState = quotaPulse?.getSummary?.() || null;
       const aaState = safeAutoAccept?.getDebugState?.() || null;
       const hiState = hostI18n?.getDebugState?.() || null;
+      const novState = novSynergy?.getState?.() || null;
+      const novConnected = Boolean(novSynergy?.isConnected?.());
       statusPill.sync({
         snap: cgState.lastSnapshot || null,
         watchdog: cgState.watchdog || null,
         bookmarkCount: bmState?.bookmarkCount || 0,
         hasDraft: Boolean(dgState?.barVisible || (dgState?.savedDraftCount || 0) > 0),
-        queueCount: pqState?.itemCount || 0,
-        quotaHealth: qpState?.health || 'ok',
-        autoAcceptActive: Boolean(aaState?.enabled && !aaState?.paused),
+        queue: pqState ? { itemCount: pqState.itemCount || 0, paused: Boolean(pqState.paused) } : null,
+        quota: qpState,
+        autoAccept: aaState
+          ? { enabled: Boolean(aaState.enabled), paused: Boolean(aaState.paused), dryRun: Boolean(aaState.dryRun) }
+          : null,
+        nov: {
+          connected: novConnected,
+          enabledCount: Number(novState?.enabledCount) || 0,
+          total: novSynergyMod?.NOV_MODULE_IDS?.length || 13,
+        },
         hostLocale: hiState?.locale || 'en',
-        synergyConnected: Boolean(novSynergy?.isConnected?.()),
+        synergyConnected: novConnected,
       });
     };
 

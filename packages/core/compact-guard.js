@@ -1274,14 +1274,7 @@
       } else if (isOverflow) {
         msgEl.textContent = i18n.formatTemplate(strings.pillOverflow, { pct, used, max });
       } else {
-        let baseMsg = i18n.formatTemplate(strings.pillReached, { pct, used, max });
-        if (lastWatchdog?.estimatedTurnsLeft > 0) {
-          baseMsg += ` ${i18n.formatTemplate(strings.pillBurnEta, { turns: lastWatchdog.estimatedTurnsLeft })}`;
-        }
-        if (lastWatchdog?.spikeDetected && lastWatchdog.lastDeltaPct > 0) {
-          baseMsg += ` ${i18n.formatTemplate(strings.pillSpikeHint, { delta: lastWatchdog.lastDeltaPct })}`;
-        }
-        msgEl.textContent = baseMsg;
+        msgEl.textContent = i18n.formatTemplate(strings.pillReached, { pct, used, max });
       }
 
       if (focusTagEl) {

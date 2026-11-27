@@ -190,25 +190,29 @@ test('Standalone user (NO Obsidian Prism): sees calm composer % pill, floating q
 
   await guard.evaluateNow();
 
-  // Even at 34% (well below 80% threshold), standalone user has a calm composer pill showing live %
+  // Even at 34% (well below 80% threshold), standalone user has a calm composer HUD pill showing live %
   const pill = doc.querySelector(`[data-testid="${statusPill.PILL_TESTID}"]`);
   assert.ok(pill, 'Standalone user must always have a calm composer status pill');
   assert.equal(pill.getAttribute('data-compact'), '0', 'Standalone pill displays percentage readout');
   assert.equal(pill.getAttribute('data-tone'), 'ok');
+  assert.ok(pill.querySelector('[data-ag-sag-hud-seg="ctx"]'), 'HUD capsule must render ctx segment');
+  assert.ok(guard.getDebugState().statusPill.segments.includes('ctx'));
   assert.ok(pill.textContent.includes('34%'));
 
-  // Clicking the pill opens the minimal floating card (Less is More: <= 8 buttons total, no redundant clear-blank)
+  // Clicking the pill opens the minimal floating card (Less is More: <= 8 buttons total, read-only threshold, no redundant clear-blank)
   pill.click();
   const card = doc.querySelector(`[data-testid="${statusPill.CARD_TESTID}"]`);
   assert.ok(card && !card.hidden, 'Clicking status pill must open the quick status & settings card');
   assert.ok(card.textContent.includes('174K / 512K'));
+  assert.ok(card.textContent.includes('80%'), 'Read-only auto-compact threshold must be displayed in card');
+  assert.equal(card.querySelector('[data-ag-sg-card-th]'), null, 'Single source of truth: no threshold buttons inside status card');
   assert.equal(card.textContent.includes('Prism'), false, 'Standalone consumer card must never mention Prism');
   assert.equal(card.querySelector('[data-ag-sg-card-act="clear-blank"]'), null, 'Must not include redundant blank-clear button');
   assert.ok(card.querySelector('[data-ag-sg-card-act="clean-restart"]'), 'Must include Clean Restart action');
   assert.ok(card.querySelectorAll('button').length <= 8, `Status card must stay serene (<= 8 buttons), got ${card.querySelectorAll('button').length}`);
 
-  // Changing threshold from floating card updates live config and syncs to native Settings card
-  card.querySelector('[data-ag-sg-card-th="75"]').click();
+  // Updating compactThreshold via config API syncs to native Settings Hub
+  guard.updateConfig({ compactThreshold: 75 });
   assert.equal(guard.getConfig().compactThreshold, 75);
 
   // Native Antigravity Settings Dialog gets unified single-source 6-Tab Settings Hub (WITHOUT Obsidian Prism!)
@@ -224,6 +228,10 @@ test('Standalone user (NO Obsidian Prism): sees calm composer % pill, floating q
   // Switch to conversation tab and confirm status card 75% threshold stayed synchronized
   nativeSec.querySelector('[data-ag-sag-subtab="conversation"]').click();
   assert.equal(nativeSec.querySelector('[data-ag-sag-th="75"]').getAttribute('aria-pressed'), 'true');
+
+  // Turning off compactGuard hides ctx segment immediately
+  guard.updateConfig({ modules: { ...guard.getConfig().modules, compactGuard: false } });
+  assert.equal(pill.querySelector('[data-ag-sag-hud-seg="ctx"]'), null, 'Disabling compactGuard must hide ctx HUD segment');
 
   guard.destroy();
   assert.equal(doc.querySelectorAll('[data-ag-sg-owned="1"]').length, 0);
@@ -260,12 +268,12 @@ test('Combined user (WITH Obsidian Prism Pulse bar): embeds directly inside Pris
   const sec = pulseSr.querySelector(`[data-testid="${statusPill.PRISM_SEC_TESTID}"]`);
   assert.ok(sec, 'Must embed Auto-Compact + Clean Restart section inside Prism context-card');
   assert.ok(pulseSr.getElementById(statusPill.PRISM_STYLE_ID), 'Must inject scoped Shadow DOM styles');
-  assert.equal(sec.querySelectorAll('button').length, 6, 'Only 5 threshold pills + 1 Clean Restart button inside Prism card');
+  assert.equal(sec.querySelector('[data-ag-sg-pv-th]'), null, 'Single source of truth: no threshold buttons inside embedded card');
+  assert.equal(sec.querySelectorAll('button').length, 2, 'Only clean-restart and open-settings buttons inside embedded card');
 
-  // Clicking 85% inside Prism card updates live config
-  sec.querySelector('[data-ag-sg-pv-th="85"]').click();
-  assert.equal(guard.getConfig().compactThreshold, 85);
-  assert.equal(sec.querySelector('[data-ag-sg-pv-th="85"]').getAttribute('aria-pressed'), 'true');
+  // Clicking Open Settings link inside embedded card opens unified drawer on conversation tab
+  sec.querySelector('[data-ag-sg-pv-act="open-settings"]').click();
+  assert.equal(guard.prismBridge.isDrawerOpen(), true);
 
   // Clicking Clean Restart inside Prism card triggers clean restart
   sec.querySelector('[data-ag-sg-pv-act="clean-restart"]').click();

@@ -49,6 +49,10 @@
   - Consolidated all 11 module master switches exclusively into the `overview` tab (`precompactExport` nested inside `compactGuard`), removed duplicate top cards and legacy `compact-guard.js` popovers, and migrated legacy `all`/`flow`/`auto` tab keys.
   - Added instant cross-tab search across hidden `<details>` sections (matching nested child modules), inline 2-step config reset, JSON export/sanitized import, `420px` global drawer (`Ctrl/Cmd+Alt+,`, `Esc`), `agy-NOV` v0.5.0 13-module/5-category sync, `--sag-*` visual tokens, `40×22` switches, and gradient hexagon SVG badges.
   - *IA Simplification Check (PASS)*: Verified 0 duplicate `[data-ag-sag-mod]` toggles outside `overview`, 0 `"Prism"` occurrences across `SAG_UI_PACKS`, 0 `:has()` CSS rules, single-locale `ru` bundle size `1,467,179 B` (`<= 1,677,721 B`), independent `auditor` review passed after fixing nested `precompactExport` search and cross-tab NOV auto-refresh scoping.
+- **Phase 2 — Unified Segmented Status Capsule HUD (`packages/core/status-pill.js`, `packages/core/styles.js`, `packages/core/index.js`, `packages/core/compact-guard.js`, `packages/core/i18n.js`, `test/status-hud.test.mjs`, `test/standalone-ux.test.mjs`)**:
+  - Upgraded the standalone footer pill into a multi-segment HUD (`ctx` progress ring, `eta`/stall, `quota`, `queue`, `bookmarks`, `autoAccept`, `nov`, `brand` fallback) with zero new config keys; toggling any module immediately adds/removes its HUD segment.
+  - Removed duplicate `compactThreshold` buttons from both the standalone quick card and Prism context card (leaving read-only percentage readouts and direct links to Settings `overview` / `conversation`), expanded the standalone quick card grid to reflect enabled module readouts (`auto-compact`, `eta`, `quota`, `queue`, `agy-NOV`), surfaced read-only HUD chips in the Prism card, and removed redundant ETA/spike tails from the Compact Guard banner.
+  - *IA Simplification Check (PASS)*: Confirmed zero duplicate threshold switches outside Settings `conversation`, zero `:has()` / `.ag-cs-` CSS rules, 100% 9-locale `PACKS` key parity, zero `"Prism"` leaks in consumer UI strings, `170/170` tests passing, and `ru` bundle size `1,481,504 B` (`<= 1,677,721 B`).
 - **Layered 9-Locale Extended UI Dictionaries (`packages/core/locales/ext/*.json`, `scripts/i18n/`, `THIRD_PARTY_NOTICES.md`)**: Expanded target-locale coverage to ~5,375–5,491 entries per locale (`zh-CN`: 465 core + 4,602 ext + 424 patterns = 5,491; `zh-TW`: 5,430; `ja`: 5,421; `ko`: 5,422; `es`: 5,407; `fr`: 5,375; `de`: 5,381; `ru`: 5,424; `pt-BR`: 5,399) using strict precedence (`Custom > 465 Core > Extended`), loaded via single-locale CDP preload (`<= 1.6 MB`), zero-port `sag:ext_pack` bridge requests, or Workbench `/ext/<locale>.json`. `zh-CN` adapts MIT-licensed `yiheng8023/antigravity-chinese` (`v3.3.65`); the other 8 locales were independently translated from the deduplicated English source table.
 - **Cross-Platform CDP Launcher & Prism JSON PID Fix (`cli/launcher.mjs`, `cli/watch-daemon.mjs`)**: Fixed `isPrismDaemonActive()` to parse JSON `.daemon.pid` files and added safe cross-platform `launch` / `keepalive` automation.
 - **Visual & Accessibility Fixes (7 items, see `CHANGELOG.md`)**: Keyboard `Enter`/`Space` header toggle with focus retention across re-renders, removal of redundant `✦` prefix adjacent to status dots, `168px` minimum column width on `.ag-sag-nov-grid` eliminating English label truncation, pure-CSS dropdown indicator on `.ag-sag-select`, high-contrast light-theme active chips, unified `:focus-visible` focus rings, and workbench multi-locale sync.
@@ -60,9 +64,9 @@
 
 Run inside repository root:
 ```bash
-npm test                                  # 163/163 tests passing (node --test)
+npm test                                  # 170/170 tests passing (node --test)
 npm run i18n:validate                     # 10 built-in + 9 extended packs, 0 errors
-npm run workbench:smoke                   # HTTP 200, 907125 B, 14 markers verified
+npm run workbench:smoke                   # HTTP 200, 921450 B, 15 markers verified
 node cli/sag-cli.mjs launch --dry-run --json  # Read-only launch plan + Prism yield check
 ```
 

@@ -66,6 +66,21 @@ L4 双星联动「1+1>2」（Tab: 双星 NOV | nov）
 4. **即时全局搜索**：摘要头搜索输入框带有内容时，忽略当前 Tab 限制，统一平铺展示全部分组中匹配 `data-ag-sag-search` 的设置行，并在输入框右侧提供一键清空按钮。
 5. **交互安全性**：恢复默认与高危配置重置全部采用内联互斥二次确认按钮，绝不调用 `window.confirm` / `window.alert`。
 
+### 4. 状态胶囊 HUD 分段规则
+- 状态胶囊与快捷卡只负责只读状态指标展示与快捷直达动作，`compactThreshold` 自动压缩阈值统一在设置中心「对话 (`conversation`)」Tab 调整，不在胶囊快捷卡或内嵌卡片中重复提供阈值切换按钮。
+- 胶囊分段严格按模块开关动态增删（零额外配置键）：
+
+| 分段 ID | 显示条件 | 展示文本 | 状态色（`tone`） |
+| :--- | :--- | :--- | :--- |
+| `ctx` | `modules.compactGuard` 开启且上下文 `%` 有效 | 12px 圆环 + `{pct}%` | 由 `computeTone(snap, cfg, watchdog)` 决定 |
+| `eta` | `modules.sessionWatchdog` 开启；卡死且未忽略时显示停滞 `m:ss`，否则剩余轮数 `> 0` 时显示 `≈{n} 轮` | `停滞 {time}` / `≈{n} 轮` | 卡死 `warn`；单轮突增 `warm`；其余 `idle` |
+| `quota` | `modules.quotaPulse` 开启且存在台账摘要 | `5h {pct}%`（优先实时观测，其次本地 5h 估算比例） | `ok`→`ok`、`warm`→`warm`、`warn`→`warn`、`limited`→`danger` |
+| `queue` | `modules.promptQueue` 开启且 `itemCount > 0` | `队列 {n}`（暂停时追加 ` ⏸`） | 暂停 `warn`；其余 `idle` |
+| `bookmarks` | `modules.outlineBookmarks` 开启且书签数 `> 0` | `★{n}` | `idle` |
+| `autoAccept` | `modules.safeAutoAccept` 开启且运行未暂停 | `审批演练`（dryRun）或 `自动审批` | 演练 `idle`；运行中 `warm` |
+| `nov` | `agy-NOV` 双星连接激活 | `NOV` | `accent` |
+| `brand` | 以上分段全为空时兜底 | `agy-Sag` | `idle` |
+
 ---
 
 ## 三、统一术语命名表（UI 与文档一致化）

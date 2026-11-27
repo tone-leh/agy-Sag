@@ -1,10 +1,10 @@
-// agy-Sag — Adaptive Context Control Surface (UMD, zero runtime deps)
+// agy-Sag — Unified Segmented Status Capsule HUD & Prism Context Embed (UMD, zero runtime deps)
 // Seamless dual-mode architecture (Less is More):
 //   1) With Obsidian Prism (#ag-prism-pulse-bar open Shadow DOM #context-card):
 //      - ZERO extra top-level pill on the composer footer!
-//      - Embeds a native-styled 2-line Auto-Compact + Clean Restart section directly inside Prism's [◔ XX%] Context Card
+//      - Embeds read-only Auto-Compact %, Clean Restart, HUD chips & Settings link inside Prism's Context Card
 //   2) Standalone (no Obsidian Prism):
-//      - Renders a calm, minimal "● 42%" status pill in .agy-composer-footer + clean floating control card
+//      - Renders a unified multi-segment HUD capsule in .agy-composer-footer + serene read-only quick card
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
     module.exports = factory(root);
@@ -14,11 +14,196 @@
 })(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this, function (globalRoot) {
   'use strict';
 
-  const THRESHOLD_PRESETS = ['off', 75, 80, 85, 90];
   const PILL_TESTID = 'ag-sg-status-pill';
   const CARD_TESTID = 'ag-sg-status-card';
   const PRISM_SEC_TESTID = 'ag-sg-pv-sec';
   const PRISM_STYLE_ID = 'ag-sg-pv-style';
+
+  const QUOTA_TONE_MAP = Object.freeze({
+    ok: 'ok',
+    warm: 'warm',
+    warn: 'warn',
+    limited: 'danger',
+  });
+
+  function resolveDep(globalKey, relPath) {
+    if (globalRoot && globalRoot[globalKey]) return globalRoot[globalKey];
+    if (typeof require === 'function') return require(relPath);
+    return null;
+  }
+
+  function computeTone(snap, cfg, watchdog) {
+    if (watchdog?.stalled && !watchdog?.stallDismissed) return 'warn';
+    const pct = snap && typeof snap.usedPct === 'number' ? snap.usedPct : null;
+    if (pct === null) return 'idle';
+    if (pct >= 100) return 'danger';
+    const th = cfg?.compactThreshold === 'off' ? 85 : Number(cfg?.compactThreshold) || 80;
+    if (pct >= th) return 'warn';
+    if (pct >= Math.max(55, th - 12)) return 'warm';
+    return 'ok';
+  }
+
+  function formatTpl(tpl, vars = {}) {
+    let out = String(tpl || '');
+    for (const [k, v] of Object.entries(vars)) {
+      out = out.split(`{${k}}`).join(String(v ?? ''));
+    }
+    return out;
+  }
+
+  function formatDurationMMSS(sec) {
+    const total = Math.max(0, Math.round(Number(sec) || 0));
+    const m = Math.floor(total / 60);
+    const s = String(total % 60).padStart(2, '0');
+    return `${m}:${s}`;
+  }
+
+  function computeQuotaPct(quota) {
+    if (!quota) return 0;
+    const obsPct = quota.observed?.observedPct;
+    if (typeof obsPct === 'number' && Number.isFinite(obsPct)) return Math.max(0, Math.round(obsPct));
+    const ratio = Number(quota.localEstimate?.warn5hRatio) || 0;
+    return Math.max(0, Math.round(ratio * 100));
+  }
+
+  function computeHudSegments({
+    cfg = {},
+    snap = null,
+    watchdog = null,
+    quota = null,
+    queue = null,
+    bookmarkCount = 0,
+    autoAccept = null,
+    nov = null,
+    strings = {},
+    formatTokens = null,
+  } = {}) {
+    const mods = cfg?.modules || {};
+    const segs = [];
+
+    // 1. ctx segment
+    if (mods.compactGuard && snap && typeof snap.usedPct === 'number' && Number.isFinite(snap.usedPct)) {
+      const pct = Math.max(0, Math.min(100, Math.round(snap.usedPct)));
+      const fmt = typeof formatTokens === 'function' ? formatTokens : (n) => String(n ?? '—');
+      const used = fmt(snap.usedTokens);
+      const max = fmt(snap.maxTokens);
+      const ctxTitle = `${strings.cardContextLabel || 'Context'}: ${snap.usedPct}% (${used} / ${max})`;
+      segs.push({
+        id: 'ctx',
+        text: `${snap.usedPct}%`,
+        tone: computeTone(snap, cfg, watchdog),
+        title: ctxTitle,
+        pct,
+      });
+    }
+
+    // 2. eta / stall segment
+    if (mods.sessionWatchdog && watchdog) {
+      if (watchdog.stalled && !watchdog.stallDismissed) {
+        const time = formatDurationMMSS(watchdog.stalledForSec);
+        const text = formatTpl(strings.hudStallShort || 'Stalled {time}', { time });
+        segs.push({
+          id: 'eta',
+          text,
+          tone: 'warn',
+          title: text,
+        });
+      } else if (Number(watchdog.estimatedTurnsLeft) > 0) {
+        const turns = Number(watchdog.estimatedTurnsLeft);
+        const text = formatTpl(strings.hudEtaShort || '≈{n} turns', { n: turns });
+        let title = formatTpl(strings.pillBurnEta || '· ~{turns} turns left', { turns }).replace(/^[·\s]+/, '');
+        if (watchdog.spikeDetected && Number(watchdog.lastDeltaPct) > 0) {
+          title += ` ${formatTpl(strings.pillSpikeHint || '· +{delta}%', { delta: watchdog.lastDeltaPct })}`;
+        }
+        segs.push({
+          id: 'eta',
+          text,
+          tone: watchdog.spikeDetected ? 'warm' : 'idle',
+          title,
+        });
+      }
+    }
+
+    // 3. quota segment
+    if (mods.quotaPulse && quota) {
+      const qPct = computeQuotaPct(quota);
+      const turns5h = Number(quota.localEstimate?.turns5h) || 0;
+      const soft5h = Number(quota.limits?.softTurns5h) || 60;
+      const turns7d = Number(quota.localEstimate?.turns7d) || 0;
+      const soft7d = Number(quota.limits?.softTurns7d) || 350;
+      segs.push({
+        id: 'quota',
+        text: `5h ${qPct}%`,
+        tone: QUOTA_TONE_MAP[quota.health] || 'ok',
+        title: formatTpl(
+          strings.hudQuotaTitle || 'Quota Pulse · 5h {turns5h}/{soft5h} turns · 7d {turns7d}/{soft7d} turns (local estimate, read-only)',
+          { turns5h, soft5h, turns7d, soft7d }
+        ),
+      });
+    }
+
+    // 4. queue segment
+    const qCount = Number(queue?.itemCount) || 0;
+    if (mods.promptQueue && qCount > 0) {
+      const base = formatTpl(strings.hudQueueShort || 'Queue {n}', { n: qCount });
+      const text = queue?.paused ? `${base} ⏸` : base;
+      segs.push({
+        id: 'queue',
+        text,
+        tone: queue?.paused ? 'warn' : 'idle',
+        title: text,
+      });
+    }
+
+    // 5. bookmarks segment
+    const bmCount = Number(bookmarkCount) || 0;
+    if (mods.outlineBookmarks && bmCount > 0) {
+      const text = `★${bmCount}`;
+      segs.push({
+        id: 'bookmarks',
+        text,
+        tone: 'idle',
+        title: `${strings.cardBookmarksLabel || 'Bookmarks'}: ${bmCount}`,
+      });
+    }
+
+    // 6. autoAccept segment
+    if (mods.safeAutoAccept && autoAccept && autoAccept.enabled && !autoAccept.paused) {
+      const text = autoAccept.dryRun
+        ? (strings.hudAutoAcceptDryRun || 'Dry-run')
+        : (strings.hudAutoAcceptShort || 'Auto-OK');
+      segs.push({
+        id: 'autoAccept',
+        text,
+        tone: autoAccept.dryRun ? 'idle' : 'warm',
+        title: text,
+      });
+    }
+
+    // 7. nov segment
+    if (nov && nov.connected) {
+      const on = Number(nov.enabledCount) || 0;
+      const total = Number(nov.total) || 13;
+      segs.push({
+        id: 'nov',
+        text: 'NOV',
+        tone: 'accent',
+        title: formatTpl(strings.hudNovTitle || 'agy-NOV connected · {on}/{total} modules', { on, total }),
+      });
+    }
+
+    // 8. brand fallback
+    if (segs.length === 0) {
+      segs.push({
+        id: 'brand',
+        text: strings.brandShort || 'agy-Sag',
+        tone: 'idle',
+        title: strings.pillEntryTitle || 'agy-Sag',
+      });
+    }
+
+    return segs;
+  }
 
   // Scoped Shadow DOM styles that inherit Obsidian Prism's exact light/dark variables (--f, --mu, --d, --ct, --sl, --ac)
   const PRISM_SHADOW_CSS = `
@@ -80,43 +265,39 @@
   color:var(--f,#eef1f7);
   border-color:var(--ac,#3186ff);
 }
-.ag-sg-pv-seg{
-  display:grid;
-  grid-template-columns:repeat(5,1fr);
-  gap:3px;
-  padding:2px;
-  border-radius:8px;
-  background:var(--ct,rgba(148,163,184,.12));
-  border:1px solid var(--d,rgba(148,163,184,.14));
+.ag-sg-pv-hud{
+  display:flex;
+  flex-wrap:wrap;
+  gap:4px;
 }
-.ag-sg-pv-seg button{
+.ag-sg-pv-chip{
+  display:inline-flex;
+  align-items:center;
+  height:18px;
+  padding:0 6px;
+  border-radius:999px;
+  background:var(--ct,rgba(148,163,184,.14));
+  color:var(--mu,#94a3b8);
+  font:500 10.5px/18px inherit;
+  font-variant-numeric:tabular-nums;
+  white-space:nowrap;
+}
+.ag-sg-pv-chip[data-tone="warn"]{color:#d97706;}
+.ag-sg-pv-chip[data-tone="danger"]{color:#ef4444;}
+.ag-sg-pv-chip[data-tone="ok"]{color:#10b981;}
+.ag-sg-pv-chip[data-tone="accent"]{color:var(--ac,#3186ff);}
+.ag-sg-pv-link{
   appearance:none;
   border:0;
-  height:21px;
-  padding:0 4px;
-  border-radius:6px;
+  padding:0;
   background:transparent;
-  color:var(--mu,#94a3b8);
-  font:500 10.5px/21px inherit;
-  font-variant-numeric:tabular-nums;
+  color:var(--ac,#3186ff);
+  font:500 10.5px/1.3 inherit;
+  align-self:flex-end;
   cursor:pointer;
-  white-space:nowrap;
-  transition:background 130ms ease,color 130ms ease,box-shadow 130ms ease;
 }
-.ag-sg-pv-seg button:hover{color:var(--f,#eef1f7);}
-.ag-sg-pv-seg button[aria-pressed="true"]{
-  background:var(--sl,rgba(49,134,255,.18));
-  color:var(--ac,var(--f,#3186ff));
-  font-weight:600;
-  box-shadow:0 1px 2px rgba(0,0,0,.08);
-}
+.ag-sg-pv-link:hover{text-decoration:underline;}
 `.trim();
-
-  function resolveDep(globalKey, relPath) {
-    if (globalRoot && globalRoot[globalKey]) return globalRoot[globalKey];
-    if (typeof require === 'function') return require(relPath);
-    return null;
-  }
 
   function createStatusPillController(options = {}) {
     const win = options.win || globalRoot;
@@ -132,24 +313,25 @@
     let wrapEl = null;
     let pillBtn = null;
     let dotEl = null;
-    let labelEl = null;
+    let segsEl = null;
     let cardEl = null;
     let createdStyleEl = null;
     let embeddedShadowHosts = new Set();
+    let lastSegments = [];
     let lastState = {
       snap: null,
       watchdog: null,
       bookmarkCount: 0,
       hasDraft: false,
+      queue: null,
+      quota: null,
+      autoAccept: null,
+      nov: null,
       synergyConnected: false,
     };
     const listeners = [];
 
     const getConfig = () => (typeof options.getConfig === 'function' ? options.getConfig() : coexist.DEFAULT_CONFIG);
-    const updateConfig = (patch) => {
-      if (typeof options.onUpdateConfig === 'function') return options.onUpdateConfig(patch);
-      return getConfig();
-    };
     const getLang = () => (typeof options.getLang === 'function' ? i18n.normalizeLang(options.getLang()) : i18n.detectLang(doc, win));
     const S = () => i18n.getStrings(getLang());
     const getScope = () => (ctxSrc.resolveActivePaneScope ? ctxSrc.resolveActivePaneScope(doc, activePaneEl) : doc);
@@ -168,7 +350,7 @@
     function removeStandalonePill() {
       cardOpen = false;
       try { wrapEl?.remove?.(); } catch {}
-      wrapEl = pillBtn = dotEl = labelEl = cardEl = null;
+      wrapEl = pillBtn = dotEl = segsEl = cardEl = null;
     }
 
     function findFooterHost(scope = getScope()) {
@@ -199,12 +381,46 @@
       } catch {}
     }
 
+    function buildNovInput(cfg) {
+      if (lastState.nov && typeof lastState.nov === 'object') {
+        return lastState.nov;
+      }
+      const connected = Boolean(
+        lastState.synergyConnected || (typeof options.novSynergy?.isConnected === 'function' && options.novSynergy.isConnected())
+      );
+      const ns = options.novSynergy?.getState?.();
+      return {
+        connected,
+        enabledCount: Number(ns?.enabledCount) || 0,
+        total: 13,
+      };
+    }
+
+    function getCurrentSegments(cfg, strings) {
+      return computeHudSegments({
+        cfg,
+        snap: lastState.snap,
+        watchdog: lastState.watchdog,
+        quota: lastState.quota,
+        queue: lastState.queue,
+        bookmarkCount: lastState.bookmarkCount,
+        autoAccept: lastState.autoAccept,
+        nov: buildNovInput(cfg),
+        strings,
+        formatTokens: ctxSrc?.formatTokens,
+      });
+    }
+
     function syncPrismContextCards() {
       const hosts = findPrismPulseHosts();
       let embeddedCount = 0;
       const cfg = getConfig();
       const strings = S();
       const bmCount = Number(lastState.bookmarkCount) || 0;
+      const thText = cfg.compactThreshold === 'off' ? strings.cfgThresholdOff : `${cfg.compactThreshold}%`;
+      const allSegs = getCurrentSegments(cfg, strings);
+      lastSegments = allSegs;
+      const chipSegs = allSegs.filter((seg) => seg.id !== 'ctx' && seg.id !== 'bookmarks' && seg.id !== 'brand');
 
       for (const host of hosts) {
         const sr = host?.shadowRoot;
@@ -244,7 +460,7 @@
         titleWrap.className = 'ag-sg-pv-title-wrap';
         const title = doc.createElement('span');
         title.className = 'ag-sg-pv-title';
-        title.textContent = strings.pvAutoCompactTitle;
+        title.textContent = `${strings.pvAutoCompactTitle} ${thText}`;
         title.title = strings.setDescThreshold;
         titleWrap.appendChild(title);
 
@@ -281,23 +497,35 @@
         }
         sec.appendChild(head);
 
-        const seg = doc.createElement('div');
-        seg.className = 'ag-sg-pv-seg';
-        seg.setAttribute('role', 'group');
-        for (const p of THRESHOLD_PRESETS) {
-          const b = doc.createElement('button');
-          b.type = 'button';
-          b.textContent = p === 'off' ? strings.cfgThresholdOff : `${p}%`;
-          b.setAttribute('data-ag-sg-pv-th', String(p));
-          b.setAttribute('aria-pressed', String(cfg.compactThreshold === p));
-          b.addEventListener('click', (ev) => {
-            ev?.preventDefault?.();
-            ev?.stopPropagation?.();
-            updateConfig({ compactThreshold: p });
-          });
-          seg.appendChild(b);
+        const hudRow = doc.createElement('div');
+        hudRow.className = 'ag-sg-pv-hud';
+        if (chipSegs.length === 0) {
+          hudRow.hidden = true;
+        } else {
+          for (const seg of chipSegs) {
+            const chip = doc.createElement('span');
+            chip.className = 'ag-sg-pv-chip';
+            chip.setAttribute('data-ag-sag-hud-seg', seg.id);
+            chip.setAttribute('data-tone', seg.tone);
+            if (seg.title) chip.title = seg.title;
+            chip.textContent = seg.text;
+            hudRow.appendChild(chip);
+          }
         }
-        sec.appendChild(seg);
+        sec.appendChild(hudRow);
+
+        const settingsBtn = doc.createElement('button');
+        settingsBtn.type = 'button';
+        settingsBtn.className = 'ag-sg-pv-link';
+        settingsBtn.setAttribute('data-ag-sg-pv-act', 'open-settings');
+        settingsBtn.textContent = strings.cardOpenSettingsBtn || 'Full Settings →';
+        settingsBtn.addEventListener('click', (ev) => {
+          ev?.preventDefault?.();
+          ev?.stopPropagation?.();
+          closePrismContextCard(sr);
+          options.onOpenSettings?.('conversation');
+        });
+        sec.appendChild(settingsBtn);
 
         embeddedShadowHosts.add(host);
         embeddedCount += 1;
@@ -306,15 +534,19 @@
       return embeddedCount;
     }
 
-    function computeTone(snap, cfg, watchdog) {
-      if (watchdog?.stalled && !watchdog?.stallDismissed) return 'warn';
-      const pct = snap && typeof snap.usedPct === 'number' ? snap.usedPct : null;
-      if (pct === null) return 'idle';
-      if (pct >= 100) return 'danger';
-      const th = cfg.compactThreshold === 'off' ? 85 : Number(cfg.compactThreshold) || 80;
-      if (pct >= th) return 'warn';
-      if (pct >= Math.max(55, th - 12)) return 'warm';
-      return 'ok';
+    function appendMetric(grid, label, value, testAttr) {
+      const cell = doc.createElement('div');
+      cell.className = 'ag-sg-card-metric';
+      if (testAttr) cell.setAttribute('data-ag-sag-card-metric', testAttr);
+      const k = doc.createElement('span');
+      k.className = 'ag-sg-card-mk';
+      k.textContent = label;
+      const v = doc.createElement('span');
+      v.className = 'ag-sg-card-mv';
+      v.textContent = value;
+      cell.appendChild(k);
+      cell.appendChild(v);
+      grid.appendChild(cell);
     }
 
     function renderStandaloneCard() {
@@ -323,6 +555,7 @@
       if (!cardOpen) return;
 
       const cfg = getConfig();
+      const mods = cfg.modules || {};
       const strings = S();
       const snap = lastState.snap;
       const pct = snap && typeof snap.usedPct === 'number' ? `${snap.usedPct}%` : '—';
@@ -330,6 +563,7 @@
       const maxLbl = snap ? ctxSrc.formatTokens(snap.maxTokens) : '—';
       const tokText = snap ? `${usedLbl} / ${maxLbl}` : '—';
       const bmCount = Number(lastState.bookmarkCount) || 0;
+      const thText = cfg.compactThreshold === 'off' ? strings.cfgThresholdOff : `${cfg.compactThreshold}%`;
 
       while (cardEl.firstChild) cardEl.removeChild(cardEl.firstChild);
 
@@ -348,73 +582,83 @@
       const grid = doc.createElement('div');
       grid.className = 'ag-sg-card-grid';
 
-      const ctxCell = doc.createElement('div');
-      ctxCell.className = 'ag-sg-card-metric';
-      const ctxK = doc.createElement('span');
-      ctxK.className = 'ag-sg-card-mk';
-      ctxK.textContent = strings.cardContextLabel;
-      const ctxV = doc.createElement('span');
-      ctxV.className = 'ag-sg-card-mv';
-      ctxV.textContent = tokText;
-      ctxCell.appendChild(ctxK);
-      ctxCell.appendChild(ctxV);
-      grid.appendChild(ctxCell);
-
-      const bmCell = doc.createElement('div');
-      bmCell.className = 'ag-sg-card-metric';
-      const bmK = doc.createElement('span');
-      bmK.className = 'ag-sg-card-mk';
-      bmK.textContent = strings.cardBookmarksLabel;
-      if (bmCount > 0 && typeof options.onOpenVault === 'function') {
-        const bmLink = doc.createElement('button');
-        bmLink.type = 'button';
-        bmLink.className = 'ag-sg-card-link';
-        bmLink.setAttribute('data-ag-sg-card-act', 'open-vault');
-        bmLink.textContent = `★ ${bmCount}`;
-        bmLink.addEventListener('click', (ev) => {
-          ev?.preventDefault?.();
-          ev?.stopPropagation?.();
-          close();
-          options.onOpenVault();
-        });
-        bmCell.appendChild(bmK);
-        bmCell.appendChild(bmLink);
-      } else {
-        const bmV = doc.createElement('span');
-        bmV.className = 'ag-sg-card-mv';
-        bmV.textContent = String(bmCount);
-        bmCell.appendChild(bmK);
-        bmCell.appendChild(bmV);
+      if (mods.compactGuard) {
+        appendMetric(grid, strings.cardContextLabel, tokText, 'context');
+        appendMetric(grid, strings.cardAutoCompactLabel || 'Auto-compact', thText, 'auto-compact');
       }
-      grid.appendChild(bmCell);
-      cardEl.appendChild(grid);
 
-      const body = doc.createElement('div');
-      body.className = 'ag-sg-card-body';
-      const row = doc.createElement('div');
-      row.className = 'ag-sg-pop-row';
-      const lbl = doc.createElement('span');
-      lbl.className = 'ag-sg-pop-lbl';
-      lbl.textContent = strings.cfgThreshold;
-      const seg = doc.createElement('div');
-      seg.className = 'ag-sg-seg';
-      for (const p of THRESHOLD_PRESETS) {
-        const b = doc.createElement('button');
-        b.type = 'button';
-        b.textContent = p === 'off' ? strings.cfgThresholdOff : `${p}%`;
-        b.setAttribute('data-ag-sg-card-th', String(p));
-        b.setAttribute('aria-pressed', String(cfg.compactThreshold === p));
-        b.addEventListener('click', (ev) => {
-          ev?.preventDefault?.();
-          ev?.stopPropagation?.();
-          updateConfig({ compactThreshold: p });
-        });
-        seg.appendChild(b);
+      if (mods.sessionWatchdog && Number(lastState.watchdog?.estimatedTurnsLeft) > 0) {
+        appendMetric(
+          grid,
+          strings.cardEtaLabel || 'Est. left',
+          i18n.formatTemplate(strings.cardTurnsVal || '~{n} turns', { n: lastState.watchdog.estimatedTurnsLeft }),
+          'eta'
+        );
       }
-      row.appendChild(lbl);
-      row.appendChild(seg);
-      body.appendChild(row);
-      cardEl.appendChild(body);
+
+      if (mods.outlineBookmarks) {
+        const bmCell = doc.createElement('div');
+        bmCell.className = 'ag-sg-card-metric';
+        bmCell.setAttribute('data-ag-sag-card-metric', 'bookmarks');
+        const bmK = doc.createElement('span');
+        bmK.className = 'ag-sg-card-mk';
+        bmK.textContent = strings.cardBookmarksLabel;
+        if (bmCount > 0 && typeof options.onOpenVault === 'function') {
+          const bmLink = doc.createElement('button');
+          bmLink.type = 'button';
+          bmLink.className = 'ag-sg-card-link';
+          bmLink.setAttribute('data-ag-sg-card-act', 'open-vault');
+          bmLink.textContent = `★ ${bmCount}`;
+          bmLink.addEventListener('click', (ev) => {
+            ev?.preventDefault?.();
+            ev?.stopPropagation?.();
+            close();
+            options.onOpenVault();
+          });
+          bmCell.appendChild(bmK);
+          bmCell.appendChild(bmLink);
+        } else {
+          const bmV = doc.createElement('span');
+          bmV.className = 'ag-sg-card-mv';
+          bmV.textContent = String(bmCount);
+          bmCell.appendChild(bmK);
+          bmCell.appendChild(bmV);
+        }
+        grid.appendChild(bmCell);
+      }
+
+      if (mods.draftGuard !== false) {
+        appendMetric(
+          grid,
+          strings.cardDraftLabel || 'Draft',
+          lastState.hasDraft ? (strings.cardDraftSaved || 'Saved') : (strings.cardDraftNone || 'None'),
+          'draft'
+        );
+      }
+
+      if (mods.quotaPulse && lastState.quota) {
+        const qPct = computeQuotaPct(lastState.quota);
+        const turns5h = Number(lastState.quota.localEstimate?.turns5h) || 0;
+        const soft5h = Number(lastState.quota.limits?.softTurns5h) || 60;
+        appendMetric(grid, strings.cardQuotaLabel || '5h quota', `${qPct}% · ${turns5h}/${soft5h}`, 'quota');
+      }
+
+      if (mods.promptQueue && lastState.queue) {
+        const qCnt = Number(lastState.queue.itemCount) || 0;
+        appendMetric(
+          grid,
+          strings.cardQueueLabel || 'Queued',
+          i18n.formatTemplate(strings.cardCountVal || '{n}', { n: qCnt }),
+          'queue'
+        );
+      }
+
+      const novInfo = buildNovInput(cfg);
+      if (novInfo.connected) {
+        appendMetric(grid, 'agy-NOV', `${novInfo.enabledCount}/${novInfo.total}`, 'nov');
+      }
+
+      if (grid.children.length > 0) cardEl.appendChild(grid);
 
       const foot = doc.createElement('div');
       foot.className = 'ag-sg-card-foot';
@@ -451,7 +695,7 @@
         foot.appendChild(
           mkAct('ag-sg-btn', strings.cardOpenSettingsBtn, 'open-settings', () => {
             close();
-            options.onOpenSettings();
+            options.onOpenSettings('overview');
           })
         );
       }
@@ -488,11 +732,11 @@
         dotEl.className = 'ag-sg-status-dot';
         dotEl.setAttribute('aria-hidden', 'true');
 
-        labelEl = doc.createElement('span');
-        labelEl.className = 'ag-sg-status-label';
+        segsEl = doc.createElement('span');
+        segsEl.className = 'ag-sag-hud-segs';
 
         pillBtn.appendChild(dotEl);
-        pillBtn.appendChild(labelEl);
+        pillBtn.appendChild(segsEl);
 
         cardEl = doc.createElement('div');
         cardEl.className = 'ag-sg-status-card';
@@ -520,41 +764,68 @@
         lastState = { ...lastState, ...statePatch };
       }
 
-      // Priority 1: Integrate directly inside Obsidian Prism's [◔ XX%] Context Card -> zero extra top-level footer pill!
+      // Priority 1: Integrate directly inside Obsidian Prism's Context Card -> zero extra top-level footer pill
       const embeddedCount = syncPrismContextCards();
       if (embeddedCount > 0) {
         removeStandalonePill();
         return;
       }
 
-      // Priority 2: Standalone user (no Obsidian Prism Context Card) -> render calm "● XX%" pill in composer footer
+      // Priority 2: Standalone user -> render unified multi-segment HUD capsule in composer footer
       const el = ensureStandalonePill();
-      if (!el || !pillBtn || !labelEl) return;
+      if (!el || !pillBtn || !segsEl) return;
 
       const cfg = getConfig();
       const strings = S();
-      const snap = lastState.snap;
-      const tone = computeTone(snap, cfg, lastState.watchdog);
-      const bmCount = Number(lastState.bookmarkCount) || 0;
-      const synergyOn = Boolean(
-        lastState.synergyConnected || (typeof options.novSynergy?.isConnected === 'function' && options.novSynergy.isConnected())
-      );
+      const segs = getCurrentSegments(cfg, strings);
+      lastSegments = segs;
 
-      pillBtn.setAttribute('data-tone', tone);
+      const ctxSeg = segs.find((s) => s.id === 'ctx');
+      const pillTone = ctxSeg ? ctxSeg.tone : 'idle';
+      const novInfo = buildNovInput(cfg);
+      const synergyOn = Boolean(novInfo.connected);
+
+      if (dotEl) {
+        dotEl.hidden = Boolean(ctxSeg);
+      }
+
+      pillBtn.setAttribute('data-tone', pillTone);
       pillBtn.setAttribute('data-compact', '0');
       pillBtn.setAttribute('aria-expanded', String(cardOpen));
       if (synergyOn) {
         pillBtn.setAttribute('data-synergy', '1');
         dotEl?.setAttribute?.('data-synergy', '1');
-        pillBtn.title = `${strings.pillEntryTitle} · ✦ × agy-NOV`;
       } else {
         pillBtn.removeAttribute?.('data-synergy');
         dotEl?.removeAttribute?.('data-synergy');
-        pillBtn.title = strings.pillEntryTitle;
       }
 
-      const pctTxt = snap && typeof snap.usedPct === 'number' ? `${snap.usedPct}%` : strings.brandShort;
-      labelEl.textContent = bmCount > 0 ? `${pctTxt} · ★${bmCount}` : pctTxt;
+      const titles = segs.map((s) => s.title).filter(Boolean);
+      if (strings.pillEntryTitle) titles.push(strings.pillEntryTitle);
+      pillBtn.title = titles.join(' · ');
+
+      while (segsEl.firstChild) segsEl.removeChild(segsEl.firstChild);
+      for (const seg of segs) {
+        const segEl = doc.createElement('span');
+        segEl.className = 'ag-sag-hud-seg';
+        segEl.setAttribute('data-ag-sag-hud-seg', seg.id);
+        segEl.setAttribute('data-tone', seg.tone);
+        if (seg.title) segEl.title = seg.title;
+
+        if (seg.id === 'ctx') {
+          const ring = doc.createElement('span');
+          ring.className = 'ag-sag-hud-ring';
+          ring.setAttribute('aria-hidden', 'true');
+          ring.style?.setProperty?.('--ag-sag-hud-p', String(seg.pct ?? 0));
+          segEl.appendChild(ring);
+        }
+
+        const txt = doc.createElement('span');
+        txt.textContent = seg.text;
+        segEl.appendChild(txt);
+        segsEl.appendChild(segEl);
+      }
+
       renderStandaloneCard();
     }
 
@@ -628,6 +899,7 @@
       }
       embeddedShadowHosts.clear();
       activePaneEl = null;
+      lastSegments = [];
     }
 
     sync();
@@ -647,11 +919,9 @@
           prismCardEmbedded: prismEmbedded,
           mounted: prismEmbedded || Boolean(wrapEl && wrapEl.isConnected !== false),
           cardOpen,
-          synergyConnected: Boolean(
-            lastState.synergyConnected ||
-              (typeof options.novSynergy?.isConnected === 'function' && options.novSynergy.isConnected())
-          ),
-          label: labelEl?.textContent || '',
+          synergyConnected: Boolean(buildNovInput(getConfig()).connected),
+          label: segsEl?.textContent || '',
+          segments: lastSegments.map((s) => s.id),
         };
       },
       destroy,
@@ -663,6 +933,7 @@
     CARD_TESTID,
     PRISM_SEC_TESTID,
     PRISM_STYLE_ID,
+    computeHudSegments,
     createStatusPillController,
   };
 });

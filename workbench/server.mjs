@@ -37,6 +37,7 @@ export const SMOKE_REQUIRED_MARKERS = Object.freeze([
   'ag-sag-synergy',
   'agSag.hostI18n.customPacks.v1',
   'requestExtendedPack',
+  'ag-sag-hud-seg',
 ]);
 
 export function buildHtmlPage() {
