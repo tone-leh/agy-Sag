@@ -16,6 +16,88 @@
 
   const AWAITING_RE = /\b(?:awaiting|waiting\s+for\s+(?:input|approval)|needs?\s+(?:input|attention|approval)|action\s+required)\b|等待(?:确认|审批|输入)|需要(?:确认|操作|输入)/i;
   const RUNNING_RE = /\b(?:running|working|thinking|in\s+progress|generating|streaming)\b|运行中|正在(?:运行|思考|生成)/i;
+  const AUDIO_MODES = Object.freeze(['off', 'chime', 'tts', 'both']);
+  const QUIET_HOURS_RE = /^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)$/;
+
+  function normalizeQuietHours(raw) {
+    const s = String(raw || '').trim();
+    return QUIET_HOURS_RE.test(s) ? s : '';
+  }
+
+  function isWithinQuietHours(quietHoursStr, nowInput = null) {
+    const clean = normalizeQuietHours(quietHoursStr);
+    if (!clean) return false;
+    const m = clean.match(QUIET_HOURS_RE);
+    if (!m) return false;
+    const startMin = Number(m[1]) * 60 + Number(m[2]);
+    const endMin = Number(m[3]) * 60 + Number(m[4]);
+    if (startMin === endMin) return false;
+    const d = nowInput instanceof Date ? nowInput : nowInput ? new Date(nowInput) : new Date();
+    const curMin = d.getHours() * 60 + d.getMinutes();
+    if (startMin < endMin) {
+      return curMin >= startMin && curMin < endMin;
+    }
+    return curMin >= startMin || curMin < endMin;
+  }
+
+  function playSynthesizedChime(win, eventType = 'awaiting_decision') {
+    const AudioCtor = win?.AudioContext || win?.webkitAudioContext;
+    if (typeof AudioCtor !== 'function') return false;
+    let ctx = null;
+    try {
+      ctx = new AudioCtor();
+      const now = Number(ctx.currentTime) || 0;
+      const notes =
+        eventType === 'stalled'
+          ? [392, 330]
+          : eventType === 'compact_warn'
+            ? [523.25, 440]
+            : eventType === 'completed'
+              ? [523.25, 659.25]
+              : [587.33, 880]; // awaiting_decision bright two-tone chime
+
+      notes.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.14);
+        gain.gain.setValueAtTime(0.001, now + idx * 0.14);
+        gain.gain.exponentialRampToValueAtTime(0.08, now + idx * 0.14 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0008, now + idx * 0.14 + 0.24);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + idx * 0.14);
+        osc.stop(now + idx * 0.14 + 0.26);
+      });
+      const closeTimer = setTimeout(() => {
+        try { ctx?.close?.(); } catch {}
+      }, 700);
+      closeTimer?.unref?.();
+      return true;
+    } catch {
+      try { ctx?.close?.(); } catch {}
+      return false;
+    }
+  }
+
+  function speakLocalAlert(win, text, lang = 'en') {
+    const synth = win?.speechSynthesis;
+    const UtterCtor = win?.SpeechSynthesisUtterance;
+    if (!synth || typeof synth.speak !== 'function' || typeof UtterCtor !== 'function') return false;
+    const cleanText = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+    if (!cleanText) return false;
+    try {
+      synth.cancel?.();
+      const utter = new UtterCtor(cleanText);
+      utter.lang = String(lang || 'en');
+      utter.rate = 1.05;
+      utter.volume = 0.85;
+      synth.speak(utter);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   function classifyRowStatus(row) {
     if (!row) return 'idle';
@@ -88,6 +170,8 @@
 
     let enabled = Boolean(options.enabled);
     let notifyMode = ['off', 'awaiting', 'all'].includes(options.notifyMode) ? options.notifyMode : 'off';
+    let audioMode = AUDIO_MODES.includes(options.audioMode) ? options.audioMode : 'off';
+    let quietHours = normalizeQuietHours(options.quietHours);
     let filterMode = 'all'; // 'all' | 'running' | 'awaiting_decision'
     let destroyed = false;
     let blurred = false;
@@ -95,7 +179,11 @@
     let counts = { all: 0, running: 0, awaiting: 0 };
     let barEl = null;
     let notificationsSent = 0;
+    let audioPlayedCount = 0;
+    let ttsSpokenCount = 0;
+    let quietSuppressedCount = 0;
     const listeners = [];
+    const nowFn = typeof options.now === 'function' ? options.now : () => Date.now();
 
     const getLang = () => (typeof options.getLang === 'function' ? i18n.normalizeLang(options.getLang()) : i18n.detectLang(doc, win));
     const S = () => i18n.getStrings(getLang());
@@ -171,10 +259,35 @@
       }
     };
 
+    const dispatchNonVisualAudio = (evType, spokenText) => {
+      let played = false;
+      let spoken = false;
+      if (audioMode === 'chime' || audioMode === 'both') {
+        played = typeof options.onPlayChime === 'function'
+          ? Boolean(options.onPlayChime(evType))
+          : playSynthesizedChime(win, evType);
+        if (played) audioPlayedCount += 1;
+      }
+      if (audioMode === 'tts' || audioMode === 'both') {
+        const lang = getLang();
+        spoken = typeof options.onSpeakTts === 'function'
+          ? Boolean(options.onSpeakTts(spokenText, lang, evType))
+          : speakLocalAlert(win, spokenText, lang);
+        if (spoken) ttsSpokenCount += 1;
+      }
+      return { played, spoken };
+    };
+
     const maybeNotify = (ev) => {
-      if (notifyMode === 'off') return false;
-      if (notifyMode === 'awaiting' && ev.type !== 'awaiting_decision') return false;
+      const osAllowed = notifyMode !== 'off' && (notifyMode !== 'awaiting' || ev.type === 'awaiting_decision');
+      const audioAllowed = audioMode !== 'off';
+      if (!osAllowed && !audioAllowed) return false;
       if (!coexist.isWindowHibernated(doc, win, blurred)) return false;
+
+      if (isWithinQuietHours(quietHours, nowFn())) {
+        quietSuppressedCount += 1;
+        return false;
+      }
 
       const strings = S();
       const title =
@@ -182,28 +295,38 @@
           ? strings.radarNotifyAwaitingTitle
           : ev.type === 'stalled'
             ? strings.radarNotifyStallTitle
-            : strings.radarNotifyDoneTitle;
+            : ev.type === 'compact_warn'
+              ? (strings.brand || 'agy-Sag')
+              : strings.radarNotifyDoneTitle;
       const body = ev.title || ev.id;
 
-      if (typeof options.onNotify === 'function') {
-        options.onNotify({ ...ev, notifTitle: title, notifBody: body });
-        notificationsSent += 1;
-        return true;
+      let fired = false;
+      if (audioAllowed) {
+        const audioRes = dispatchNonVisualAudio(ev.type, `${title}. ${body}`);
+        if (audioRes.played || audioRes.spoken) fired = true;
       }
 
-      const NotifCtor = win?.Notification;
-      if (typeof NotifCtor === 'function' && NotifCtor.permission === 'granted') {
-        try {
-          const n = new NotifCtor(title, { body, tag: `ag-sg-${ev.id}` });
-          n.onclick = () => {
-            try { win.focus?.(); } catch {}
-            try { ev.el?.click?.(); } catch {}
-          };
+      if (osAllowed) {
+        if (typeof options.onNotify === 'function') {
+          options.onNotify({ ...ev, notifTitle: title, notifBody: body, audioMode });
           notificationsSent += 1;
           return true;
-        } catch {}
+        }
+
+        const NotifCtor = win?.Notification;
+        if (typeof NotifCtor === 'function' && NotifCtor.permission === 'granted') {
+          try {
+            const n = new NotifCtor(title, { body, tag: `ag-sg-${ev.id}` });
+            n.onclick = () => {
+              try { win.focus?.(); } catch {}
+              try { ev.el?.click?.(); } catch {}
+            };
+            notificationsSent += 1;
+            return true;
+          } catch {}
+        }
       }
-      return false;
+      return fired;
     };
 
     function sync(sessions = []) {
@@ -274,6 +397,37 @@
       notifyMode = ['off', 'awaiting', 'all'].includes(m) ? m : 'off';
     }
 
+    function setAudioMode(m) {
+      if (destroyed) return;
+      audioMode = AUDIO_MODES.includes(m) ? m : 'off';
+    }
+
+    function setQuietHours(raw) {
+      if (destroyed) return;
+      quietHours = normalizeQuietHours(raw);
+    }
+
+    function testAudioAlert() {
+      if (destroyed) return { played: false, spoken: false };
+      const prevMode = audioMode;
+      if (audioMode === 'off') {
+        const played = typeof options.onPlayChime === 'function'
+          ? Boolean(options.onPlayChime('awaiting_decision'))
+          : playSynthesizedChime(win, 'awaiting_decision');
+        if (played) audioPlayedCount += 1;
+        return { played, spoken: false };
+      }
+      const res = dispatchNonVisualAudio('awaiting_decision', S().radarNotifyAwaitingTitle || 'agy-Sag alert test');
+      audioMode = prevMode;
+      return res;
+    }
+
+    function notifyCompactThreshold({ pct = 80, cascadeId = '' } = {}) {
+      if (destroyed) return false;
+      const body = i18n.formatTemplate(S().pillReached || 'Context at {pct}%', { pct });
+      return maybeNotify({ type: 'compact_warn', id: cascadeId || 'active-session', title: body, el: null });
+    }
+
     function destroy() {
       if (destroyed) return;
       destroyed = true;
@@ -299,8 +453,12 @@
       sync,
       syncFromDom,
       notifyStall,
+      notifyCompactThreshold,
+      testAudioAlert,
       setEnabled,
       setNotifyMode,
+      setAudioMode,
+      setQuietHours,
       setFilterMode: (m) => {
         if (['all', 'running', 'awaiting_decision'].includes(m)) {
           filterMode = m;
@@ -311,14 +469,28 @@
         enabled,
         destroyed,
         notifyMode,
+        audioMode,
+        quietHours,
         filterMode,
         counts: { ...counts },
         trackedCount: prevStates.size,
         notificationsSent,
+        audioPlayedCount,
+        ttsSpokenCount,
+        quietSuppressedCount,
       }),
       destroy,
     };
   }
 
-  return { classifyRowStatus, detectAttentionTransitions, createSessionRadarController };
+  return {
+    AUDIO_MODES,
+    normalizeQuietHours,
+    isWithinQuietHours,
+    playSynthesizedChime,
+    speakLocalAlert,
+    classifyRowStatus,
+    detectAttentionTransitions,
+    createSessionRadarController,
+  };
 });

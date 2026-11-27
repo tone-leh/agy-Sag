@@ -183,3 +183,93 @@ test('SessionRadar: recognizes real Antigravity v2.35.1 running & awaiting row i
   rowPerm.appendChild(p);
   assert.equal(radar.classifyRowStatus(rowPerm), 'awaiting_decision');
 });
+
+test('SessionRadar Phase 5: quiet hours parser handles overnight, same-day & invalid ranges', () => {
+  assert.equal(radar.normalizeQuietHours('22:00-08:00'), '22:00-08:00');
+  assert.equal(radar.normalizeQuietHours('25:99-08:00'), '');
+  assert.equal(radar.isWithinQuietHours('22:00-08:00', new Date(2026, 10, 27, 23, 30)), true);
+  assert.equal(radar.isWithinQuietHours('22:00-08:00', new Date(2026, 10, 27, 7, 15)), true);
+  assert.equal(radar.isWithinQuietHours('22:00-08:00', new Date(2026, 10, 27, 14, 0)), false);
+  assert.equal(radar.isWithinQuietHours('13:00-14:00', new Date(2026, 10, 27, 13, 30)), true);
+  assert.equal(radar.isWithinQuietHours('13:00-14:00', new Date(2026, 10, 27, 14, 5)), false);
+});
+
+test('SessionRadar Phase 5: WebAudio chime & local TTS fire only when blurred, respect quiet hours, and degrade gracefully', () => {
+  const doc = {
+    hidden: false,
+    documentElement: makeNode('html'),
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    createElement: (tag) => makeNode(tag),
+  };
+
+  let oscCount = 0;
+  let spokenTexts = [];
+  const win = {
+    document: doc,
+    navigator: { language: 'zh-CN' },
+    addEventListener() {},
+    removeEventListener() {},
+    AudioContext: class FakeAudioContext {
+      constructor() { this.currentTime = 0; this.destination = {}; }
+      createOscillator() {
+        oscCount += 1;
+        return { type: '', frequency: { setValueAtTime() {} }, connect() {}, start() {}, stop() {} };
+      }
+      createGain() {
+        return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} };
+      }
+      close() {}
+    },
+    SpeechSynthesisUtterance: class FakeUtter {
+      constructor(t) { this.text = t; }
+    },
+    speechSynthesis: {
+      cancel() {},
+      speak(u) { spokenTexts.push(u.text); },
+    },
+  };
+
+  let fakeTime = new Date(2026, 10, 27, 15, 0).getTime(); // 15:00 (outside quiet hours)
+  const ctl = radar.createSessionRadarController({
+    win,
+    doc,
+    enabled: true,
+    notifyMode: 'off',
+    audioMode: 'both',
+    quietHours: '22:00-08:00',
+    now: () => fakeTime,
+  });
+
+  try {
+    // Focused window -> must NOT play audio/TTS
+    assert.equal(ctl.notifyCompactThreshold({ pct: 85, cascadeId: 'c1' }), false);
+    assert.equal(oscCount, 0);
+    assert.equal(spokenTexts.length, 0);
+
+    // Blurred window outside quiet hours -> fires both WebAudio chime & local TTS
+    doc.hidden = true;
+    assert.equal(ctl.notifyCompactThreshold({ pct: 85, cascadeId: 'c1' }), true);
+    assert.ok(oscCount >= 2);
+    assert.equal(spokenTexts.length, 1);
+    assert.equal(ctl.getDebugState().audioPlayedCount, 1);
+    assert.equal(ctl.getDebugState().ttsSpokenCount, 1);
+
+    // Inside quiet hours (23:15) -> suppressed cleanly
+    fakeTime = new Date(2026, 10, 27, 23, 15).getTime();
+    assert.equal(ctl.notifyStall({ cascadeId: 'c1', stalledForSec: 180 }), false);
+    assert.equal(ctl.getDebugState().quietSuppressedCount, 1);
+    assert.equal(spokenTexts.length, 1);
+
+    // Explicit testAudioAlert works regardless of blur/quiet hours
+    const testRes = ctl.testAudioAlert();
+    assert.equal(testRes.played, true);
+    assert.equal(testRes.spoken, true);
+  } finally {
+    ctl.destroy();
+  }
+
+  // Graceful degradation when WebAudio & speechSynthesis are absent
+  assert.equal(radar.playSynthesizedChime({}, 'completed'), false);
+  assert.equal(radar.speakLocalAlert({}, 'hello', 'en'), false);
+});

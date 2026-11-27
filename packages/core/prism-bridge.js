@@ -1499,6 +1499,72 @@
       }
       pane.appendChild(mkSuiteRow(t('cfgRadarNotify', 'Background Alerts'), t('guardRadarDesc', ''), notifyGrid, { searchExtra: 'sessionRadar radarNotifyMode' }));
 
+      // 2b. Non-Visual Audio Chime / Local TTS + Quiet Hours
+      const audioWrap = doc.createElement('div');
+      audioWrap.className = 'ag-sag-pack-ctrl';
+      const audioGrid = doc.createElement('div');
+      audioGrid.className = 'ag-sag-ext-grid';
+      for (const [aKey, aLbl] of [
+        ['off', t('guardAudioOff', 'Off')],
+        ['chime', t('guardAudioChime', 'Chime')],
+        ['tts', t('guardAudioTts', 'Local TTS')],
+        ['both', t('guardAudioBoth', 'Chime + TTS')],
+      ]) {
+        audioGrid.appendChild(
+          mkChip({
+            label: aLbl,
+            active: (cfg.radarAudioMode || 'off') === aKey,
+            attr: 'data-ag-sag-audio-mode',
+            val: aKey,
+            onClick: () => updateConfig({ radarAudioMode: aKey }),
+          })
+        );
+      }
+      if (typeof options.onTestRadarAudio === 'function') {
+        audioGrid.appendChild(
+          mkChip({
+            label: t('guardAudioTestBtn', 'Test'),
+            active: false,
+            testId: 'ag-sag-audio-test-btn',
+            onClick: () => options.onTestRadarAudio(),
+          })
+        );
+      }
+      audioWrap.appendChild(audioGrid);
+
+      const quietRow = doc.createElement('div');
+      quietRow.className = 'ag-sag-ext-grid';
+      const quietInp = doc.createElement('input');
+      quietInp.type = 'text';
+      quietInp.className = 'ag-sag-search-input';
+      quietInp.setAttribute('data-testid', 'ag-sag-quiet-hours-input');
+      quietInp.placeholder = t('guardQuietPlaceholder', 'e.g. 22:00-08:00');
+      quietInp.value = cfg.radarQuietHours || '';
+      quietInp.addEventListener('change', () => {
+        updateConfig({ radarQuietHours: quietInp.value.trim() });
+      });
+      quietRow.appendChild(quietInp);
+      if (cfg.radarQuietHours) {
+        quietRow.appendChild(
+          mkChip({
+            label: t('guardQuietClear', 'Clear'),
+            active: false,
+            testId: 'ag-sag-quiet-hours-clear',
+            onClick: () => {
+              quietInp.value = '';
+              updateConfig({ radarQuietHours: '' });
+            },
+          })
+        );
+      }
+      audioWrap.appendChild(quietRow);
+      pane.appendChild(
+        mkSuiteRow(t('guardAudioLabel', 'Audio Chime & Local TTS'), t('guardAudioDesc', ''), audioWrap, {
+          stacked: true,
+          searchExtra: 'radarAudioMode radarQuietHours chime tts audio quiet hours',
+        })
+      );
+
       // 3. Safe Auto-Accept Policy + Dry Run + <details> custom allow patterns
       const aaGrid = doc.createElement('div');
       aaGrid.className = 'ag-sag-ext-grid';

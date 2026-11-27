@@ -65,7 +65,7 @@ Every module in **`agy-Sag`** is independently toggleable from the `Overview` ta
 | **L2** | **Prompt Library** (`promptLibrary`) | OFF | 100% Offline · Read-Only NOV | Composer button + `Ctrl/Cmd+Alt+P` command palette featuring slash shortcuts, 6 bilingual engineering templates with `{{var=default}}` interactive fill forms, local custom snippets (CRUD + 128 KB sanitized JSON import/export), and read-only `agy-NOV` `ops` templates. Appends safely without overwriting drafts and never auto-submits. |
 | **L2** | **Turn Bookmarks & Vault** (`outlineBookmarks`) | OFF | 100% Offline | Inline star button beside message Copy/Undo actions, floating `★ N` quick-jump drawer, and `Ctrl/Cmd+Shift+B` searchable cross-session archive with redacted Markdown export. |
 | **L3** | **Stall & Burn Watchdog** (`sessionWatchdog`) | **ON** | 100% Offline | Rolling burn-rate estimator (`≈N turns` in HUD), single-turn spike indicator, and streaming stall detector (default 3 min) with `+5m` snooze. |
-| **L3** | **Sidebar Radar** (`sessionRadar`) | OFF | 100% Offline | Sidebar `All / Running / Awaiting` filter bar with blurred-window OS notifications. |
+| **L3** | **Sidebar Radar & Alerts** (`sessionRadar`) | OFF | 100% Offline | Sidebar `All / Running / Awaiting` filter bar with blurred-window OS notifications, opt-in zero-network WebAudio synthesized chimes, local browser `speechSynthesis` voice alerts, and `HH:MM-HH:MM` quiet hours. |
 | **L3** | **Safe Auto-Accept** (`safeAutoAccept`) | OFF | **Strict Opt-in** · Local | Policy-gated automatic clicking for low-risk inline approval cards (`readonly-safe`, `dev-flow`, `custom`) protected by a **non-bypassable hard deny blacklist** (`rm -rf`, `git push --force`, `git reset --hard`, `DROP TABLE`, `curl\|sh`, `sudo`, `.env`, `~/.ssh`, etc.), dry-run mode, pause toggle, and 50-entry audit log. |
 | **L3** | **Quota Pulse** (`quotaPulse`) | OFF | 100% Offline · Read-Only | Zero-credential, zero-network 5h/7d local turn ledger combined with visible UI rate-limit / `Resets in ...` countdown parsing, keeping observed signals separate from local estimates. |
 | **CLI** | **Storage Doctor** (`storage-doctor`) | CLI | Read-Only Audit | Offline CLI (`agy-sag storage audit\|backup\|export`) that inspects `~/.gemini/antigravity/` disk usage, orphan folders, SQLite `.db-wal` lock safety, and exports secret-redacted Markdown/JSON session archives. |
@@ -198,7 +198,7 @@ Antigravity 2.0 Host (Electron 44 + language_server localhost UI)
 ## Development & Verification
 
 ```bash
-npm test                 # Run full native node:test suite (180/180 passing, zero external deps)
+npm test                 # Run full native node:test suite (182/182 passing, zero external deps)
 npm run i18n:validate    # Validate all 10 built-in + 9 extended UI translation packs (0 errors)
 npm run workbench:smoke  # Run automated HTTP smoke check against the offline workbench (17 markers)
 npm run doctor           # Read-only local environment diagnostics

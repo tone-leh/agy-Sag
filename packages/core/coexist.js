@@ -38,6 +38,8 @@
   const ALLOWED_AUTO_ACCEPT_POLICIES = Object.freeze(['readonly-safe', 'dev-flow', 'custom']);
   const ALLOWED_THEME_PRESETS = Object.freeze(['native', 'midnight-ink', 'nord-frost', 'warm-paper', 'oled-pure']);
   const ALLOWED_THEME_DENSITIES = Object.freeze(['compact', 'balanced', 'comfortable']);
+  const ALLOWED_RADAR_AUDIO_MODES = Object.freeze(['off', 'chime', 'tts', 'both']);
+  const QUIET_HOURS_RE = /^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)$/;
 
   const MODULE_CATALOG = Object.freeze([
     Object.freeze({ id: 'hostI18n', category: 'ui', defaultEnabled: true, aggressive: false }),
@@ -87,6 +89,8 @@
     resetDropPct: 10, // auto-reset dismiss state if usage drops by >=10% below threshold
     stallThresholdSeconds: 180, // 'off' | 60..900 (3 min default)
     radarNotifyMode: 'off', // 'off' | 'awaiting' | 'all' (opt-in blurred OS notifications)
+    radarAudioMode: 'off', // 'off' | 'chime' | 'tts' | 'both' (opt-in zero-network WebAudio / local TTS)
+    radarQuietHours: '', // '' | 'HH:MM-HH:MM' quiet window suppressing blurred alerts & audio
     hostI18nLocale: 'auto', // 'auto' | 'en' | 'zh-CN' | 'zh-TW' | 'ja' | 'ko' | 'es' | 'fr' | 'de' | 'ru' | 'pt-BR'
     hostI18nConflictPolicy: 'yield', // 'yield' | 'takeover'
     hostI18nCollectMissing: false, // opt-in collector for untranslated UI phrases
@@ -248,6 +252,16 @@
     const allowedNotify = ['off', 'awaiting', 'all'];
     const radarNotifyMode = allowedNotify.includes(src.radarNotifyMode) ? src.radarNotifyMode : fallback.radarNotifyMode;
 
+    const radarAudioMode = ALLOWED_RADAR_AUDIO_MODES.includes(src.radarAudioMode)
+      ? src.radarAudioMode
+      : fallback.radarAudioMode || 'off';
+
+    const rawQuiet = typeof src.radarQuietHours === 'string' ? src.radarQuietHours.trim() : null;
+    const radarQuietHours =
+      rawQuiet !== null
+        ? (rawQuiet === '' || QUIET_HOURS_RE.test(rawQuiet) ? rawQuiet : fallback.radarQuietHours || '')
+        : fallback.radarQuietHours || '';
+
     const hostI18nLocale = ALLOWED_HOST_LOCALES.includes(src.hostI18nLocale)
       ? src.hostI18nLocale
       : fallback.hostI18nLocale || 'auto';
@@ -352,6 +366,8 @@
       resetDropPct,
       stallThresholdSeconds,
       radarNotifyMode,
+      radarAudioMode,
+      radarQuietHours,
       hostI18nLocale,
       hostI18nConflictPolicy,
       hostI18nCollectMissing,

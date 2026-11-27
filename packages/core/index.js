@@ -127,6 +127,8 @@
       outlineBookmarks?.setEnabled?.(Boolean(nextCfg.modules?.outlineBookmarks));
       sessionRadar?.setEnabled?.(Boolean(nextCfg.modules?.sessionRadar));
       sessionRadar?.setNotifyMode?.(nextCfg.radarNotifyMode || 'off');
+      sessionRadar?.setAudioMode?.(nextCfg.radarAudioMode || 'off');
+      sessionRadar?.setQuietHours?.(nextCfg.radarQuietHours || '');
 
       if (hostI18n) {
         hostI18n.setConflictPolicy?.(nextCfg.hostI18nConflictPolicy || 'yield');
@@ -296,6 +298,9 @@
       coexist,
       enabled: Boolean(cfg.modules?.sessionRadar),
       notifyMode: cfg.radarNotifyMode || 'off',
+      audioMode: cfg.radarAudioMode || 'off',
+      quietHours: cfg.radarQuietHours || '',
+      now: options.now,
       getLang: options.getLang,
       onTransition: options.onRadarTransition,
       onNotify: options.onRadarNotify,
@@ -641,6 +646,7 @@
           getBookmarkState: () => outlineBookmarks?.getDebugState?.() || null,
           getPromptLibraryState: () => promptLibrary?.getDebugState?.() || null,
           onOpenPromptLibrary: () => promptLibrary?.open?.(),
+          onTestRadarAudio: () => sessionRadar?.testAudioAlert?.(),
           onExportPromptSnippets: () => promptLibrary?.exportSnippetsJson?.() || '{"version":1,"snippets":[]}',
           onImportPromptSnippets: (raw) => promptLibrary?.importSnippetsJson?.(raw) || { ok: false, errors: ['Prompt Library unavailable'] },
           onOpenVault: (q) => openVault(q),

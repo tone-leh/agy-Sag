@@ -65,7 +65,7 @@
 | **L2** | **提示词库**（`promptLibrary`） | 关闭 | 100% 离线 · 只读 NOV | 输入区入口按钮 + `Ctrl/Cmd+Alt+P` 命令面板：支持斜杠指令速填、6 个中英双语高频工程模板（内置 `{{变量=默认值}}` 表单与实时预览）、自定义片段增删改与 128 KB 校验导入导出、以及只读 `agy-NOV` `ops` 模板；默认安全追加不覆盖已有草稿，绝不自动发送。 |
 | **L2** | **轮次书签与档案库**（`outlineBookmarks`） | 关闭 | 100% 离线 | 在消息操作栏加入收藏星标、悬浮 `★ N` 快速回跳抽屉，以及 `Ctrl/Cmd+Shift+B` 跨会话可搜索档案库与脱敏合集导出。 |
 | **L3** | **卡死与燃尽监测**（`sessionWatchdog`） | **开启** | 100% 离线 | 估算到达阈值的剩余轮数（展示于状态胶囊 HUD）、标记单轮突增，并在流式输出长时间静默（默认 3 分钟）时轻提醒并支持一键 `+5m` 延后。 |
-| **L3** | **侧栏聚光与提醒**（`sessionRadar`） | 关闭 | 100% 离线 | 左侧会话列表顶部增加 `全部 / 运行中 / 待确认` 快捷筛选，支持窗口切后台时的桌面提醒。 |
+| **L3** | **侧栏聚光与提醒**（`sessionRadar`） | 关闭 | 100% 离线 | 左侧会话列表顶部增加 `全部 / 运行中 / 待确认` 快捷筛选，支持窗口切后台时的桌面通知、零外发 WebAudio 合成提示音、浏览器本地语音播报（TTS）与 `HH:MM-HH:MM` 静音时段。 |
 | **L3** | **安全自动审批**（`safeAutoAccept`） | 关闭 | **高敏默认关** · 本地 | 针对低风险内联审批卡片按策略自动放行（`readonly-safe` 只读安全 / `dev-flow` 研发闭环 / `custom` 自定义），内置**任何模式下均不可绕过的铁壁黑名单**（拦截 `rm -rf`、`git push --force`、`reset --hard`、`DROP TABLE`、`curl\|sh`、`sudo`、`.env`、`~/.ssh` 等），支持演练 Dry-Run、一键急停与 50 条审计日志。 |
 | **L3** | **配额脉冲**（`quotaPulse`） | 关闭 | 100% 离线 · 纯只读 | 零凭据接触、零网络请求的只读额度观测器：记录本地 5 小时与 7 天活动估算，并捕获页面中出现的 429 / 限流 / `Resets in ...` 倒计时提示，严格区分页面实测与本地估算，杜绝号池封号风险。 |
 | **CLI** | **本地存储体检**（`storage-doctor`） | CLI | 只读审计 | 独立命令行工具（`agy-sag storage audit\|backup\|export`），扫描 `~/.gemini/antigravity/` 空间占用、孤儿目录、SQLite `.db-wal` 活跃写锁状态，并支持密钥脱敏后的 Markdown/JSON 会话导出与安全备份。 |
@@ -198,7 +198,7 @@ Antigravity 2.0 宿主（Electron 44 + language_server 本地渲染界面）
 ## 本地开发与验证
 
 ```bash
-npm test                 # 运行全量原生 node:test 单测套件（180/180 通过，零外部依赖）
+npm test                 # 运行全量原生 node:test 单测套件（182/182 通过，零外部依赖）
 npm run i18n:validate    # 校验全部 10 国内置 + 9 扩展界面翻译词典与正则模板（0 错误）
 npm run workbench:smoke  # 对离线沙盒执行自动化 HTTP 烟雾校验（17 markers）
 npm run doctor           # 只读本机环境与双星共存诊断
