@@ -18,6 +18,7 @@ export const CORE_FILES = [
   'styles.js',
   'host-i18n-packs.js',
   'host-i18n.js',
+  'thought-translator.js',
   'draft-guard.js',
   'prompt-queue.js',
   'prompt-library.js',
@@ -28,6 +29,12 @@ export const CORE_FILES = [
   'nov-synergy.js',
   'clean-slate.js',
   'status-pill.js',
+  'settings/tab-overview.js',
+  'settings/tab-ui.js',
+  'settings/tab-conversation.js',
+  'settings/tab-guard.js',
+  'settings/tab-nov.js',
+  'settings/tab-advanced.js',
   'prism-bridge.js',
   'outline-bookmarks.js',
   'compact-guard.js',
@@ -42,6 +49,7 @@ const GLOBAL_KEYS = [
   '__agSagCoexist',
   '__agSagHostI18nPacks',
   '__agSagHostI18n',
+  '__agSagThoughtTranslator',
   '__agSagPromptQueue',
   '__agSagPromptLibrary',
   '__agSagReadingNav',
@@ -63,6 +71,12 @@ const GLOBAL_KEYS = [
   '__agSgDraftGuard',
   '__agSgCleanSlate',
   '__agSgStatusPill',
+  '__agSagSettingsTabOverview',
+  '__agSagSettingsTabUi',
+  '__agSagSettingsTabConversation',
+  '__agSagSettingsTabGuard',
+  '__agSagSettingsTabNov',
+  '__agSagSettingsTabAdvanced',
   '__agSgPrismBridge',
   '__agSgOutlineBookmarks',
   '__agSgStyles',
@@ -84,7 +98,7 @@ export const REMOVE_EXPRESSION = `(() => {
   try { document.getElementById('ag-sag-theme-css')?.remove(); } catch {}
   try { document.getElementById('ag-sag-queue-css')?.remove(); } catch {}
   try { document.querySelectorAll('[data-ag-sg-owned="1"], [data-ag-sag-owned="1"], .ag-sag-smooth-caret, .ag-sag-ambient-glow, .ag-sag-ctx-toast').forEach((n) => n.remove()); } catch {}
-  try { document.querySelectorAll('[data-ag-sag-code-folded], [data-ag-sag-code-enhanced], [data-ag-sag-code-wrap], [data-ag-sag-smooth-caret], [data-ag-sag-caret-host]').forEach((n) => { n.removeAttribute('data-ag-sag-code-folded'); n.removeAttribute('data-ag-sag-code-enhanced'); n.removeAttribute('data-ag-sag-code-wrap'); n.removeAttribute('data-ag-sag-smooth-caret'); n.removeAttribute('data-ag-sag-caret-host'); }); } catch {}
+  try { document.querySelectorAll('[data-ag-sag-code-folded], [data-ag-sag-code-enhanced], [data-ag-sag-code-wrap], [data-ag-sag-smooth-caret], [data-ag-sag-caret-host], [data-ag-sag-thought-hidden]').forEach((n) => { n.removeAttribute('data-ag-sag-code-folded'); n.removeAttribute('data-ag-sag-code-enhanced'); n.removeAttribute('data-ag-sag-code-wrap'); n.removeAttribute('data-ag-sag-smooth-caret'); n.removeAttribute('data-ag-sag-caret-host'); if (n.hasAttribute('data-ag-sag-thought-hidden')) { n.removeAttribute('data-ag-sag-thought-hidden'); if (n.style) n.style.display = ''; } }); } catch {}
   try { if (typeof CSS !== 'undefined' && CSS.highlights && CSS.highlights.delete) { for (const h of ['ag-sag-sf0','ag-sag-sf1','ag-sag-sf2','ag-sag-sf3','ag-sag-sf4']) CSS.highlights.delete(h); } } catch {}
   try { document.querySelectorAll('#ag-prism-pulse-bar, [data-ag-prism-pulse-bar="true"], #ag-pulse-status-bar, [data-ag-pulse-bar="true"]').forEach((h) => { h?.shadowRoot?.querySelectorAll?.('[data-ag-sg-owned="1"], [data-ag-sag-owned="1"]')?.forEach?.((n) => n.remove()); }); } catch {}
   try {
@@ -238,7 +252,7 @@ function scanAndCompactJs(src) {
     return REGEX_PRECEDING_PUNCT.has(lastSigChar);
   };
 
-  const NO_ASI_AFTER = new Set([';', '{', ',', '(', '[']);
+  const NO_ASI_AFTER = new Set([';', '{', ',', '(', '[', '=', '?', ':']);
   const emitCodeChar = (ch) => {
     if (ch === '\n') {
       flushIdent();
@@ -535,6 +549,138 @@ function minifyStaticCss(css) {
   return out;
 }
 
+function minifyThemeCssTemplates(code) {
+  // Compact leading indentation and newlines strictly inside multiline CSS template literal segments in theme-studio.js,
+  // skipping ${...} JS expressions intact so calc(...) spacing and JS tokens are preserved verbatim.
+  let out = '';
+  let i = 0;
+  const len = code.length;
+  while (i < len) {
+    const ch = code[i];
+    if (ch === "'" || ch === '"') {
+      const q = ch;
+      out += ch;
+      i += 1;
+      while (i < len) {
+        const c = code[i];
+        out += c;
+        i += 1;
+        if (c === '\\' && i < len) {
+          out += code[i];
+          i += 1;
+        } else if (c === q) {
+          break;
+        }
+      }
+      continue;
+    }
+    if (ch !== '`') {
+      out += ch;
+      i += 1;
+      continue;
+    }
+    // Scan template literal from opening ` to matching `
+    let tplRaw = '`';
+    i += 1;
+    let seg = '';
+    const flushSeg = () => {
+      if (!seg) return;
+      if (seg.includes('\n')) {
+        tplRaw += minifyStaticCss(seg);
+      } else {
+        tplRaw += seg;
+      }
+      seg = '';
+    };
+    while (i < len) {
+      const c = code[i];
+      if (c === '\\' && i + 1 < len) {
+        seg += c + code[i + 1];
+        i += 2;
+        continue;
+      }
+      if (c === '$' && code[i + 1] === '{') {
+        flushSeg();
+        tplRaw += '${';
+        i += 2;
+        let depth = 1;
+        while (i < len && depth > 0) {
+          const ec = code[i];
+          if (ec === "'" || ec === '"' || ec === '`') {
+            const q = ec;
+            tplRaw += ec;
+            i += 1;
+            while (i < len) {
+              const sc = code[i];
+              tplRaw += sc;
+              i += 1;
+              if (sc === '\\' && i < len) {
+                tplRaw += code[i];
+                i += 1;
+              } else if (sc === q) {
+                break;
+              }
+            }
+            continue;
+          }
+          if (ec === '{') depth += 1;
+          else if (ec === '}') depth -= 1;
+          tplRaw += ec;
+          i += 1;
+        }
+        continue;
+      }
+      if (c === '`') {
+        flushSeg();
+        tplRaw += '`';
+        i += 1;
+        break;
+      }
+      seg += c;
+      i += 1;
+    }
+    out += tplRaw;
+  }
+  return out;
+}
+
+function packExtExactLossless(exactObj) {
+  const rawJson = JSON.stringify(exactObj || {});
+  // Frequency-driven lossless dictionary substitution using Private Use Area codepoints (U+E000..U+E03F).
+  // Verified round-trip identical at bundle time; falls back to plain JSON if any collision occurs.
+  const freq = new Map();
+  const wordRe = /[A-Za-zА-Яа-яЁё0-9_-]{7,24}/g;
+  let m;
+  while ((m = wordRe.exec(rawJson)) !== null) {
+    const tok = m[0];
+    freq.set(tok, (freq.get(tok) || 0) + 1);
+  }
+  const candidates = Array.from(freq.entries())
+    .map(([tok, cnt]) => ({ tok, cnt, gain: (cnt - 1) * (Buffer.byteLength(tok, 'utf8') - 3) - 6 }))
+    .filter((x) => x.gain > 60)
+    .sort((a, b) => b.gain - a.gain)
+    .slice(0, 64);
+
+  let packed = rawJson;
+  const dict = [];
+  for (const { tok } of candidates) {
+    const ch = String.fromCharCode(0xe000 + dict.length);
+    if (rawJson.includes(ch)) continue;
+    const parts = packed.split(tok);
+    if (parts.length > 3 && (parts.length - 1) * (Buffer.byteLength(tok, 'utf8') - 3) > Buffer.byteLength(tok, 'utf8') + 12) {
+      packed = parts.join(ch);
+      dict.push(tok);
+    }
+  }
+  if (!dict.length) return null;
+  let check = packed;
+  for (let i = dict.length - 1; i >= 0; i -= 1) {
+    check = check.split(String.fromCharCode(0xe000 + i)).join(dict[i]);
+  }
+  if (check !== rawJson) return null;
+  return { d: dict, s: packed };
+}
+
 function compactCorePart(part) {
   let code = compactCoreSource(part.code);
   if (part.file === 'styles.js') {
@@ -549,6 +695,8 @@ function compactCorePart(part) {
     code = code.replace(/const PRISM_SHADOW_CSS\s*=\s*`([\s\S]*?)`\.trim\(\)/, (_m, css) => {
       return `const PRISM_SHADOW_CSS=\`${minifyStaticCss(css)}\`.trim()`;
     });
+  } else if (part.file === 'theme-studio.js') {
+    code = minifyThemeCssTemplates(code);
   }
   return code;
 }
@@ -580,9 +728,29 @@ export function buildInjectExpression(config = null, opts = {}) {
         opts.navigatorLang || ''
       );
   const extPack = resolvedExtLoc ? readExtendedPackFile(resolvedExtLoc) : null;
-  const extPrelude = extPack
-    ? `window.__agSagExtPacks = window.__agSagExtPacks || {}; window.__agSagExtPacks[${JSON.stringify(resolvedExtLoc)}] = ${JSON.stringify(extPack)};`
-    : '';
+  let extPrelude = '';
+  if (extPack) {
+    const compactPatterns = Array.isArray(extPack.patterns)
+      ? extPack.patterns.map((p) => (p?.flags && p.flags !== 'i' ? [p.source, p.replace, p.flags] : [p?.source || '', p?.replace || '']))
+      : [];
+    const packedExact = packExtExactLossless(extPack.exact || {});
+    if (packedExact) {
+      const wirePack = {
+        meta: { locale: extPack.meta?.locale || resolvedExtLoc },
+        d: packedExact.d,
+        s: packedExact.s,
+        p: compactPatterns,
+      };
+      extPrelude = `(()=>{const _w=${JSON.stringify(wirePack)};let _s=_w.s;for(let i=_w.d.length-1;i>=0;i--)_s=_s.split(String.fromCharCode(0xe000+i)).join(_w.d[i]);window.__agSagExtPacks=window.__agSagExtPacks||{};window.__agSagExtPacks[${JSON.stringify(resolvedExtLoc)}]={meta:_w.meta,exact:JSON.parse(_s),patterns:_w.p.map(x=>({source:x[0],flags:x[2]||'i',replace:x[1]}))};})();`;
+    } else {
+      const wirePack = {
+        meta: { locale: extPack.meta?.locale || resolvedExtLoc },
+        exact: extPack.exact || {},
+        p: compactPatterns,
+      };
+      extPrelude = `(()=>{const _w=${JSON.stringify(wirePack)};window.__agSagExtPacks=window.__agSagExtPacks||{};window.__agSagExtPacks[${JSON.stringify(resolvedExtLoc)}]={meta:_w.meta,exact:_w.exact,patterns:_w.p.map(x=>({source:x[0],flags:x[2]||'i',replace:x[1]}))};})();`;
+    }
+  }
 
   return `(() => {
   try {

@@ -250,6 +250,8 @@ export function buildLaunchSpec({
   const posixHome = rawHome.startsWith('/') ? rawHome : path.resolve(rawHome);
   const linuxCandidates = [
     path.posix.join(posixHome, '.local', 'bin', 'antigravity'),
+    path.posix.join(posixHome, '.local', 'share', 'flatpak', 'exports', 'bin', 'com.google.Antigravity'),
+    '/var/lib/flatpak/exports/bin/com.google.Antigravity',
     '/usr/share/antigravity/antigravity',
     '/usr/lib/antigravity/antigravity',
     '/opt/Antigravity/antigravity',
@@ -1263,10 +1265,16 @@ export async function evaluateLaunchPlan(options = {}) {
     };
   }
 
+  const displayWarning =
+    platform === 'linux' && !getEnvCaseInsensitive(env, 'DISPLAY') && !getEnvCaseInsensitive(env, 'WAYLAND_DISPLAY')
+      ? 'No DISPLAY or WAYLAND_DISPLAY detected in Linux environment; GUI launch requires an active desktop session.'
+      : null;
+
   return {
     ok: true,
     action: 'launch',
     message: `Ready to launch Antigravity with --remote-debugging-port=${port}.`,
+    ...(displayWarning ? { displayWarning } : {}),
     platform,
     port,
     launchSpec,

@@ -61,10 +61,14 @@
   const ALLOWED_THEME_CODE_FONTS = Object.freeze(['default', 'jetbrains', 'cascadia', 'fira', 'sfmono', 'sarasa']);
   const ALLOWED_THEME_AMBIENT_GLOWS = Object.freeze(['off', 'subtle', 'vivid']);
   const ALLOWED_RADAR_AUDIO_MODES = Object.freeze(['off', 'chime', 'tts', 'both']);
+  const ALLOWED_THOUGHT_ENGINES = Object.freeze(['mt', 'openai', 'anthropic', 'gemini', 'ollama']);
+  const ALLOWED_THOUGHT_TRIGGERS = Object.freeze(['auto', 'manual']);
+  const ALLOWED_THOUGHT_VIEWS = Object.freeze(['bilingual', 'translated']);
   const QUIET_HOURS_RE = /^([01]\d|2[0-3]):([0-5]\d)-([01]\d|2[0-3]):([0-5]\d)$/;
 
   const MODULE_CATALOG = Object.freeze([
     Object.freeze({ id: 'hostI18n', category: 'ui', defaultEnabled: true, aggressive: false }),
+    Object.freeze({ id: 'thoughtTranslate', category: 'ui', defaultEnabled: false, aggressive: false }),
     Object.freeze({ id: 'compactGuard', category: 'session', defaultEnabled: true, aggressive: false }),
     Object.freeze({ id: 'precompactExport', category: 'session', defaultEnabled: true, aggressive: false }),
     Object.freeze({ id: 'draftGuard', category: 'composer', defaultEnabled: true, aggressive: false }),
@@ -87,6 +91,7 @@
 
   const MODULE_META = Object.freeze({
     hostI18n: Object.freeze({ id: 'hostI18n', group: 'ui', layer: 'L1', settingsTab: 'ui', labelKey: 'modHostI18n', descKey: 'modDescHostI18n', defaultEnabled: true, aggressive: false, parentId: null }),
+    thoughtTranslate: Object.freeze({ id: 'thoughtTranslate', group: 'ui', layer: 'L1', settingsTab: 'ui', labelKey: 'modThoughtTranslate', descKey: 'modDescThoughtTranslate', defaultEnabled: false, aggressive: false, parentId: null }),
     themeStudio: Object.freeze({ id: 'themeStudio', group: 'ui', layer: 'L1', settingsTab: 'ui', labelKey: 'modThemeStudio', descKey: 'modDescThemeStudio', defaultEnabled: false, aggressive: false, parentId: null }),
     readingNav: Object.freeze({ id: 'readingNav', group: 'ui', layer: 'L1', settingsTab: 'ui', labelKey: 'modReadingNav', descKey: 'modDescReadingNav', defaultEnabled: false, aggressive: false, parentId: null }),
     compactGuard: Object.freeze({ id: 'compactGuard', group: 'conversation', layer: 'L2', settingsTab: 'conversation', labelKey: 'modCompactGuard', descKey: 'modDescCompactGuard', defaultEnabled: true, aggressive: false, parentId: null }),
@@ -116,6 +121,11 @@
     hostI18nLocale: 'auto', // 'auto' | 'en' | 'zh-CN' | 'zh-TW' | 'ja' | 'ko' | 'es' | 'fr' | 'de' | 'ru' | 'pt-BR'
     hostI18nConflictPolicy: 'yield', // 'yield' | 'takeover'
     hostI18nCollectMissing: false, // opt-in collector for untranslated UI phrases
+    thoughtEngine: 'mt', // 'mt' | 'openai' | 'anthropic' | 'gemini' | 'ollama'
+    thoughtTargetLang: 'auto', // 'auto' | target locale code
+    thoughtTrigger: 'auto', // 'auto' | 'manual'
+    thoughtViewMode: 'bilingual', // 'bilingual' | 'translated'
+    thoughtTranslateTitles: false, // opt-in sidebar/breadcrumb title translation
     autoAcceptPolicy: 'readonly-safe', // 'readonly-safe' | 'dev-flow' | 'custom'
     autoAcceptCustomPatterns: Object.freeze([]), // string[] allow patterns (always subordinate to HARD_DENY_PATTERNS)
     autoAcceptDryRun: false, // audit-only simulation mode
@@ -140,6 +150,7 @@
     quotaSoftTurns7d: 350, // 30..5000 local soft weekly warning
     modules: Object.freeze({
       hostI18n: true, // Zero-ASAR native UI multi-language translator
+      thoughtTranslate: false, // strict opt-in: multi-engine thought & title translator (Node sidecar proxy)
       compactGuard: true,
       precompactExport: true,
       outlineBookmarks: false, // opt-in: adds bookmark icon beside Copy/Undo in user action bar
@@ -160,6 +171,7 @@
       id: 'essential',
       modules: Object.freeze({
         hostI18n: true,
+        thoughtTranslate: false,
         compactGuard: true,
         precompactExport: true,
         draftGuard: true,
@@ -178,6 +190,7 @@
       id: 'i18n-only',
       modules: Object.freeze({
         hostI18n: true,
+        thoughtTranslate: false,
         compactGuard: false,
         precompactExport: false,
         draftGuard: false,
@@ -196,6 +209,7 @@
       id: 'power',
       modules: Object.freeze({
         hostI18n: true,
+        thoughtTranslate: false,
         compactGuard: true,
         precompactExport: true,
         draftGuard: true,
@@ -215,6 +229,7 @@
       autoAcceptPolicy: 'readonly-safe',
       modules: Object.freeze({
         hostI18n: true,
+        thoughtTranslate: false,
         compactGuard: true,
         precompactExport: true,
         draftGuard: true,
@@ -305,6 +320,27 @@
       src.hostI18nCollectMissing !== undefined
         ? Boolean(src.hostI18nCollectMissing)
         : Boolean(fallback.hostI18nCollectMissing);
+
+    const thoughtEngine = ALLOWED_THOUGHT_ENGINES.includes(src.thoughtEngine)
+      ? src.thoughtEngine
+      : fallback.thoughtEngine || 'mt';
+
+    const thoughtTargetLang = ALLOWED_HOST_LOCALES.includes(src.thoughtTargetLang)
+      ? src.thoughtTargetLang
+      : fallback.thoughtTargetLang || 'auto';
+
+    const thoughtTrigger = ALLOWED_THOUGHT_TRIGGERS.includes(src.thoughtTrigger)
+      ? src.thoughtTrigger
+      : fallback.thoughtTrigger || 'auto';
+
+    const thoughtViewMode = ALLOWED_THOUGHT_VIEWS.includes(src.thoughtViewMode)
+      ? src.thoughtViewMode
+      : fallback.thoughtViewMode || 'bilingual';
+
+    const thoughtTranslateTitles =
+      src.thoughtTranslateTitles !== undefined
+        ? Boolean(src.thoughtTranslateTitles)
+        : Boolean(fallback.thoughtTranslateTitles);
 
     const autoAcceptPolicy = ALLOWED_AUTO_ACCEPT_POLICIES.includes(src.autoAcceptPolicy)
       ? src.autoAcceptPolicy
@@ -407,6 +443,7 @@
     const fbMods = fallback.modules || DEFAULT_CONFIG.modules;
     const modules = {
       hostI18n: mSrc.hostI18n !== undefined ? Boolean(mSrc.hostI18n) : fbMods.hostI18n !== false,
+      thoughtTranslate: mSrc.thoughtTranslate !== undefined ? Boolean(mSrc.thoughtTranslate) : Boolean(fbMods.thoughtTranslate),
       compactGuard: mSrc.compactGuard !== undefined ? Boolean(mSrc.compactGuard) : fbMods.compactGuard,
       precompactExport: mSrc.precompactExport !== undefined ? Boolean(mSrc.precompactExport) : fbMods.precompactExport,
       outlineBookmarks: mSrc.outlineBookmarks !== undefined ? Boolean(mSrc.outlineBookmarks) : fbMods.outlineBookmarks,
@@ -436,6 +473,11 @@
       hostI18nLocale,
       hostI18nConflictPolicy,
       hostI18nCollectMissing,
+      thoughtEngine,
+      thoughtTargetLang,
+      thoughtTrigger,
+      thoughtViewMode,
+      thoughtTranslateTitles,
       autoAcceptPolicy,
       autoAcceptCustomPatterns,
       autoAcceptDryRun,

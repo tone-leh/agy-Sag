@@ -36,6 +36,7 @@ import {
   readNovState,
 } from './nov-bridge.mjs';
 import { auditAntigravityStorage } from './storage-doctor.mjs';
+import { TranslatorService } from './translator-service.mjs';
 
 export const HOST_BRIDGE_BINDING_NAME = '__agSagHostBridge';
 
@@ -645,6 +646,7 @@ export class SagWatchDaemon {
         : !hasCustomEval && typeof this.WebSocketImpl === 'function';
     this.deferExtPack = typeof options.deferExtPack === 'boolean' ? options.deferExtPack : this.enableHostBridge;
     this.storageDataDir = options.storageDataDir || undefined;
+    this.translatorService = options.translatorService || new TranslatorService(options.translatorOpts || {});
     this.buildInject =
       options.buildInject ||
       (({ extLocale = null } = {}) => ({
@@ -802,6 +804,19 @@ export class SagWatchDaemon {
           } catch {
             return { reqId, ok: false, error: 'Storage audit failed' };
           }
+        }
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          (parsed.type === 'sag:translate_status' ||
+            parsed.type === 'sag:translate_save_provider' ||
+            parsed.type === 'sag:translate_text' ||
+            parsed.type === 'sag:translate_diagnose')
+        ) {
+          const reqId = typeof parsed.reqId === 'string' && parsed.reqId.length <= 128 ? parsed.reqId : null;
+          return Promise.resolve(this.translatorService.handleBridgeRequest(parsed.type, parsed.payload || {}))
+            .then((res) => ({ reqId, ...(res || { ok: false, error: 'Translator service error' }) }))
+            .catch((err) => ({ reqId, ok: false, error: err?.message || 'Translator service error' }));
         }
       } catch {}
     }

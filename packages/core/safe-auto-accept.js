@@ -454,6 +454,33 @@
       pattern: /\breboot\b/i,
     }),
 
+    // Windows PowerShell / CMD destructive & remote execution commands
+    Object.freeze({
+      id: 'win-remove-item-force',
+      label: 'Remove-Item -Recurse -Force',
+      pattern: /\b(?:remove-item|ri)\b[^\n;|&]{0,160}(?:-recurse\b[^\n;|&]{0,80}-force\b|-force\b[^\n;|&]{0,80}-recurse\b|-r\b[^\n;|&]{0,60}-fo\b)/i,
+    }),
+    Object.freeze({
+      id: 'win-cmd-rd-del-force',
+      label: 'rd /s /q or del /f /s',
+      pattern: /\b(?:(?:rd|rmdir)\b[^\n;|&]{0,100}\/s\b[^\n;|&]{0,40}\/q\b|(?:del|erase)\b[^\n;|&]{0,100}\/f\b[^\n;|&]{0,40}\/s\b)/i,
+    }),
+    Object.freeze({
+      id: 'win-iwr-iex',
+      label: 'PowerShell irm/iwr | iex',
+      pattern: /\b(?:irm|iwr|invoke-webrequest|invoke-restmethod)\b[^\n|]{0,180}\|\s*(?:iex|invoke-expression)\b|\b(?:iex|invoke-expression)\s*\(\s*(?:irm|iwr|invoke-webrequest|invoke-restmethod)\b/i,
+    }),
+    Object.freeze({
+      id: 'win-disk-format',
+      label: 'format / Clear-Disk / diskpart',
+      pattern: /\b(?:clear-disk|diskpart|format\s+[a-z]:)\b/i,
+    }),
+    Object.freeze({
+      id: 'win-taskkill-force',
+      label: 'taskkill /F or Stop-Process -Force',
+      pattern: /\b(?:taskkill\b[^\n;|&]{0,80}\/f\b|stop-process\b[^\n;|&]{0,80}-force\b)/i,
+    }),
+
     // Sensitive credentials & system paths
     Object.freeze({
       id: 'dotenv',

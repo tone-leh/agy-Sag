@@ -21,7 +21,7 @@
 | **技术路线** | 100% 官方原生 MCP Apps (SEP-1865) + Lifecycle Hooks，**零 ASAR、零 CDP** | Zero-ASAR Electron CDP 渲染层引擎 + Watch Sidecar + 离线存储体检 CLI |
 | **升级与安全特性** | 严格走官方插件协议，客户端任意升级稳定生效 | 零改动 `app.asar` 与 Apple 公证签名，Watch 守护进程自动重挂，卸载 0 残留 |
 | **主攻场景** | 侧边栏/全局工程工作台、改前安全拦截与快照、Stop 校验门、工作树与 Spec 写锁、长期记忆与远程遥控 | 统一 6-Tab 控制中心与全局抽屉、底栏分段 HUD、10 国界面多语言、提示词命令面板与排队、外观排版与本地数据治理 |
-| **核心模块矩阵** | **13 大零 CDP 纯原生模块**，分 5 大分类（5 档预设，6–47 工具）：`review`、`guard`、`xray`、`turbo`、`radar`、`verify`、`worktree`、`spec`、`studio`、`canvas`、`mem`、`ops`、`remote` | **13 大渲染模块 + 离线存储 CLI**（4 档预设）：`hostI18n`、`themeStudio`、`readingNav`、`compactGuard`、`precompactExport`、`draftGuard`、`promptQueue`、`promptLibrary`、`outlineBookmarks`、`sessionWatchdog`、`sessionRadar`、`safeAutoAccept`、`quotaPulse`、`storage-doctor` |
+| **核心模块矩阵** | **13 大零 CDP 纯原生模块**，分 5 大分类（5 档预设，6–47 工具）：`review`、`guard`、`xray`、`turbo`、`radar`、`verify`、`worktree`、`spec`、`studio`、`canvas`、`mem`、`ops`、`remote` | **14 大渲染模块 + 离线存储 CLI**（4 档预设）：`hostI18n`、`thoughtTranslate`（按需开启）、`themeStudio`、`readingNav`、`compactGuard`、`precompactExport`、`draftGuard`、`promptQueue`、`promptLibrary`、`outlineBookmarks`、`sessionWatchdog`、`sessionRadar`、`safeAutoAccept`、`quotaPulse`、`storage-doctor` |
 
 ### 双星联动化学反应（零额外网络端口）
 
@@ -47,18 +47,19 @@
 
 ## 统一控制中心与分段状态胶囊 HUD
 
-- **单一真源 6-Tab 控制中心（`概览 | 界面 | 对话 | 守护 | 双星 NOV | 高级`）**：支持从原生 **Settings → Appearance**（左侧导航栏自动注入 `agy-Sag` 快捷锚点）、全局快捷键 **`Ctrl/Cmd+Alt+,`**（`420px` 右侧滑出抽屉，`Esc` 关闭）或状态卡底部「完整设置 →」直达。全部 13 个模块总开关集中在 `概览` 页（杜绝重复开关），低频项收纳在 `<details>` 折叠区，顶部搜索框跨全 Tab 即时过滤，`高级` 页提供配置 JSON 导出/校验导入、内联二次确认重置（零 `window.confirm`）、运行态诊断与零写入 **本地存储体检**（`sag:storage_audit`）；按 **`Ctrl/Cmd+Alt+/`** 随时呼出当前生效快捷键速查浮层。
+- **单一真源 6-Tab 控制中心（`概览 | 界面 | 对话 | 守护 | 双星 NOV | 高级`）**：支持从原生 **Settings → Appearance**（左侧导航栏自动注入 `agy-Sag` 快捷锚点）、全局快捷键 **`Ctrl/Cmd+Alt+,`**（`420px` 右侧滑出抽屉，`Esc` 关闭）或状态卡底部「完整设置 →」直达。全部 14 个模块总开关集中在 `概览` 页（杜绝重复开关），低频项收纳在 `<details>` 折叠区，顶部搜索框跨全 Tab 即时过滤，`高级` 页提供配置 JSON 导出/校验导入、内联二次确认重置（零 `window.confirm`）、运行态诊断与零写入 **本地存储体检**（`sag:storage_audit`）；按 **`Ctrl/Cmd+Alt+/`** 随时呼出当前生效快捷键速查浮层。
 - **统一分段式状态胶囊 HUD 与上下文透镜**：输入框底栏以单枚紧凑胶囊汇总实时指标，各分段严格跟随对应模块开关增删（`ctx` 12px 圆环、`eta` 剩余轮数或 `m:ss` 停滞、`quota`、`queue`、`bookmarks`、`autoAccept`、`NOV`）。展开浮卡呈现纯本地 **三色上下文构成条**（提问 / 正文 / 代码与工具）、**Top-3 最重轮次跳转**、上一轮流式耗时、5h 配额进度条与一键「导出 MD」。检测到 Obsidian Prism 上下文卡片时自动无痕内嵌其 Shadow DOM，底栏零多余胶囊。
 
 ---
 
-## 13 大独立开关渲染模块 + 离线存储体检（按需开关）
+## 14 大独立开关渲染模块 + 离线存储体检（按需开关）
 
 所有模块均可在 `概览` 页或命令行单独开关。关闭的模块零 DOM 观察器、零事件监听、零定时器开销。
 
 | 层级 | 模块 | 默认状态 | 隔离与风险分级 | 核心能力 |
 | :---: | :--- | :---: | :--- | :--- |
 | **L1** | **原生界面翻译**（`hostI18n`） | **开启** | 100% 离线 · 无损热切 | 实时翻译 Antigravity 2.x 原生桌面界面，内置 **10 国语言**（简中、繁中、日、韩、西、法、德、俄、葡、英文还原）。每语种覆盖约 5,400 词条（465 核心 + 分层扩展词库 + 424 正则模板），物理豁免代码块/输入框/对话正文/斜杠命令名，穿透 Shadow DOM，支持自定义 JSON 词典热导入。 |
+| **L1** | **思考与标题翻译**（`thoughtTranslate`） | 关闭 | **高敏默认关** · Sidecar 代理 | 实时翻译 Agent 思考块与可选侧栏/面包屑标题。支持 **5 类引擎**：免 Key 轻量机器翻译（及自定义端点）、用户自填 API Key **OpenAI 兼容接口**（OpenAI / DeepSeek / OpenRouter / Groq / LM Studio）、**Anthropic**、**Gemini** 与本机离线 **Ollama**。全部请求经零端口 Node Sidecar 代理转发，API Key 独立存放在 `0600` 本地文件（自动排除在配置导出与备份之外），内置 SSRF/重定向防线、LRU 缓存、双语对照/沉浸译文切换与 Prism 礼让。 |
 | **L1** | **光学主题与美学皮肤**（`themeStudio`） | 关闭 | 100% 离线 | 零 `:has()` 全表面视觉与动效引擎：内置 **15 套精选深浅与风格皮肤**（经典深色 7 套含黑曜深空/暖炭玄岩/午夜墨蓝/北欧冰霜/纯黑 OLED/东京之夜/摩卡可可、经典浅色 3 套含白昼冷晶/暖白画册/玫瑰晨曦、风格美学 5 套含抹茶手帐/怪盗猩红/线稿素描/像素极客/极光玻璃）、**8 套一键外观方案**、跟随宿主明暗自动配对、7 档强调色覆写、4 档表面材质（含黑曜切面/纸墨手帐/极光玻璃）、4 档全局圆角、6 档代码字体栈（含更纱黑体）与连字、CJK 调优、`CSS.highlights` 五级水墨流式淡入、FastDOM 丝滑输入光标、0fps 底缘语义微光（避让 Browser Hole）、净化自定义 CSS，以及向 `plugin://` 扩展面板（含 `agy-NOV`）同步主题变量。 |
 | **L1** | **阅读导航**（`readingNav`） | 关闭 | 100% 离线 | 流式保护的长代码块折叠（默认 `>= 40` 行，支持 `20/40/60/80`，同时覆盖对话区与 `artifact-view`），收起自动 `scrollTop` 补偿、吸顶行数/展开/换行/复制条、`Alt+↑/↓` 跳轮、无上限可滚动迷你导轨与一键顺滑滚底（`⤓`）、`Alt+F` 本会话大纲实时搜索、一键折展全部代码与步骤，以及零 `innerHTML` Mermaid 缩放与 SVG 导出模态（遇 Prism 自动礼让）。 |
 | **L2** | **自动压缩保护**（`compactGuard`） | **开启** | 100% 离线 | 自定义预警与触发阈值（`关闭` 或 `50%–98%`，默认 `80%`），默认静默自动压缩并启用视口滚动盾（阅读历史消息时不跳屏）；兼容 Lexical 两步斜杠选择、`/clear` 轻量重开与压缩后锚点续接条。 |
@@ -171,23 +172,26 @@ Antigravity 2.0 宿主（Electron 44 + language_server 本地渲染界面）
  │    ├── cli/sag-cli.mjs        — 统一命令入口（launch / keepalive / attach / watch / doctor / i18n / storage / nov / workbench）
  │    ├── cli/platform-utils.mjs — 跨平台入口软链校验、Windows/Linux 路径边界归一与原子替换重试
  │    ├── cli/launcher.mjs       — 跨平台 CDP 启动与保活（Win PowerShell UTF-8/pwsh/Scoop、Linux XDG/Flatpak/Snap//proc、Prism 礼让与 0600 原子状态）
- │    ├── cli/watch-daemon.mjs   — 自适应退避（3s -> 30s）CDP 守护进程、实时 nov:feed 推送与零端口桥（sag:ext_pack / sag:nov_templates / sag:nov_feed）
- │    ├── cli/nov-bridge.mjs     — 0600 原子化 agy-NOV v0.5 配置桥（13 模块 / 5 预设）+ 只读脱敏模板与实时数据流读取器
+ │    ├── cli/watch-daemon.mjs   — 自适应退避（3s -> 30s）CDP 守护进程、实时 nov:feed 推送与零端口桥（sag:ext_pack / sag:nov_* / sag:storage_audit / sag:translate_*）
+ │    ├── cli/translator-service.mjs — 严格按需开启的 5 引擎思考与标题翻译代理（MT / OpenAI / Anthropic / Gemini / Ollama），0600 密钥隔离与 SSRF 防护
+ │    ├── cli/nov-bridge.mjs     — 0600 原子化 agy-NOV 配置桥（13 模块 / 5 预设）+ 只读脱敏模板与实时数据流读取器
  │    ├── cli/bundle.mjs         — 零构建 UMD 拼接器（SHA-256 幂等附着、<=1.6MB 扩展包预注入与一键全清）
  │    └── cli/storage-doctor.mjs — 只读存储诊断、WAL 活跃锁防护与密钥脱敏导出
  └── 渲染层模块化 UMD 核心（packages/core/，全部支持 100% 无损 destroy()）
-      ├── coexist.js             — 配置校验、4 档预设、13 模块目录、宿主礼让与失焦休眠
+      ├── coexist.js             — 配置校验、4 档预设、14 模块目录、宿主礼让与失焦休眠
       ├── host-i18n*.js          — 10 国语言 WeakMap DOM 翻译引擎 + 465 核心 + ~5k 分层扩展词库（locales/ext/）
+      ├── thought-translator.js  — 严格默认关闭的思考与侧栏标题实时翻译（双语/纯译文、Prism 自动礼让）
       ├── compact-guard.js       — 静默 /compact、视口滚动盾、/clear 轻重开与锚点续接
       ├── draft-guard.js         — 按会话未发送草稿自动保护
       ├── prompt-queue.js        — 流式排队预写与四重安全熔断出队（含 NOV Spec 写锁）
       ├── prompt-library.js      — Ctrl/Cmd+Alt+P 提示词命令面板、{{变量}} 片段库与只读 NOV 模板
       ├── reading-nav.js         — 长代码块自动折叠、吸顶复制条与 Alt+↑/↓ 迷你轮次导轨
-      ├── safe-auto-accept.js    — 策略门控自动审批 + 不可绕过铁壁高危黑名单
+      ├── safe-auto-accept.js    — 策略门控自动审批 + 不可绕过 POSIX/Windows 铁壁高危黑名单
       ├── theme-studio.js        — 零 :has() 15 套光学皮肤、8 套外观方案、材质圆角、流式淡入与丝滑光标
       ├── quota-pulse.js         — 100% 只读 5h/7d 配额估算与限流信号解析
       ├── status-pill.js         — 底栏统一分段状态胶囊 HUD 与 Prism 上下文卡片内嵌
-      └── prism-bridge.js        — 单一真源 6-Tab 设置中心、色板画廊、跨 Tab 搜索与 Ctrl/Cmd+Alt+, 全局抽屉
+      ├── settings/tab-*.js      — 模块化 6-Tab 设置页渲染器（overview / ui / conversation / guard / nov / advanced）
+      └── prism-bridge.js        — 设置中心外壳、全局搜索、动态快捷键表与 Ctrl/Cmd+Alt+, 全局抽屉
 ```
 
 **五条安全红线**：
@@ -202,13 +206,13 @@ Antigravity 2.0 宿主（Electron 44 + language_server 本地渲染界面）
 ## 本地开发与验证
 
 ```bash
-npm test                 # 运行全量原生 node:test 单测套件（238/238 通过，零外部依赖）
+npm test                 # 运行全量原生 node:test 单测套件（243/243 通过，零外部依赖）
 npm run i18n:validate    # 校验全部 10 国内置 + 9 扩展界面翻译词典与正则模板（0 错误）
 npm run workbench:smoke  # 对离线沙盒执行自动化 HTTP 烟雾校验（22 markers）
 npm run doctor           # 只读本机环境与双星共存诊断
 ```
 
-完整演进路线与产品信息架构见 [docs/ROADMAP.md](./docs/ROADMAP.md) 与 [docs/PRODUCT-IA.md](./docs/PRODUCT-IA.md)。
+社区贡献指引见 [CONTRIBUTING.md](./CONTRIBUTING.md)，完整演进路线与产品信息架构见 [docs/ROADMAP.md](./docs/ROADMAP.md) 与 [docs/PRODUCT-IA.md](./docs/PRODUCT-IA.md)。
 
 ---
 

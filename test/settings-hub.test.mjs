@@ -247,7 +247,7 @@ function createHubDom({ savedTab = null, withNativeSettings = true } = {}) {
   return { win, doc, storage, store, copied, docListeners };
 }
 
-test('Settings Hub enforces single-source-of-truth: all 13 module switches appear once in overview and zero in layer tabs', () => {
+test('Settings Hub enforces single-source-of-truth: all 14 module switches appear once in overview and zero in layer tabs', () => {
   const { win, doc, storage } = createHubDom();
   const api = core.mountSag({
     win,
@@ -270,8 +270,8 @@ test('Settings Hub enforces single-source-of-truth: all 13 module switches appea
 
     const modButtons = sec.querySelectorAll('[data-ag-sag-mod]');
     const modIds = modButtons.map((b) => b.getAttribute('data-ag-sag-mod'));
-    assert.equal(modIds.length, 13);
-    assert.equal(new Set(modIds).size, 13, 'Every module switch must be unique without duplicates');
+    assert.equal(modIds.length, 14);
+    assert.equal(new Set(modIds).size, 14, 'Every module switch must be unique without duplicates');
     assert.equal(modButtons.every((b) => b.getAttribute('role') === 'switch'), true, 'All overview switches must use role=switch');
 
     // compactGuard card holds precompactExport sub-switch
@@ -475,7 +475,7 @@ test('Settings Drawer opens via Ctrl+Alt+, closes via Esc, shares renderHub, ren
     assert.equal(api.prismBridge.isDrawerOpen(), true);
     const drawer = doc.querySelector(`[data-testid="${prismBridge.DRAWER_TESTID}"]`);
     assert.ok(drawer);
-    assert.equal(drawer.querySelectorAll('[data-ag-sag-mod]').length, 13);
+    assert.equal(drawer.querySelectorAll('[data-ag-sag-mod]').length, 14);
 
     // Switch to NOV tab inside drawer and verify 5 category groups + 13 module cards + hex N icon
     drawer.querySelector('[data-ag-sag-subtab="nov"]').click();

@@ -890,6 +890,31 @@ ${coreScript}
           },
         };
       }
+      if (type === 'sag:translate_status') {
+        return {
+          ok: true,
+          reqId,
+          data: {
+            secretsPathDisplay: '~/.config/agy-sag/translator-secrets.json (demo)',
+            providers: {
+              mt: { endpoint: '', configured: true, needsKey: false },
+              openai: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', hasKey: false, maskedKey: '', configured: false, needsKey: true },
+              anthropic: { baseUrl: 'https://api.anthropic.com/v1', model: 'claude-3-5-haiku-latest', hasKey: false, maskedKey: '', configured: false, needsKey: true },
+              gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-2.5-flash', hasKey: false, maskedKey: '', configured: false, needsKey: true },
+              ollama: { baseUrl: 'http://127.0.0.1:11434', model: 'qwen2.5:7b', hasKey: false, maskedKey: '', configured: true, needsKey: false },
+            },
+          },
+        };
+      }
+      if (type === 'sag:translate_save_provider') {
+        return { ok: true, reqId, data: { saved: true } };
+      }
+      if (type === 'sag:translate_diagnose') {
+        return { ok: true, reqId, data: { engine: payload.engine || 'mt', model: 'demo', sample: '重构模块结构（Workbench 模拟）', latencyMs: 12 } };
+      }
+      if (type === 'sag:translate_text') {
+        return { ok: true, reqId, data: { translated: '[译] ' + String(payload.text || '').slice(0, 240), engine: payload.engine || 'mt', cached: false } };
+      }
       if (type === 'sag:nov_feed') {
         return {
           ok: true,

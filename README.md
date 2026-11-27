@@ -21,7 +21,7 @@ We maintain **two complementary, zero-overlap plugins** built specifically for G
 | **Architecture** | 100% official MCP Apps (SEP-1865) + Lifecycle Hooks; **zero ASAR, zero CDP** | Zero-ASAR Electron CDP renderer layer + Watch Sidecar + offline Storage CLI |
 | **Upgrade Resilience** | Survives every Antigravity update natively via official plugin protocols | Leaves `app.asar` & Apple notarization untouched; auto re-attaches via Watch Daemon |
 | **Core Scope** | Side-pane / global engineering workbench, pre-tool hooks, verify gates, worktrees, spec lock, artifacts & remote IM | Native 6-Tab Settings Hub & global drawer, segmented HUD, 10-language UI translation, main chat DOM, composer palette/queue & local storage hygiene |
-| **Included Modules** | **13 native zero-CDP modules** across 5 categories (5 presets, 6–47 tools): `review`, `guard`, `xray`, `turbo`, `radar`, `verify`, `worktree`, `spec`, `studio`, `canvas`, `mem`, `ops`, `remote` | **13 renderer modules + Storage CLI** (4 presets): `hostI18n`, `themeStudio`, `readingNav`, `compactGuard`, `precompactExport`, `draftGuard`, `promptQueue`, `promptLibrary`, `outlineBookmarks`, `sessionWatchdog`, `sessionRadar`, `safeAutoAccept`, `quotaPulse`, `storage-doctor` |
+| **Included Modules** | **13 native zero-CDP modules** across 5 categories (5 presets, 6–47 tools): `review`, `guard`, `xray`, `turbo`, `radar`, `verify`, `worktree`, `spec`, `studio`, `canvas`, `mem`, `ops`, `remote` | **14 renderer modules + Storage CLI** (4 presets): `hostI18n`, `thoughtTranslate` (opt-in), `themeStudio`, `readingNav`, `compactGuard`, `precompactExport`, `draftGuard`, `promptQueue`, `promptLibrary`, `outlineBookmarks`, `sessionWatchdog`, `sessionRadar`, `safeAutoAccept`, `quotaPulse`, `storage-doctor` |
 
 ### Built-In Dual-Star Synergy (Zero Extra Ports)
 
@@ -47,18 +47,19 @@ When both **`agy-Sag`** and **`agy-NOV`** are installed together, **`agy-Sag`**'
 
 ## Unified Control Hub & Segmented Status HUD
 
-- **Single-Source 6-Tab Settings Hub (`overview | ui | conversation | guard | nov | advanced`)**: Accessible via native **Settings → Appearance** (with an injected `agy-Sag` sidebar jump anchor), the **`Ctrl/Cmd+Alt+,`** slide-out drawer (`Esc` to close), or the status card footer (`Full Settings →`). All 13 module master switches live exclusively in `Overview` (zero duplicate switches), advanced parameters fold inside `<details>`, instant cross-tab search filters all rows, `Advanced` includes JSON export, sanitized import, inline 2-step reset (zero `window.confirm`), runtime diagnostics, and read-only **Local Storage Audit** (`sag:storage_audit`), and **`Ctrl/Cmd+Alt+/`** opens a dynamic active-shortcuts sheet.
+- **Single-Source 6-Tab Settings Hub (`overview | ui | conversation | guard | nov | advanced`)**: Accessible via native **Settings → Appearance** (with an injected `agy-Sag` sidebar jump anchor), the **`Ctrl/Cmd+Alt+,`** slide-out drawer (`Esc` to close), or the status card footer (`Full Settings →`). All 14 module master switches live exclusively in `Overview` (zero duplicate switches), advanced parameters fold inside `<details>`, instant cross-tab search filters all rows, `Advanced` includes JSON export, sanitized import, inline 2-step reset (zero `window.confirm`), runtime diagnostics, and read-only **Local Storage Audit** (`sag:storage_audit`), and **`Ctrl/Cmd+Alt+/`** opens a dynamic active-shortcuts sheet.
 - **Unified Segmented Status Capsule HUD & Context Lens**: Compact composer-footer pill displaying live read-only segments driven directly by active module switches (`ctx` 12px conic ring, `eta` turns-left / `m:ss` stall indicator, `quota`, `queue`, `bookmarks`, `autoAccept`, and `NOV`). Clicking the capsule opens a cockpit card with a local **3-segment Context Breakdown Bar** (User / AI / Code & Tools), **Top-3 heaviest turn jump chips**, last-turn elapsed timing, 5h quota progress bar, and 1-click **Export MD**. When Obsidian Prism's context card is detected, `agy-Sag` embeds cleanly inside its Shadow DOM without adding an extra footer pill.
 
 ---
 
-## 13 Modular Capabilities + Storage Doctor CLI (Pick Only What You Need)
+## 14 Modular Capabilities + Storage Doctor CLI (Pick Only What You Need)
 
 Every module in **`agy-Sag`** is independently toggleable from the `Overview` tab or CLI. Disabled modules run zero DOM observers, zero listeners, and zero timers.
 
 | Layer | Module | Default | Risk / Isolation | What It Does |
 | :---: | :--- | :---: | :--- | :--- |
 | **L1** | **Native UI Translation** (`hostI18n`) | **ON** | 100% Offline · Lossless | Real-time multi-language localization for Antigravity 2.x UI across **10 languages** (`zh-CN`, `zh-TW`, `ja`, `ko`, `es`, `fr`, `de`, `ru`, `pt-BR`, `en`). ~5,400 entries per target locale (465 core + layered extended packs + 424 regex patterns), physical skip isolation for code / inputs / chat bubbles / slash command names, Shadow DOM recursion, instant hot-switch, and custom JSON pack import. |
+| **L1** | **Thought & Title Translation** (`thoughtTranslate`) | OFF | **Strict Opt-in** · Sidecar Proxy | Real-time translation for agent thinking blocks and optional sidebar/breadcrumb titles. Supports **5 engines**: keyless Machine Translation (or custom endpoint), BYO API Key **OpenAI-compatible** (OpenAI / DeepSeek / OpenRouter / Groq / LM Studio), **Anthropic**, **Gemini**, and offline local **Ollama**. Runs strictly via zero-port Node Sidecar proxy with `0600` isolated secrets (excluded from exports/backups), SSRF/redirect guards, LRU caching, bilingual / translated-only toggle, and Prism auto-yield. |
 | **L1** | **Theme & Aesthetics** (`themeStudio`) | OFF | 100% Offline | Zero-`:has()` full-surface optical theme & motion engine: **15 dark/light/stylized skins** (7 classic dark incl. Obsidian Dark / Warm Basalt / Midnight / Nord / OLED / Tokyo Night / Catppuccin Mocha, 3 classic light incl. Crystal Day / Warm Paper / Rosé Dawn, 5 stylized incl. Matcha Journal / Phantom Crimson / Doodle Sketch / Pixel Terminal / Aurora Glass), **8 one-click visual looks**, automatic dark/light host pairing, 7 accent overrides, 4 surface materials (Clean / Smoked Facets / Paper & Ink / Aurora Glass), 4 corner styles, 6 monospace stacks (incl. Sarasa SC) + ligatures, CJK tuning, `CSS.highlights` 5-step velvet stream fade, FastDOM smooth typing caret, 0fps semantic horizon glow (Browser-Hole safe), sanitized custom CSS, and `plugin://` extension iframe sync. |
 | **L1** | **Reading Navigation** (`readingNav`) | OFF | 100% Offline | Streaming-safe auto-folding for long code blocks (`>= 40` lines default, configurable `20/40/60/80`, covering both chat & `artifact-view`) with `scrollTop` fold compensation, sticky line-count/expand/wrap/copy bar, `Alt+↑/↓` turn navigation, uncapped rail with smooth scroll-to-bottom (`⤓`), `Alt+F` searchable outline & 1-click fold-all code/steps, and zero-`innerHTML` Mermaid zoom + SVG export modal (auto-yields to Prism outline nav). |
 | **L2** | **Auto-Compact Guard** (`compactGuard`) | **ON** | 100% Offline | Configurable compaction threshold (`off` or `50%–98%`, default `80%`), silent auto-compact with viewport scroll shield, Lexical two-step slash menu support, `/clear` clean-slate restart, and post-compact anchor recovery. |
@@ -171,23 +172,26 @@ Antigravity 2.0 Host (Electron 44 + language_server localhost UI)
  │    ├── cli/sag-cli.mjs        — Unified CLI (launch, keepalive, attach, watch, doctor, i18n, storage, nov, workbench)
  │    ├── cli/platform-utils.mjs — Cross-platform CLI entry/symlink guard, Win/POSIX path containment & atomic rename retry
  │    ├── cli/launcher.mjs       — Cross-platform CDP launcher/keepalive (Win PowerShell UTF-8/pwsh/Scoop, Linux XDG/Flatpak/Snap//proc, Prism yield & 0600 atomic state)
- │    ├── cli/watch-daemon.mjs   — Adaptive-backoff (3s -> 30s) CDP watcher, live nov:feed push & zero-port bridge (sag:ext_pack / sag:nov_templates / sag:nov_feed)
- │    ├── cli/nov-bridge.mjs     — Atomic 0600 agy-NOV v0.5 config bridge (13 modules / 5 presets) + read-only redacted templates & live feed loader
+ │    ├── cli/watch-daemon.mjs   — Adaptive-backoff (3s -> 30s) CDP watcher, live nov:feed push & zero-port bridge (sag:ext_pack / sag:nov_* / sag:storage_audit / sag:translate_*)
+ │    ├── cli/translator-service.mjs — Opt-in 5-engine thought/title translation proxy (MT / OpenAI / Anthropic / Gemini / Ollama) with 0600 secret isolation & SSRF guards
+ │    ├── cli/nov-bridge.mjs     — Atomic 0600 agy-NOV config bridge (13 modules / 5 presets) + read-only redacted templates & live feed loader
  │    ├── cli/bundle.mjs         — Deterministic UMD bundler with SHA-256 hash idempotency, <=1.6MB ext preload & clean remove
  │    └── cli/storage-doctor.mjs — Read-only storage audit, WAL lock guard & secret-redacted export
  └── Renderer UMD Modules (packages/core/, 100% lossless destroy())
-      ├── coexist.js             — Config schema, 4 presets, 13-module catalog, owner yield & hibernation
+      ├── coexist.js             — Config schema, 4 presets, 14-module catalog, owner yield & hibernation
       ├── host-i18n*.js          — 10-language WeakMap DOM translator + 465 core + layered ~5k/locale ext packs (locales/ext/)
+      ├── thought-translator.js  — Strict opt-in thought & sidebar title translator (bilingual / translated-only, Prism yield)
       ├── compact-guard.js       — Auto-silent /compact, scroll shield, clean-slate /clear & recovery
       ├── draft-guard.js         — Per-session unsent draft vault
       ├── prompt-queue.js        — Streaming follow-up queue with 4 safety circuit-breakers (incl. NOV spec lock)
       ├── prompt-library.js      — Ctrl/Cmd+Alt+P command palette, {{var}} snippets & read-only agy-NOV templates
       ├── reading-nav.js         — Long code block auto-folding, sticky copy bar & Alt+↑/↓ mini turn rail
-      ├── safe-auto-accept.js    — Policy-gated auto-accept + non-bypassable hard deny blacklist
+      ├── safe-auto-accept.js    — Policy-gated auto-accept + non-bypassable POSIX/Windows hard deny blacklist
       ├── theme-studio.js        — Zero-:has() 15 optical skins, 8 looks, surfaces, stream fade & smooth caret
       ├── quota-pulse.js         — Read-only 5h/7d quota tracker & rate-limit signal parser
       ├── status-pill.js         — Unified segmented composer HUD capsule & Prism context card embed
-      └── prism-bridge.js        — Single-source 6-Tab Settings Hub, swatch gallery, cross-tab search & Ctrl/Cmd+Alt+, drawer
+      ├── settings/tab-*.js      — Modular 6-Tab Settings renderers (overview, ui, conversation, guard, nov, advanced)
+      └── prism-bridge.js        — Settings Hub shell, global search, shortcut sheet & Ctrl/Cmd+Alt+, drawer
 ```
 
 **Hard Safety Boundaries**:
@@ -202,13 +206,13 @@ Antigravity 2.0 Host (Electron 44 + language_server localhost UI)
 ## Development & Verification
 
 ```bash
-npm test                 # Run full native node:test suite (238/238 passing, zero external deps)
+npm test                 # Run full native node:test suite (243/243 passing, zero external deps)
 npm run i18n:validate    # Validate all 10 built-in + 9 extended UI translation packs (0 errors)
 npm run workbench:smoke  # Run automated HTTP smoke check against the offline workbench (22 markers)
 npm run doctor           # Read-only local environment diagnostics
 ```
 
-See [docs/ROADMAP.md](./docs/ROADMAP.md) and [docs/PRODUCT-IA.md](./docs/PRODUCT-IA.md) for the multi-phase architecture and upcoming modules.
+See [CONTRIBUTING.md](./CONTRIBUTING.md), [docs/ROADMAP.md](./docs/ROADMAP.md), and [docs/PRODUCT-IA.md](./docs/PRODUCT-IA.md) for contribution guidelines, multi-phase architecture, and upcoming modules.
 
 ---
 

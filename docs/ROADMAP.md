@@ -146,6 +146,6 @@
 
 ### v1.4 进度总览
 
-- [ ] **阶段 15**：`prism-bridge.js` 按 Tab 结构化拆分、`CONTRIBUTING.md` 社区贡献文档与模块边界梳理
-- [ ] **阶段 16**：多引擎思考过程与侧栏标题实时翻译（严格 Opt-in，自填 API Key 自选模型 + 本地 Ollama + 机器翻译，零端口 Node 侧受控代理与 `0600` 凭据隔离）
-- [ ] **阶段 17**：真实跨平台实机反馈收口与 `agy-NOV v1.0+` 持续对齐
+- [x] **阶段 15**：`prism-bridge.js` 按 6 Tab 拆分为 `packages/core/settings/tab-*.js`、`CONTRIBUTING.md` 社区贡献文档与 `cli/bundle.mjs` 打包结构化升级
+- [x] **阶段 16**：第 14 模块 `thoughtTranslate` 多引擎思考过程与侧栏标题实时翻译（严格 Opt-in，支持免 Key 机器翻译 + 自填 API Key OpenAI 兼容 / Anthropic / Gemini + 本地 Ollama，零端口 Node Sidecar 代理、`0600` 独立凭据隔离与 SSRF/重定向防护）
+- [ ] **阶段 17**：真实 Windows / Linux 桌面实机反馈收口与 `agy-NOV v1.0+` 持续对齐（已完成本地 Windows PowerShell/CMD 铁壁黑名单、IPv4-mapped IPv6 元数据拦截、Windows 大小写无关 `APPDATA`、Linux Flatpak 入口与无头显示检测等静态/模拟加固，待实机复验）

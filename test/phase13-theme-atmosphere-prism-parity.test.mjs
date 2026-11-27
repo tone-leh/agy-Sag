@@ -561,8 +561,8 @@ test('Phase 13: Settings Hub UI tab keeps 0 duplicate master switches, i18n pari
   assert.ok(REMOVE_EXPRESSION.includes('ag-sag-smooth-caret'));
   assert.ok(REMOVE_EXPRESSION.includes('ag-sag-sf0'));
 
-  // 5. Full integration mountSag exposes 13 modules (0 new top-level switches)
-  assert.equal(coexist.MODULE_CATALOG.length, 13);
+  // 5. Full integration mountSag exposes 14 modules (incl. v1.4 opt-in thoughtTranslate)
+  assert.equal(coexist.MODULE_CATALOG.length, 14);
   const inst = core.mountSag({ win: { document: doc, localStorage: fakeStorage }, doc, storage: fakeStorage, autoObserve: false });
   inst.updateConfig({ modules: { themeStudio: true }, themePreset: 'aurora-glass', themeSurface: 'glass' });
   assert.equal(doc.documentElement.getAttribute('data-ag-sag-theme-preset'), 'aurora-glass');

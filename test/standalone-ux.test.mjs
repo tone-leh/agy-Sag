@@ -221,7 +221,7 @@ test('Standalone user (NO Obsidian Prism): sees calm composer % pill, floating q
   assert.equal(guard.getDebugState().prismBridge.mountedMode, 'native');
   assert.equal(guard.prismBridge.getActiveSubTab(), 'overview');
   assert.equal(nativeSec.querySelectorAll('[data-ag-sag-group]').length, 3, 'Overview groups into L1/L2/L3');
-  assert.equal(nativeSec.querySelectorAll('[data-ag-sag-mod]').length, 13, 'Each of the 13 module switches appears once in Overview');
+  assert.equal(nativeSec.querySelectorAll('[data-ag-sag-mod]').length, 14, 'Each of the 14 module switches appears once in Overview');
   assert.equal(nativeSec.textContent.includes('Prism'), false, 'Native standalone settings must never show Prism jargon');
   assert.equal(guard.getConfig().modules.outlineBookmarks, false, 'outlineBookmarks must default to opt-in (false) for clean first-run UX');
 

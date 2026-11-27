@@ -2,6 +2,23 @@
 
 All notable changes to **agy-Sag** *(formerly Antigravity Session Guard / 领航哨)* are documented in this file.
 
+## [Unreleased]
+
+### Added
+- **v1.4 Phase 15 — Modular Settings Hub Split & Community Guide (`packages/core/settings/tab-*.js`, `packages/core/prism-bridge.js`, `cli/bundle.mjs`, `CONTRIBUTING.md`)**:
+  - Split `packages/core/prism-bridge.js` (from 3,366 lines down to ~1,330 lines) into 6 dedicated UMD tab modules (`packages/core/settings/tab-overview.js`, `tab-ui.js`, `tab-conversation.js`, `tab-guard.js`, `tab-nov.js`, `tab-advanced.js`) while preserving zero npm runtime dependencies, deterministic bundling, and 100% lossless teardown.
+  - Added [`CONTRIBUTING.md`](./CONTRIBUTING.md) documenting the architecture map, UMD module registration, i18n parity checks, CSS/DOM hygiene rules, and local verification commands.
+- **v1.4 Phase 16 — Opt-In Multi-Engine Thought & Sidebar Title Translator (`cli/translator-service.mjs`, `packages/core/thought-translator.js`, `packages/core/settings/tab-ui.js`, `packages/core/coexist.js`, `packages/core/index.js`, `cli/watch-daemon.mjs`, `workbench/server.mjs`, `test/thought-translator.test.mjs`)**:
+  - Added the 14th toggleable renderer module `thoughtTranslate` (**strict opt-in, default OFF across all 4 presets**): translates Antigravity thought blocks and optional sidebar/breadcrumb conversation titles with streaming completion guard, bilingual / translated-only toggle, lossless `WeakMap` title restoration, and automatic Obsidian Prism yield.
+  - Built zero-dependency Node-side `TranslatorService` proxied strictly through the existing zero-port CDP `Runtime.addBinding` channel, supporting **5 engines** (`mt` keyless machine translation or custom endpoint, `openai` OpenAI-compatible APIs incl. DeepSeek/OpenRouter/Groq/LM Studio, `anthropic`, `gemini` via `x-goog-api-key` header, and local offline `ollama`), LRU caching (400 entries), concurrency limit (3), 1-click connection diagnostics, and dedicated `0600` secret isolation outside `~/.gemini/antigravity/` (never returned in plaintext or included in exports/backups).
+  - Upgraded `cli/bundle.mjs` with lexer-safe `theme-studio.js` CSS template compaction, expanded ASI-safe newline compaction, and round-trip-verified lossless extended-pack dictionary packing, keeping the full `ru` sync bundle at `~1,536 KB` (`<= 1,540 KB` headroom / `<= 1.6 MiB` hard cap).
+
+### Fixed
+- **Windows & Linux Deep Compatibility Pass (`packages/core/safe-auto-accept.js`, `cli/translator-service.mjs`, `cli/launcher.mjs`, `packages/core/prism-bridge.js`, `test/cross-platform-audit-fixes.test.mjs`)**:
+  - Added 5 linear-time Windows PowerShell/CMD destructive command patterns (`Remove-Item -Recurse -Force`, `rd /s /q` & `del /f /s`, `irm/iwr | iex` / `Invoke-Expression`, `format` / `Clear-Disk` / `diskpart`, `taskkill /F` / `Stop-Process -Force`) to `safeAutoAccept`'s non-bypassable `HARD_DENY_PATTERNS`.
+  - Hardened `TranslatorService` with case-insensitive Windows `APPDATA` + `path.win32.join` secrets resolution, IPv4-mapped IPv6 cloud metadata SSRF blocking (`::ffff:169.254.*`, `::ffff:100.100.100.200`, etc.), and redacted proxy environment detection (`proxyEnvDetected`).
+  - Extended Linux `launcher.mjs` binary discovery with user & system Flatpak export paths (`com.google.Antigravity`) and added a non-blocking `displayWarning` when neither `DISPLAY` nor `WAYLAND_DISPLAY` is present; made `prism-bridge.js` shortcut sheet adapt modifier labels (`Cmd` on macOS vs `Ctrl` on Windows/Linux).
+
 ## [1.3.0] - 2026-11-27
 
 ### Added

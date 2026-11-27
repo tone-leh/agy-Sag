@@ -45,6 +45,7 @@
     const themeStudioMod = options.themeStudioMod || resolveDep('__agSagThemeStudio', './theme-studio.js');
     const quotaPulseMod = options.quotaPulseMod || resolveDep('__agSagQuotaPulse', './quota-pulse.js');
     const novSynergyMod = options.novSynergyMod || resolveDep('__agSagNovSynergy', './nov-synergy.js');
+    const thoughtTranslatorMod = options.thoughtTranslatorMod || resolveDep('__agSagThoughtTranslator', './thought-translator.js');
 
     // Coexistence auto-yield: if a host integrator (e.g. Obsidian Prism Channel 13) already owns agy-Sag, standalone yields cleanly
     if (coexist.shouldYieldToHostIntegrator(win, source)) {
@@ -93,6 +94,7 @@
     let themeStudio = null;
     let quotaPulse = null;
     let novSynergy = null;
+    let thoughtTranslator = null;
     const quotaBySession = new Map();
 
     const openVault = () => bookmarkVault?.open?.();
@@ -217,6 +219,18 @@
           softTurns7d: nextCfg.quotaSoftTurns7d || 350,
         });
         quotaPulse.setEnabled?.(Boolean(nextCfg.modules?.quotaPulse));
+      }
+
+      if (thoughtTranslator) {
+        thoughtTranslator.configure?.({
+          enabled: Boolean(nextCfg.modules?.thoughtTranslate),
+          engine: nextCfg.thoughtEngine || 'mt',
+          targetLang: nextCfg.thoughtTargetLang || 'auto',
+          triggerMode: nextCfg.thoughtTrigger || 'auto',
+          viewMode: nextCfg.thoughtViewMode || 'bilingual',
+          translateTitles: Boolean(nextCfg.thoughtTranslateTitles),
+          conflictPolicy: nextCfg.hostI18nConflictPolicy || 'yield',
+        });
       }
 
       prismBridge?.sync?.();
@@ -742,6 +756,41 @@
       return true;
     }
 
+    const callTranslatorBridge = async (type, payload = {}) => {
+      if (typeof options.onTranslatorBridge === 'function') {
+        return options.onTranslatorBridge(type, payload);
+      }
+      if (!novSynergy || typeof novSynergy.requestRaw !== 'function' || !novSynergy.isBridgeAvailable?.()) {
+        return { ok: false, reason: 'bridge-offline', error: 'Watch sidecar bridge offline' };
+      }
+      try {
+        const res = await novSynergy.requestRaw(type, payload);
+        const data = res?.raw?.data ?? res?.data ?? null;
+        if (res?.ok) return { ok: true, data };
+        return { ok: false, error: res?.error || res?.raw?.error || 'Translator request failed' };
+      } catch (err) {
+        return { ok: false, error: err?.message || String(err) };
+      }
+    };
+
+    thoughtTranslator = thoughtTranslatorMod?.createThoughtTranslatorController
+      ? thoughtTranslatorMod.createThoughtTranslatorController({
+          win,
+          doc,
+          coexist,
+          enabled: Boolean(cfg.modules?.thoughtTranslate),
+          engine: cfg.thoughtEngine || 'mt',
+          targetLang: cfg.thoughtTargetLang || 'auto',
+          triggerMode: cfg.thoughtTrigger || 'auto',
+          viewMode: cfg.thoughtViewMode || 'bilingual',
+          translateTitles: Boolean(cfg.thoughtTranslateTitles),
+          conflictPolicy: cfg.hostI18nConflictPolicy || 'yield',
+          autoObserve: options.autoObserve,
+          getEffectiveLang: () => compactGuard.getConfig()?.hostI18nLocale || 'zh-CN',
+          onRequestTranslate: (req) => callTranslatorBridge('sag:translate_text', req),
+        })
+      : null;
+
     prismBridge = prismBridgeMod?.createPrismBridgeController
       ? prismBridgeMod.createPrismBridgeController({
           win,
@@ -781,6 +830,9 @@
               return { ok: false, error: err?.message || String(err) };
             }
           },
+          onTranslatorStatus: () => callTranslatorBridge('sag:translate_status', {}),
+          onTranslatorSaveProvider: (req) => callTranslatorBridge('sag:translate_save_provider', req),
+          onTranslatorDiagnose: (req) => callTranslatorBridge('sag:translate_diagnose', req),
           onTestRadarAudio: () => sessionRadar?.testAudioAlert?.(),
           onExportPromptSnippets: () => promptLibrary?.exportSnippetsJson?.() || '{"version":1,"snippets":[]}',
           onImportPromptSnippets: (raw) => promptLibrary?.importSnippetsJson?.(raw) || { ok: false, errors: ['Prompt Library unavailable'] },
@@ -823,12 +875,14 @@
       themeStudio,
       quotaPulse,
       novSynergy,
+      thoughtTranslator,
       evaluateNow: async () => {
         draftGuard?.sync?.();
         cleanSlate?.sync?.();
         outlineBookmarks.sync();
         sessionRadar.syncFromDom();
         hostI18n?.scanNow?.();
+        thoughtTranslator?.scanNow?.();
         promptQueue?.sync?.();
         promptLibrary?.sync?.();
         readingNav?.sync?.();
@@ -908,6 +962,7 @@
         themeStudio: themeStudio?.getDebugState?.() || null,
         quotaPulse: quotaPulse?.getDebugState?.() || null,
         novSynergy: novSynergy?.getDebugState?.() || null,
+        thoughtTranslator: thoughtTranslator?.getDebugState?.() || null,
       }),
       destroy(destroyOpts = {}) {
         if (destroyed) return;
@@ -916,6 +971,7 @@
         statusPill?.destroy?.();
         prismBridge?.destroy?.();
         novSynergy?.destroy?.();
+        thoughtTranslator?.destroy?.();
         hostI18n?.destroy?.();
         promptQueue?.destroy?.();
         promptLibrary?.destroy?.();
