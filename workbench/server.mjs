@@ -38,6 +38,7 @@ export const SMOKE_REQUIRED_MARKERS = Object.freeze([
   'agSag.hostI18n.customPacks.v1',
   'requestExtendedPack',
   'ag-sag-hud-seg',
+  '__agSagPromptLibrary',
 ]);
 
 export function buildHtmlPage() {
@@ -291,6 +292,7 @@ export function buildHtmlPage() {
       <div class="ctl-row">
         <button class="ctl" id="btn-compact-sim">模拟压缩完成 (回落 18%)</button>
         <button class="ctl" id="btn-open-cfg">打开设置抽屉 (Ctrl+Alt+,)</button>
+        <button class="ctl" id="btn-open-pl">打开提示词库 (Ctrl+Alt+P)</button>
         <button class="ctl" id="btn-remount">卸载重挂 (0 残留)</button>
       </div>
     </div>
@@ -763,6 +765,35 @@ ${coreScript}
     function simNovTransport(req) {
       const { reqId, type, payload = {} } = req || {};
       const modApi = window.__agSagNovSynergy;
+      if (type === 'sag:nov_templates') {
+        return {
+          ok: true,
+          reqId,
+          data: {
+            available: Boolean(simNov.installed),
+            templates: simNov.installed
+              ? [
+                  {
+                    id: 'nov-sec-audit',
+                    source: 'nov',
+                    title: 'agy-NOV 安全边界审查',
+                    description: '来自 agy-NOV ops 只读模板库',
+                    tags: ['security', 'nov'],
+                    body: '请对 {{target=当前模块}} 执行路径穿越、symlink 与敏感信息脱敏核查。',
+                  },
+                  {
+                    id: 'nov-release-check',
+                    source: 'nov',
+                    title: 'agy-NOV 发布前验收清单',
+                    description: '来自 agy-NOV ops 只读模板库',
+                    tags: ['release', 'nov'],
+                    body: '请核对 {{version=v1.1.0}} 的全量测试、CHANGELOG、README 与 CI 状态。',
+                  },
+                ]
+              : [],
+          },
+        };
+      }
       if (type === 'nov:set_module' && simNov.installed) {
         if (Object.prototype.hasOwnProperty.call(simNov.config.modules, payload.moduleId)) {
           simNov.config.modules[payload.moduleId] = Boolean(payload.enabled);
@@ -831,6 +862,7 @@ ${coreScript}
             precompactExport: true,
             draftGuard: true,
             promptQueue: true,
+            promptLibrary: true,
             outlineBookmarks: true,
             sessionRadar: radarChk.checked,
             sessionWatchdog: true,
@@ -1106,6 +1138,7 @@ ${coreScript}
       appendLog('[COMPACTED #' + (sess ? sess.compactedCount : 1) + '] Context reset to 18%. Post-Compact Recovery strip ready!');
     });
     document.getElementById('btn-open-cfg').addEventListener('click', () => guard.openSettingsPopover());
+    document.getElementById('btn-open-pl').addEventListener('click', () => guard.openPromptLibrary());
     document.getElementById('btn-open-vault').addEventListener('click', () => guard.openBookmarkVault());
     document.getElementById('btn-sim-transition').addEventListener('click', () => {
       const row = document.getElementById('sim-row-running');

@@ -45,6 +45,7 @@
     Object.freeze({ id: 'precompactExport', category: 'session', defaultEnabled: true, aggressive: false }),
     Object.freeze({ id: 'draftGuard', category: 'composer', defaultEnabled: true, aggressive: false }),
     Object.freeze({ id: 'promptQueue', category: 'composer', defaultEnabled: true, aggressive: false }),
+    Object.freeze({ id: 'promptLibrary', category: 'composer', defaultEnabled: false, aggressive: false }),
     Object.freeze({ id: 'sessionWatchdog', category: 'session', defaultEnabled: true, aggressive: false }),
     Object.freeze({ id: 'outlineBookmarks', category: 'navigation', defaultEnabled: false, aggressive: false }),
     Object.freeze({ id: 'sessionRadar', category: 'navigation', defaultEnabled: false, aggressive: false }),
@@ -66,6 +67,7 @@
     precompactExport: Object.freeze({ id: 'precompactExport', group: 'conversation', layer: 'L2', settingsTab: 'conversation', labelKey: 'modPrecompactExport', descKey: 'modDescPrecompactExport', defaultEnabled: true, aggressive: false, parentId: 'compactGuard' }),
     draftGuard: Object.freeze({ id: 'draftGuard', group: 'conversation', layer: 'L2', settingsTab: 'conversation', labelKey: 'cfgModDraftGuard', descKey: 'modDescDraftGuard', defaultEnabled: true, aggressive: false, parentId: null }),
     promptQueue: Object.freeze({ id: 'promptQueue', group: 'conversation', layer: 'L2', settingsTab: 'conversation', labelKey: 'modPromptQueue', descKey: 'modDescPromptQueue', defaultEnabled: true, aggressive: false, parentId: null }),
+    promptLibrary: Object.freeze({ id: 'promptLibrary', group: 'conversation', layer: 'L2', settingsTab: 'conversation', labelKey: 'modPromptLibrary', descKey: 'modDescPromptLibrary', defaultEnabled: false, aggressive: false, parentId: null }),
     outlineBookmarks: Object.freeze({ id: 'outlineBookmarks', group: 'conversation', layer: 'L2', settingsTab: 'conversation', labelKey: 'cfgModBookmarks', descKey: 'modDescBookmarks', defaultEnabled: false, aggressive: false, parentId: null }),
     sessionWatchdog: Object.freeze({ id: 'sessionWatchdog', group: 'guard', layer: 'L3', settingsTab: 'guard', labelKey: 'cfgModWatchdog', descKey: 'modDescWatchdog', defaultEnabled: true, aggressive: false, parentId: null }),
     sessionRadar: Object.freeze({ id: 'sessionRadar', group: 'guard', layer: 'L3', settingsTab: 'guard', labelKey: 'cfgModRadar', descKey: 'modDescRadar', defaultEnabled: false, aggressive: false, parentId: null }),
@@ -105,6 +107,7 @@
       outlineBookmarks: false, // opt-in: adds bookmark icon beside Copy/Undo in user action bar
       draftGuard: true, // unsent composer draft auto-save & crash recovery
       promptQueue: true, // queue follow-up prompts while Agent is streaming
+      promptLibrary: false, // opt-in: command palette with slash shortcuts, {{var}} snippets & read-only NOV templates
       sessionRadar: false, // opt-in sidebar attention filter + alerts
       sessionWatchdog: true, // burn-rate estimate + streaming stall detector
       safeAutoAccept: false, // strict opt-in: policy-gated auto-accept with hard deny blacklist
@@ -122,6 +125,7 @@
         precompactExport: true,
         draftGuard: true,
         promptQueue: true,
+        promptLibrary: false,
         sessionWatchdog: true,
         outlineBookmarks: false,
         sessionRadar: false,
@@ -138,6 +142,7 @@
         precompactExport: false,
         draftGuard: false,
         promptQueue: false,
+        promptLibrary: false,
         sessionWatchdog: false,
         outlineBookmarks: false,
         sessionRadar: false,
@@ -154,6 +159,7 @@
         precompactExport: true,
         draftGuard: true,
         promptQueue: true,
+        promptLibrary: true,
         sessionWatchdog: true,
         outlineBookmarks: true,
         sessionRadar: false,
@@ -171,6 +177,7 @@
         precompactExport: true,
         draftGuard: true,
         promptQueue: true,
+        promptLibrary: true,
         sessionWatchdog: true,
         outlineBookmarks: true,
         sessionRadar: true,
@@ -313,6 +320,7 @@
       outlineBookmarks: mSrc.outlineBookmarks !== undefined ? Boolean(mSrc.outlineBookmarks) : fbMods.outlineBookmarks,
       draftGuard: mSrc.draftGuard !== undefined ? Boolean(mSrc.draftGuard) : fbMods.draftGuard !== false,
       promptQueue: mSrc.promptQueue !== undefined ? Boolean(mSrc.promptQueue) : fbMods.promptQueue !== false,
+      promptLibrary: mSrc.promptLibrary !== undefined ? Boolean(mSrc.promptLibrary) : Boolean(fbMods.promptLibrary),
       sessionRadar: mSrc.sessionRadar !== undefined ? Boolean(mSrc.sessionRadar) : fbMods.sessionRadar,
       sessionWatchdog: mSrc.sessionWatchdog !== undefined ? Boolean(mSrc.sessionWatchdog) : fbMods.sessionWatchdog !== false,
       safeAutoAccept: mSrc.safeAutoAccept !== undefined ? Boolean(mSrc.safeAutoAccept) : Boolean(fbMods.safeAutoAccept),

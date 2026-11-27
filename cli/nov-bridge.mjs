@@ -614,7 +614,7 @@ export function readNovState(opts = {}) {
     version: paths.version,
     pluginDir: paths.pluginDir,
     dataDir: paths.dataDir,
-    configPath: paths.configPath,
+    configPath: path.join(paths.dataDir, 'config.json'),
     configExists,
     signature,
     config,
@@ -624,6 +624,93 @@ export function readNovState(opts = {}) {
     categories: NOV_MODULE_CATEGORIES,
     presets: NOV_PRESETS,
   };
+}
+
+const NOV_TEMPLATES_MAX_BYTES = 262144; // 256 KB strict cap
+const NOV_TEMPLATES_MAX_COUNT = 100;
+const NOV_FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
+ * Strictly read-only loader for agy-NOV's ops/prompts.json templates.
+ * Never creates or writes files; enforces symlink guard, 256 KB cap, and field whitelisting.
+ */
+export function readNovOpsTemplates(opts = {}) {
+  const homeDir = opts.homeDir || os.homedir();
+  const paths = resolveNovPaths(opts);
+  const opsDir = path.join(paths.dataDir, 'ops');
+  const promptsPath = path.join(opsDir, 'prompts.json');
+
+  const dirViolation = findSymlinkViolation(opsDir, homeDir);
+  if (dirViolation) {
+    return { ok: false, available: false, templates: [], error: dirViolation };
+  }
+
+  const opsStat = safeLstat(opsDir);
+  if (!opsStat) {
+    return { ok: true, available: false, templates: [] };
+  }
+  if (opsStat.isSymbolicLink() || !opsStat.isDirectory()) {
+    return { ok: false, available: false, templates: [], error: 'Refusing to read non-directory or symlink ops dir' };
+  }
+
+  const fileStat = safeLstat(promptsPath);
+  if (!fileStat) {
+    return { ok: true, available: false, templates: [] };
+  }
+  if (fileStat.isSymbolicLink() || !fileStat.isFile()) {
+    return { ok: false, available: false, templates: [], error: 'Refusing to read symlink or non-regular prompts.json' };
+  }
+  if (fileStat.size > NOV_TEMPLATES_MAX_BYTES) {
+    return { ok: false, available: false, templates: [], error: `prompts.json exceeds ${NOV_TEMPLATES_MAX_BYTES} bytes limit` };
+  }
+
+  const realOps = safeRealpath(opsDir);
+  const realPrompts = safeRealpath(promptsPath);
+  if (!realOps || !realPrompts || !isPathWithinBase(realPrompts, realOps)) {
+    return { ok: false, available: false, templates: [], error: 'Refusing to read prompts.json outside real ops directory' };
+  }
+
+  try {
+    const rawText = fs.readFileSync(realPrompts, 'utf8');
+    const parsed = JSON.parse(rawText);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Object.keys(parsed).some((k) => NOV_FORBIDDEN_KEYS.has(k))) {
+      return { ok: false, available: false, templates: [], error: 'Prototype pollution key rejected in prompts.json' };
+    }
+    const list = Array.isArray(parsed)
+      ? parsed
+      : parsed && typeof parsed === 'object' && Array.isArray(parsed.prompts)
+        ? parsed.prompts
+        : [];
+    const templates = [];
+    const seen = new Set();
+    for (const item of list) {
+      if (templates.length >= NOV_TEMPLATES_MAX_COUNT) break;
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+      if (Object.keys(item).some((k) => NOV_FORBIDDEN_KEYS.has(k))) continue;
+      const id = typeof item.id === 'string' ? item.id.trim().slice(0, 64) : '';
+      const title = typeof item.title === 'string' ? item.title.trim().slice(0, 80) : '';
+      const body = typeof item.body === 'string' ? item.body.trim().slice(0, 4000) : '';
+      if (!title || !body) continue;
+      const safeId = id && !NOV_FORBIDDEN_KEYS.has(id) ? id : `nov-${templates.length + 1}`;
+      if (seen.has(safeId)) continue;
+      seen.add(safeId);
+      const description = typeof item.description === 'string' ? item.description.trim().slice(0, 200) : '';
+      const tags = Array.isArray(item.tags)
+        ? item.tags.filter((x) => typeof x === 'string' && x.trim()).map((x) => x.trim().slice(0, 24)).slice(0, 6)
+        : [];
+      templates.push({
+        id: safeId,
+        source: 'nov',
+        title,
+        description,
+        tags,
+        body,
+      });
+    }
+    return { ok: true, available: true, templates };
+  } catch {
+    return { ok: false, available: false, templates: [], error: 'Failed to parse agy-NOV prompts.json' };
+  }
 }
 
 function validateExplicitDataDirOption(explicitDataDir) {

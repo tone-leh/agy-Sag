@@ -26,7 +26,7 @@ import {
   validateHostLang,
   validatePresetName,
 } from './cdp-attach.mjs';
-import { handleBridgePayload, readNovState } from './nov-bridge.mjs';
+import { handleBridgePayload, readNovOpsTemplates, readNovState } from './nov-bridge.mjs';
 
 export const HOST_BRIDGE_BINDING_NAME = '__agSagHostBridge';
 
@@ -711,6 +711,14 @@ export class SagWatchDaemon {
             return { reqId, ok: false, error: `Extended pack not found for locale: ${loc}` };
           }
           return { reqId, ok: true, data: { locale: loc, pack } };
+        }
+        if (parsed && typeof parsed === 'object' && parsed.type === 'sag:nov_templates') {
+          const reqId = typeof parsed.reqId === 'string' && parsed.reqId.length <= 128 ? parsed.reqId : null;
+          const tplRes = readNovOpsTemplates(this.novBridgeOpts);
+          if (!tplRes.ok) {
+            return { reqId, ok: false, error: tplRes.error || 'Failed to read agy-NOV templates' };
+          }
+          return { reqId, ok: true, data: { available: tplRes.available, templates: tplRes.templates } };
         }
       } catch {}
     }

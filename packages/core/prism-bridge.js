@@ -192,6 +192,10 @@
     let cfgImportDraftText = '';
     let cfgStatusText = '';
     let cfgStatusTone = 'info';
+    let plDetailsOpen = false;
+    let plImportDraftText = '';
+    let plStatusText = '';
+    let plStatusTone = 'info';
     let resetConfirmPending = false;
     let diagCopiedFeedback = false;
 
@@ -1294,6 +1298,146 @@
       dgBadge.className = 'ag-sag-badge-note';
       dgBadge.textContent = `${dgState?.savedDraftCount ?? 0} drafts`;
       pane.appendChild(mkSuiteRow(t('cfgModDraftGuard', 'Draft Guard'), t('convDraftDesc', ''), dgBadge, { searchExtra: 'draftGuard' }));
+
+      // 6. Prompt Library management (<details>)
+      const plDetails = doc.createElement('details');
+      plDetails.className = 'ag-sag-details';
+      if (plDetailsOpen || plStatusText) plDetails.open = true;
+      plDetails.addEventListener('toggle', () => {
+        plDetailsOpen = Boolean(plDetails.open);
+      });
+      const plSum = doc.createElement('summary');
+      plSum.textContent = t('convPlAdvSummary', 'Prompt Library Management');
+      plDetails.appendChild(plSum);
+
+      const plCtrl = doc.createElement('div');
+      plCtrl.className = 'ag-sag-pack-ctrl';
+      const plState = typeof options.getPromptLibraryState === 'function' ? options.getPromptLibraryState() : null;
+
+      const plBtnRow = doc.createElement('div');
+      plBtnRow.className = 'ag-sag-ext-grid';
+
+      const plCountNote = doc.createElement('span');
+      plCountNote.className = 'ag-sag-badge-note';
+      plCountNote.textContent = i18n.formatTemplate(t('convPlCountBadge', '{user} custom · {nov} NOV read-only'), {
+        user: plState?.userSnippetCount ?? 0,
+        nov: plState?.novTemplateCount ?? 0,
+      });
+      plBtnRow.appendChild(plCountNote);
+
+      if (typeof options.onOpenPromptLibrary === 'function') {
+        plBtnRow.appendChild(
+          mkChip({
+            label: t('convPlOpenBtn', 'Open Palette'),
+            active: false,
+            testId: 'ag-sag-pl-open-from-settings',
+            disabled: !cfg.modules?.promptLibrary,
+            onClick: () => options.onOpenPromptLibrary(),
+          })
+        );
+      }
+
+      const plStatus = doc.createElement('div');
+      plStatus.className = 'ag-sag-pack-status';
+      plStatus.setAttribute('data-testid', 'ag-sag-pl-cfg-status');
+      if (plStatusText) {
+        plStatus.textContent = plStatusText;
+        plStatus.setAttribute('data-tone', plStatusTone || 'info');
+      } else {
+        plStatus.hidden = true;
+      }
+      const setPlStatus = (msg, tone = 'ok') => {
+        plStatusText = String(msg || '');
+        plStatusTone = tone;
+        const targets = new Set([
+          plStatus,
+          mountedEl?.querySelector?.('[data-testid="ag-sag-pl-cfg-status"]'),
+          drawerBodyEl?.querySelector?.('[data-testid="ag-sag-pl-cfg-status"]'),
+          doc.querySelector?.('[data-testid="ag-sag-pl-cfg-status"]'),
+        ]);
+        for (const target of targets) {
+          if (!target) continue;
+          target.textContent = plStatusText;
+          target.setAttribute('data-tone', tone);
+          target.hidden = !plStatusText;
+        }
+      };
+
+      if (typeof options.onExportPromptSnippets === 'function') {
+        plBtnRow.appendChild(
+          mkChip({
+            label: t('convPlExportBtn', 'Export Snippets JSON'),
+            active: false,
+            testId: 'ag-sag-pl-export-btn',
+            onClick: () => {
+              plDetailsOpen = true;
+              const rawJson = options.onExportPromptSnippets();
+              let parsed = null;
+              try { parsed = JSON.parse(rawJson); } catch {}
+              downloadJsonPayload('agy-sag-prompt-snippets.json', parsed || { version: 1, snippets: [] });
+              const cnt = Array.isArray(parsed?.snippets) ? parsed.snippets.length : 0;
+              setPlStatus(i18n.formatTemplate(t('convPlExportDone', 'Exported ({n})'), { n: cnt }), 'ok');
+            },
+          })
+        );
+      }
+
+      const plImpTa = doc.createElement('textarea');
+      plImpTa.className = 'ag-sag-pack-textarea';
+      plImpTa.setAttribute('data-testid', 'ag-sag-pl-import-textarea');
+      plImpTa.setAttribute('spellcheck', 'false');
+      plImpTa.placeholder = t('convPlImportPlaceholder', '');
+      plImpTa.value = plImportDraftText;
+      plImpTa.addEventListener('input', () => {
+        plImportDraftText = plImpTa.value;
+      });
+
+      if (typeof options.onImportPromptSnippets === 'function') {
+        plBtnRow.appendChild(
+          mkChip({
+            label: t('convPlImportBtn', 'Validate & Import Snippets'),
+            active: true,
+            testId: 'ag-sag-pl-import-btn',
+            onClick: () => {
+              plDetailsOpen = true;
+              const rawVal = plImpTa.value;
+              plImportDraftText = rawVal;
+              const res = options.onImportPromptSnippets(rawVal);
+              if (!res || !res.ok) {
+                setPlStatus((res?.errors || [t('convPlImportErr', 'Invalid JSON')]).join('; '), 'error');
+                return;
+              }
+              plImportDraftText = '';
+              for (const liveTa of new Set([
+                plImpTa,
+                mountedEl?.querySelector?.('[data-testid="ag-sag-pl-import-textarea"]'),
+                drawerBodyEl?.querySelector?.('[data-testid="ag-sag-pl-import-textarea"]'),
+                doc.querySelector?.('[data-testid="ag-sag-pl-import-textarea"]'),
+              ])) {
+                if (liveTa) liveTa.value = '';
+              }
+              setPlStatus(
+                i18n.formatTemplate(t('convPlImportOk', 'Imported {count} ({total} total)'), {
+                  count: res.count ?? 0,
+                  total: res.total ?? 0,
+                }),
+                'ok'
+              );
+            },
+          })
+        );
+      }
+
+      plCtrl.appendChild(plBtnRow);
+      plCtrl.appendChild(plImpTa);
+      plCtrl.appendChild(plStatus);
+      plDetails.appendChild(
+        mkSuiteRow(t('modPromptLibrary', 'Prompt Library'), t('modDescPromptLibrary', ''), plCtrl, {
+          stacked: true,
+          searchExtra: 'promptLibrary snippet template slash import export',
+        })
+      );
+      pane.appendChild(plDetails);
     }
 
     function renderGuardTab(pane, ctx) {
@@ -1909,6 +2053,8 @@
               customPatternsDraftText = null;
               customPatternsStatusText = '';
               cfgImportDraftText = '';
+              plImportDraftText = '';
+              plStatusText = '';
               diagCopiedFeedback = false;
               cfgStatusText = t('advResetDone', 'Restored defaults');
               cfgStatusTone = 'ok';

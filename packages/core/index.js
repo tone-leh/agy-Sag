@@ -39,6 +39,7 @@
     const hostI18nMod = options.hostI18nMod || resolveDep('__agSagHostI18n', './host-i18n.js');
     const hostI18nPacksMod = options.hostI18nPacksMod || resolveDep('__agSagHostI18nPacks', './host-i18n-packs.js');
     const promptQueueMod = options.promptQueueMod || resolveDep('__agSagPromptQueue', './prompt-queue.js');
+    const promptLibraryMod = options.promptLibraryMod || resolveDep('__agSagPromptLibrary', './prompt-library.js');
     const safeAutoAcceptMod = options.safeAutoAcceptMod || resolveDep('__agSagSafeAutoAccept', './safe-auto-accept.js');
     const themeStudioMod = options.themeStudioMod || resolveDep('__agSagThemeStudio', './theme-studio.js');
     const quotaPulseMod = options.quotaPulseMod || resolveDep('__agSagQuotaPulse', './quota-pulse.js');
@@ -80,6 +81,7 @@
     let statusPill = null;
     let hostI18n = null;
     let promptQueue = null;
+    let promptLibrary = null;
     let safeAutoAccept = null;
     let themeStudio = null;
     let quotaPulse = null;
@@ -133,6 +135,10 @@
 
       if (promptQueue) {
         promptQueue.setEnabled?.(Boolean(nextCfg.modules?.promptQueue));
+      }
+
+      if (promptLibrary) {
+        promptLibrary.setEnabled?.(Boolean(nextCfg.modules?.promptLibrary));
       }
 
       if (safeAutoAccept) {
@@ -488,9 +494,42 @@
                 void hostI18n.ensureExtendedPack?.();
               }
             }
+            if (novState?.bridgeConnected && promptLibrary?.getDebugState?.()?.enabled) {
+              void promptLibrary.refreshNovTemplates?.();
+            }
             prismBridge?.sync?.();
             syncStatusPill();
             if (typeof options.onNovStateChange === 'function') options.onNovStateChange(novState);
+          },
+        })
+      : null;
+
+    const requestNovTemplates = async () => {
+      if (novSynergy && typeof novSynergy.requestRaw === 'function' && novSynergy.isBridgeAvailable?.()) {
+        try {
+          const res = await novSynergy.requestRaw('sag:nov_templates', {});
+          const tpls = res?.raw?.data?.templates || res?.data?.templates || res?.raw?.templates;
+          if (res?.ok && Array.isArray(tpls)) {
+            return tpls;
+          }
+        } catch {}
+      }
+      return [];
+    };
+
+    promptLibrary = promptLibraryMod?.createPromptLibraryController
+      ? promptLibraryMod.createPromptLibraryController({
+          win,
+          doc,
+          storage: options.storage,
+          coexist,
+          enabled: Boolean(cfg.modules?.promptLibrary),
+          autoObserve: options.autoObserve,
+          getLang: options.getLang,
+          initialNovTemplates: options.initialNovTemplates,
+          requestNovTemplates,
+          onChange: () => {
+            prismBridge?.sync?.();
           },
         })
       : null;
@@ -573,6 +612,10 @@
           getQueueState: () => promptQueue?.getDebugState?.() || null,
           getDraftState: () => draftGuard?.getDebugState?.() || null,
           getBookmarkState: () => outlineBookmarks?.getDebugState?.() || null,
+          getPromptLibraryState: () => promptLibrary?.getDebugState?.() || null,
+          onOpenPromptLibrary: () => promptLibrary?.open?.(),
+          onExportPromptSnippets: () => promptLibrary?.exportSnippetsJson?.() || '{"version":1,"snippets":[]}',
+          onImportPromptSnippets: (raw) => promptLibrary?.importSnippetsJson?.(raw) || { ok: false, errors: ['Prompt Library unavailable'] },
           onOpenVault: (q) => openVault(q),
           bindDrawerShortcut: options.bindDrawerShortcut !== false,
           onHostContextChange: () => {
@@ -581,6 +624,7 @@
             outlineBookmarks?.sync?.();
             sessionRadar?.syncFromDom?.();
             hostI18n?.scanNow?.();
+            promptLibrary?.sync?.();
             themeStudio?.sync?.();
             syncStatusPill();
           },
@@ -604,6 +648,7 @@
       statusPill,
       hostI18n,
       promptQueue,
+      promptLibrary,
       safeAutoAccept,
       themeStudio,
       quotaPulse,
@@ -615,6 +660,7 @@
         sessionRadar.syncFromDom();
         hostI18n?.scanNow?.();
         promptQueue?.sync?.();
+        promptLibrary?.sync?.();
         safeAutoAccept?.scanNow?.();
         themeStudio?.sync?.();
         quotaPulse?.scanDomForSignals?.();
@@ -666,6 +712,7 @@
       openSettingsPopover: (tabId) => prismBridge?.openDrawer?.(tabId),
       openSettingsDrawer: (tabId) => prismBridge?.openDrawer?.(tabId),
       closeSettingsDrawer: () => prismBridge?.closeDrawer?.(),
+      openPromptLibrary: () => promptLibrary?.open?.(),
       openBookmarkVault: (q) => bookmarkVault?.open?.(q),
       getDebugState: () => ({
         version: VERSION,
@@ -683,6 +730,7 @@
         statusPill: statusPill?.getDebugState?.() || null,
         hostI18n: hostI18n?.getDebugState?.() || null,
         promptQueue: promptQueue?.getDebugState?.() || null,
+        promptLibrary: promptLibrary?.getDebugState?.() || null,
         safeAutoAccept: safeAutoAccept?.getDebugState?.() || null,
         themeStudio: themeStudio?.getDebugState?.() || null,
         quotaPulse: quotaPulse?.getDebugState?.() || null,
@@ -696,6 +744,7 @@
         novSynergy?.destroy?.();
         hostI18n?.destroy?.();
         promptQueue?.destroy?.();
+        promptLibrary?.destroy?.();
         safeAutoAccept?.destroy?.();
         themeStudio?.destroy?.();
         quotaPulse?.destroy?.();
