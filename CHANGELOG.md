@@ -2,7 +2,7 @@
 
 All notable changes to **agy-Sag** *(formerly Antigravity Session Guard / 领航哨)* are documented in this file.
 
-## [Unreleased]
+## [1.3.0] - 2026-11-27
 
 ### Added
 - **v1.3 Phase 14 — `agy-NOV` v0.8/v0.9 Synergy Alignment, Bundle Headroom & Dictionary Quality Polish (`cli/nov-bridge.mjs`, `cli/bundle.mjs`, `cli/sag-cli.mjs`, `packages/core/nov-synergy.js`, `packages/core/prompt-library.js`, `packages/core/prism-bridge.js`, `packages/core/status-pill.js`, `packages/core/theme-studio.js`, `packages/core/index.js`, `packages/core/locales/ext/zh-CN.json`, `test/phase14-nov-v09-hardening.test.mjs`)**:
@@ -37,6 +37,10 @@ All notable changes to **agy-Sag** *(formerly Antigravity Session Guard / 领航
 - **Eliminated Duplicate Switches & Legacy Popovers (`packages/core/prism-bridge.js`, `packages/core/compact-guard.js`)**: Placed all 11 module master switches exclusively inside the `overview` tab (`precompactExport` nested inside the `compactGuard` card), kept layer tabs strictly focused on per-module parameters, and replaced `compact-guard.js`'s legacy inline settings popover with direct delegation to the unified Settings Drawer.
 
 ### Fixed
+- **Release Hardening — Linux System Symlink Allowlist, Windows 8.3 Canonical Realpath & `remove`/`watch` Guard (`cli/platform-utils.mjs`, `cli/nov-bridge.mjs`, `cli/storage-doctor.mjs`, `cli/install-plugin.mjs`, `cli/bundle.mjs`, `cli/watch-daemon.mjs`, `test/cross-platform-audit-fixes.test.mjs`)**:
+  - Extended `isPlatformSystemRootSymlink()` to exempt Linux immutable/usr-merge system links (`/home`, `/var/run`, `/var/lock`, `/tmp`, `/bin`, `/sbin`, `/lib`, `/lib64`) alongside macOS (`/var`, `/tmp`, `/etc`) while still rejecting user-controlled symlink ancestors.
+  - Added `canonicalRealpathSync()` preferring `fs.realpathSync.native` across `platform-utils.mjs`, `nov-bridge.mjs`, `storage-doctor.mjs`, and `install-plugin.mjs` so Windows 8.3 short paths (`RUNNER~1`) and true disk casing stay consistent in containment checks.
+  - Set an in-memory `window.__agSagManuallyRemoved = true` flag on standalone `remove` (`REMOVE_EXPRESSION`) so a running `watch` daemon yields cleanly (`removed-by-user`) until page reload or an explicit `attach` (`respectManualRemove: false`) clears the flag and resumes mounting.
 - **Full-Repo Security Audit & Windows / Linux Cross-Platform Hardening (`cli/platform-utils.mjs`, `cli/*.mjs`, `packages/core/*.js`, `workbench/server.mjs`, `test/cross-platform-audit-fixes.test.mjs`, `test/renderer-audit-fixes.test.mjs`)**:
   - **Cross-Platform CLI & Path Identity**: Added `cli/platform-utils.mjs` (`isCliEntry` handling POSIX `npm link` symlinks & Windows drive casing, `isPathWithinBase` stripping `\\?\` / `\\?\UNC\` prefixes & normalizing Windows casing, `expandTildePath`, `atomicRenameWithRetry` for Windows `EPERM`/`EACCES`/`EBUSY` file lock contention, `safeChmodSync`, `quoteShellArgForDisplay`, and `assertNoSymlinkAncestors`); applied across all 8 CLI/workbench entrypoints, `nov-bridge.mjs`, `storage-doctor.mjs`, `install-plugin.mjs`, and `launcher.mjs`.
   - **Windows & Linux Launcher / Discovery Hardening**: Expanded `discoverCdpPort` to cover Linux `$XDG_CONFIG_HOME`, lowercase `~/.config/antigravity`, Flatpak, Snap, and Windows `APPDATA`/`LOCALAPPDATA`; fixed `SagKeepaliveController` to propagate launched fixed ports to its internal watch daemon; upgraded Windows process queries to UTF-8 PowerShell with `pwsh` -> `wmic` fallback, quoted `--remote-debugging-port` matching, `ANTIGRAVITY_BIN` / Scoop / LocalAppData discovery, and quoted space-safe manual guidance; added Linux `/proc` pure-Node fallback when `ps` fails and tightened Linux process matching to executable basename / Electron Antigravity app path; enforced fail-closed `PROCESS_DETECTION_FAILED` when probing fails; tolerated already-exited PIDs on graceful quit (`taskkill` / `ESRCH`) and recorded launch state atomically before graceful quit.

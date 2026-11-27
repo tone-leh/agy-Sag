@@ -73,11 +73,22 @@ function resolvePathForPlatform(p, platform = process.platform) {
   return path.resolve(stripped);
 }
 
+/**
+ * Native-first canonical realpath (expands Windows 8.3 short paths like `ADMINI~1`
+ * and resolves true disk casing via `fs.realpathSync.native` when available).
+ */
+export function canonicalRealpathSync(targetPath, realpathSyncFn = fs.realpathSync) {
+  if (realpathSyncFn === fs.realpathSync && typeof fs.realpathSync?.native === 'function') {
+    return fs.realpathSync.native(targetPath);
+  }
+  return realpathSyncFn(targetPath);
+}
+
 function safeRealpathOrResolve(p, platform = process.platform, realpathSyncFn = fs.realpathSync) {
   const raw = String(p ?? '');
   if (!raw) return '';
   try {
-    return realpathSyncFn(raw);
+    return canonicalRealpathSync(raw, realpathSyncFn);
   } catch {
     return resolvePathForPlatform(raw, platform);
   }
@@ -214,11 +225,19 @@ export function quoteShellArgForDisplay(arg, platform = process.platform) {
 }
 
 /**
- * Only macOS top-level compatibility symlinks (`/var`, `/tmp`, `/etc`) are exempted
- * during ancestor symlink walks.
+ * Platform system-level root symlinks exempted during ancestor symlink walks:
+ * - macOS: `/var`, `/tmp`, `/etc`
+ * - Linux (e.g. Fedora Silverblue / ostree / usr-merge): `/home`, `/var/run`, `/var/lock`, `/tmp`, `/bin`, `/sbin`, `/lib`, `/lib64`
  */
 export function isPlatformSystemRootSymlink(p, platform = process.platform) {
-  return platform === 'darwin' && /^\/(?:var|tmp|etc)$/.test(String(p ?? ''));
+  const s = String(p ?? '');
+  if (platform === 'darwin') {
+    return /^\/(?:var|tmp|etc)$/.test(s);
+  }
+  if (platform === 'linux') {
+    return /^\/(?:home|var\/run|var\/lock|tmp|bin|sbin|lib|lib64)$/.test(s);
+  }
+  return false;
 }
 
 /**
@@ -275,7 +294,7 @@ let atomicCopyCounter = 0;
  */
 export function copyFileSafeAtomic(srcPath, destPath, realDestRoot, { platform = process.platform } = {}) {
   const destDir = path.dirname(destPath);
-  const realParent = fs.realpathSync(destDir);
+  const realParent = canonicalRealpathSync(destDir);
   if (!isPathWithinBase(realParent, realDestRoot, platform)) {
     throw new Error(`Security violation: destination parent escapes root (${destPath})`);
   }
@@ -302,7 +321,7 @@ export function copyFileSafeAtomic(srcPath, destPath, realDestRoot, { platform =
   try {
     fs.writeFileSync(tmpPath, srcBuf, { flag: 'wx' });
     createdTmp = true;
-    const recheckParent = fs.realpathSync(destDir);
+    const recheckParent = canonicalRealpathSync(destDir);
     if (!isPathWithinBase(recheckParent, realDestRoot, platform)) {
       throw new Error(`Security violation: destination parent moved outside root (${destPath})`);
     }

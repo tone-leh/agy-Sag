@@ -10,6 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   assertNoSymlinkAncestors,
+  canonicalRealpathSync,
   copyFileSafeAtomic,
   expandTildePath,
   isCliEntry,
@@ -58,7 +59,7 @@ function resolveCanonicalPath(targetPath) {
 
   while (true) {
     try {
-      const real = fs.realpathSync(cur);
+      const real = canonicalRealpathSync(cur);
       return tail.length ? path.join(real, ...tail.reverse()) : real;
     } catch {
       const parent = path.dirname(cur);
@@ -713,8 +714,8 @@ export function exportSanitizedSession({
   let realDataDir;
   let realBrainDir;
   try {
-    realDataDir = fs.realpathSync(resolvedDataDir);
-    realBrainDir = fs.realpathSync(brainDir);
+    realDataDir = canonicalRealpathSync(resolvedDataDir);
+    realBrainDir = canonicalRealpathSync(brainDir);
   } catch {
     throw new Error(`Unable to resolve real path for dataDir/brain directory: ${sid}`);
   }
@@ -770,7 +771,7 @@ export function exportSanitizedSession({
     throw new Error(`Transcript file not found for session: ${sid}`);
   }
 
-  const realTranscriptPath = fs.realpathSync(transcriptPath);
+  const realTranscriptPath = canonicalRealpathSync(transcriptPath);
   if (!isPathWithinBase(realTranscriptPath, realDataDir) || !isPathWithinBase(realTranscriptPath, realBrainDir)) {
     throw new Error(`Resolved transcript path escapes dataDir for session: ${sid}`);
   }
@@ -953,7 +954,7 @@ export function createStorageBackup({
   }
   fs.mkdirSync(resolvedOut, { recursive: true });
   assertNoSymlinkAncestors(resolvedOut);
-  const realDestRoot = fs.realpathSync(resolvedOut);
+  const realDestRoot = canonicalRealpathSync(resolvedOut);
 
   let copiedFiles = 0;
   let copiedBytes = 0;
@@ -986,7 +987,7 @@ export function createStorageBackup({
     }
 
     fs.mkdirSync(path.dirname(destPath), { recursive: true });
-    const realParentDir = fs.realpathSync(path.dirname(destPath));
+    const realParentDir = canonicalRealpathSync(path.dirname(destPath));
     if (!isPathWithinBase(realParentDir, realDestRoot)) {
       throw new Error(`Security violation: resolved backup parent escapes destRoot (${destPath})`);
     }

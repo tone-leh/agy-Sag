@@ -6,7 +6,7 @@
 
 Live **10-language native UI translation** (~5,400 entries per locale), unified **6-Tab Control Hub & Global Drawer (`Ctrl/Cmd+Alt+,`)**, **segmented status capsule HUD**, **Prompt Library & Command Palette (`Ctrl/Cmd+Alt+P`)**, configurable auto `/compact` guard with viewport scroll shield, streaming **Prompt Queue**, crash-proof **Draft Vault**, turn bookmarks & cross-session archive, **policy-gated Auto-Accept** with a non-bypassable hard deny blacklist, zero-`:has()` **Optical Theme Studio**, read-only **Quota Pulse**, and offline **Storage Doctor** — **pick only the modules you want**.
 
-> **License:** [MIT](./LICENSE) · **Runtime:** Node.js >= 22 · **Dependencies:** Zero runtime npm deps · **Architecture:** Zero-ASAR CDP (Lossless) · **Companion:** [`agy-NOV`](https://github.com/tone-leh/agy-NOV)
+> **Version:** `v1.3.0` · **License:** [MIT](./LICENSE) · **Runtime:** Node.js >= 22 · **Dependencies:** Zero runtime npm deps · **Architecture:** Zero-ASAR CDP (Lossless) · **Companion:** [`agy-NOV`](https://github.com/tone-leh/agy-NOV)
 
 ---
 
@@ -25,7 +25,7 @@ We maintain **two complementary, zero-overlap plugins** built specifically for G
 
 When both **`agy-Sag`** and **`agy-NOV`** are installed together, **`agy-Sag`**'s unified Settings Hub (inside **Settings → Appearance** or the `Ctrl/Cmd+Alt+,` drawer) automatically unlocks the **`agy-NOV`** tab and shared visual language (`--sag-*` aligned with `--nov-*`):
 
-- **Control `agy-NOV` v0.5 directly inside Antigravity Settings**: Toggle all **13 `agy-NOV` modules** organized by 5 categories and switch its **5 presets** (`minimal` 6 / `core` 12 / `power` 32 / `local-all` 43 / `full` 47 tools) in real time. Communication runs over CDP `Runtime.addBinding` (zero extra HTTP ports) to `agy-Sag`'s Watch Sidecar, which atomically updates `agy-NOV`'s `config.json` (`0600`) while `agy-NOV`'s native hot-sync updates `tools/list` live without adding any CDP code to `agy-NOV`.
+- **Control `agy-NOV` (`v0.5–v1.0+`) directly inside Antigravity Settings**: Toggle all **13 `agy-NOV` modules** organized by 5 categories and switch its **5 presets** (`minimal` 6 / `core` 12 / `power` 32 / `local-all` 43 / `full` 47 tools) in real time. Communication runs over CDP `Runtime.addBinding` (zero extra HTTP ports) to `agy-Sag`'s Watch Sidecar, which atomically updates `agy-NOV`'s `config.json` (`0600`) while `agy-NOV`'s native hot-sync updates `tools/list` live without adding any CDP code to `agy-NOV`.
 - **Read-Only `agy-NOV` Template Sharing (`promptLibrary` × `agy-NOV ops`)**: Reads `agy-NOV`'s `ops/prompts.json` over the zero-port `sag:nov_templates` channel (strictly read-only, symlink-guarded, `<= 256 KB`) so your engineering templates appear right inside the `Ctrl/Cmd+Alt+P` palette.
 - **Read-Only Live Feed & Per-Turn Rollback (`sag:nov_feed` × `guard` / `spec` / `mem` / `radar`)**: Aggregates read-only snapshots from `agy-NOV` (`<= 256 KB`, symlink-guarded, zero writes) to pause `promptQueue` automatically while `spec` write-lock is active, surface `NOV 🔒` / `NOV · ΔN` memory-drift badges in the HUD and Settings `nov` tab, and add an optional per-turn `↺` rollback prompt filler (only when `agy-NOV guard` is active; appends safely without overwriting drafts).
 - **Safety Shield Synergy (`safeAutoAccept` × `agy-NOV guard` / `verify`)**: Pairs frontend hard-deny auto-accept with `agy-NOV`'s PreToolUse secret shield, pre-edit file snapshots, and Stop verify gate.
@@ -200,7 +200,7 @@ Antigravity 2.0 Host (Electron 44 + language_server localhost UI)
 ## Development & Verification
 
 ```bash
-npm test                 # Run full native node:test suite (237/237 passing, zero external deps)
+npm test                 # Run full native node:test suite (238/238 passing, zero external deps)
 npm run i18n:validate    # Validate all 10 built-in + 9 extended UI translation packs (0 errors)
 npm run workbench:smoke  # Run automated HTTP smoke check against the offline workbench (22 markers)
 npm run doctor           # Read-only local environment diagnostics

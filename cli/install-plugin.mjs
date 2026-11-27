@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   assertNoSymlinkAncestors,
+  canonicalRealpathSync,
   copyFileSafeAtomic,
   expandTildePath,
   isCliEntry,
@@ -77,7 +78,7 @@ function assertSafeInstallDestination(rootDir, realRootDir, destFilePath) {
   }
 
   fs.mkdirSync(path.dirname(resolvedDest), { recursive: true });
-  const realParent = fs.realpathSync(path.dirname(resolvedDest));
+  const realParent = canonicalRealpathSync(path.dirname(resolvedDest));
   if (!isPathWithinBase(realParent, realRootDir)) {
     throw new Error(`Security violation: destination directory escapes targetDir (${resolvedDest})`);
   }
@@ -125,7 +126,7 @@ export function installLocalPlugin({ repoRoot = REPO_ROOT, targetDir, dryRun = f
     }
     fs.mkdirSync(resolvedTargetDir, { recursive: true });
     assertNoSymlinkAncestors(resolvedTargetDir);
-    const realTargetDir = fs.realpathSync(resolvedTargetDir);
+    const realTargetDir = canonicalRealpathSync(resolvedTargetDir);
     for (const item of planned) {
       assertSafeInstallDestination(resolvedTargetDir, realTargetDir, item.dst);
       copyFileSafeAtomic(item.src, item.dst, realTargetDir);

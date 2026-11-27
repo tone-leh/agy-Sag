@@ -129,6 +129,7 @@ export const REMOVE_EXPRESSION = `(() => {
     try { delete window[k]; } catch {}
     try { delete globalThis[k]; } catch {}
   }
+  try { window.__agSagManuallyRemoved = true; } catch {}
   return { ok: true, status: 'removed' };
 })()`;
 
@@ -592,10 +593,15 @@ export function buildInjectExpression(config = null, opts = {}) {
   const targetHash = ${JSON.stringify(codeHash)};
   const bootCfg = ${cfgJson};
   const source = ${sourceJson};
+  const respectManualRemove = ${JSON.stringify(Boolean(opts.respectManualRemove))};
   const curOwner = window.__agSagOwner || window.__agSessionGuardOwner;
   if (curOwner && curOwner !== source) {
     return { ok: true, yielded: true, owner: curOwner, codeHash: targetHash, brand: 'agy-Sag' };
   }
+  if (respectManualRemove && window.__agSagManuallyRemoved) {
+    return { ok: true, yielded: true, removedByUser: true, codeHash: targetHash, brand: 'agy-Sag' };
+  }
+  try { delete window.__agSagManuallyRemoved; } catch {}
   ${extPrelude}
   const prev = window.__agSag || window.__agSessionGuard;
   if (prev && !prev.getDebugState?.()?.destroyed && prev.__agSgHash === targetHash) {
@@ -617,6 +623,6 @@ export function buildInjectExpression(config = null, opts = {}) {
     ...(bootCfg ? { config: bootCfg } : {}),
   });
   if (api) api.__agSgHash = targetHash;
-  return { ok: Boolean(api), yielded: Boolean(api?.yielded), codeHash: targetHash, brand: 'agy-Sag', version: api?.version || '1.0.0' };
+  return { ok: Boolean(api), yielded: Boolean(api?.yielded), codeHash: targetHash, brand: 'agy-Sag', version: api?.version || '1.3.0' };
 })()`;
 }

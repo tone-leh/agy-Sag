@@ -16,6 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   atomicRenameWithRetry,
+  canonicalRealpathSync,
   isPathWithinBase,
   isPlatformSystemRootSymlink,
   normalizePathForCompare,
@@ -335,7 +336,7 @@ function safeLstat(targetPath) {
 
 function safeRealpath(targetPath) {
   try {
-    return fs.realpathSync(targetPath);
+    return canonicalRealpathSync(targetPath);
   } catch {
     return null;
   }

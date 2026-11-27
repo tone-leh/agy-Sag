@@ -1,4 +1,4 @@
-# agy-Sag Project Handoff Baseline (v1.0.0)
+# agy-Sag Project Handoff Baseline (v1.3.0)
 
 > This handoff document summarizes the verified architecture, module boundaries, dual-star synergy contract, and next priorities for dedicated `agy-Sag` agents.
 
@@ -68,6 +68,10 @@
   - Wired `spec.writeLockActive` into `promptQueue` dispatch circuit-breaker (`spec-write-lock`), surfaced `NOV 🔒` / `NOV · ΔN` on the HUD `nov` segment and Live NOV Feed in Settings `nov`, and added a per-turn `↺` rollback prompt filler (only when `agy-NOV guard` is connected; appends safely, never overwrites drafts or auto-submits).
   - *Phase 7 Evaluation*: Kept cross-session bookmark search in `BookmarkVault` (`Ctrl/Cmd+Shift+B`) and full offline session archival in `storage-doctor` CLI without adding extra renderer bloat, keeping `ru` injection comfortably under the 1.6 MiB hard cap.
   - *IA Simplification Check (PASS)*: Still 13 modules in `Overview`, zero duplicate controls, zero `:has()` / `.ag-cs-` rules, zero `"Prism"` leaks, `186/186` tests passing, and `ru` bundle size `1,604,340 B` (`<= 1,677,721 B`).
+- **v1.3.0 Release Hardening (`cli/platform-utils.mjs`, `cli/nov-bridge.mjs`, `cli/storage-doctor.mjs`, `cli/install-plugin.mjs`, `cli/bundle.mjs`, `cli/watch-daemon.mjs`, `test/cross-platform-audit-fixes.test.mjs`)**:
+  - Extended `isPlatformSystemRootSymlink()` for Linux immutable/usr-merge roots (`/home`, `/var/run`, `/var/lock`, `/tmp`, `/bin`, `/sbin`, `/lib`, `/lib64`), unified Windows 8.3 `canonicalRealpathSync()` (`fs.realpathSync.native`) across CLI modules, and added the in-memory `window.__agSagManuallyRemoved` yield flag so `remove` stays uninstalled under a running `watch` daemon until reload or explicit `attach`.
+  - Documented v1.4 roadmap in `docs/ROADMAP.md` (Phase 15 `prism-bridge.js` modular split + `CONTRIBUTING.md`, Phase 16 opt-in multi-engine thought/title translator with BYO API Key + local Ollama + lightweight MT over zero-port Node proxy & `0600` secret isolation).
+  - *Verification Baseline*: `238/238` tests passing, `i18n:validate` 0 errors, `workbench:smoke` HTTP 200 (`1,261,876 B`, 22 markers), `ru` sync bundle `1,532,276 B` (`<= 1,550,000 B`), Watch deferred `918,830 B`, `readmeImages = 0`.
 - **v1.3 Phase 14 — `agy-NOV` v0.8/v0.9 Alignment, Bundle Headroom & Dictionary Quality (`cli/nov-bridge.mjs`, `cli/bundle.mjs`, `cli/sag-cli.mjs`, `packages/core/nov-synergy.js`, `packages/core/prompt-library.js`, `packages/core/prism-bridge.js`, `packages/core/status-pill.js`, `packages/core/theme-studio.js`, `packages/core/index.js`, `packages/core/locales/ext/zh-CN.json`, `test/phase14-nov-v09-hardening.test.mjs`)**:
   - Synced read-only `readNovFeed()` & renderer HUD/Settings with `agy-NOV v0.8/v0.9` (`guard.forceAskCount`, `guard.permissionMode`, `lastEvent.decision`, `verify`, redacted `alerts`), exposed `/nov-spec`, `/nov-debug`, `/nov-review`, `/nov-handoff` in `promptLibrary` when NOV is connected, upgraded `themeStudio` visibility checks with `getComputedStyle`, fixed all 6 `zh-CN.json` placeholder/brand anomalies (0 defects across all 9 extended packs), and reclaimed >21 KB in `cli/bundle.mjs` (`ru` sync `1,532,015 B`, Watch deferred `918,569 B`).
   - *Verification Baseline*: `237/237` tests passing, `i18n:validate` 0 errors, `workbench:smoke` HTTP 200 (`1,261,876 B`, 22 markers).
@@ -96,7 +100,7 @@
 
 Run inside repository root:
 ```bash
-npm test                                  # 237/237 tests passing (node --test)
+npm test                                  # 238/238 tests passing (node --test)
 npm run i18n:validate                     # 10 built-in + 9 extended packs, 0 errors
 npm run workbench:smoke                   # HTTP 200, 1261876 B, 22 markers verified
 node cli/sag-cli.mjs launch --dry-run --json  # Read-only launch plan + Prism yield check

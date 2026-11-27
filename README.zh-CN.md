@@ -6,7 +6,7 @@
 
 内置 **10 国语言原生界面实时翻译**（每语种约 5,400 词条）、**统一 6-Tab 控制中心与 `Ctrl/Cmd+Alt+,` 全局设置抽屉**、**分段式状态胶囊 HUD**、**`Ctrl/Cmd+Alt+P` 提示词库与命令面板**、自定义阈值静默 `/compact` 防爆与视口滚动盾、流式运行中 **提示词排队**、防丢 **草稿保护**、轮次书签与跨会话档案库、带不可绕过高危黑名单的 **安全自动审批**、零 `:has()` **光学主题与中文字体排版**、零封号风险的 **只读配额脉冲**，以及离线 **本地存储体检与脱敏备份 CLI**——**全部模块独立开关，按需启用**。
 
-> **开源协议：** [MIT](./LICENSE) · **运行环境：** Node.js >= 22 · **外部依赖：** 零 npm 运行依赖 · **架构路线：** Zero-ASAR 无损 CDP · **双星搭档：** [`agy-NOV`](https://github.com/tone-leh/agy-NOV)
+> **当前版本：** `v1.3.0` · **开源协议：** [MIT](./LICENSE) · **运行环境：** Node.js >= 22 · **外部依赖：** 零 npm 运行依赖 · **架构路线：** Zero-ASAR 无损 CDP · **双星搭档：** [`agy-NOV`](https://github.com/tone-leh/agy-NOV)
 
 ---
 
@@ -25,7 +25,7 @@
 
 同时安装 **`agy-Sag`** 与 **`agy-NOV`** 后，`agy-Sag` 统一控制中心（内嵌于 **Settings → Appearance** 或通过 `Ctrl/Cmd+Alt+,` 打开右侧抽屉）自动解锁 **`双星 NOV`** 面板，并与 `agy-NOV` 保持统一视觉设计 Token（`--sag-*` 对齐 `--nov-*`）：
 
-- **在 Antigravity 原生设置里直接热控 `agy-NOV` v0.5**：按 5 大分类一键开关全部 **13 个 `agy-NOV` 纯原生模块** 并切换 **5 档场景预设**（`minimal` 6 / `core` 12 / `power` 32 / `local-all` 43 / `full` 47 工具）。通信复用 CDP `Runtime.addBinding`（零额外 HTTP 端口）通知 Sidecar 原子更新 `agy-NOV` 的 `config.json`（`0600`），`agy-NOV` 服务端通过原生文件签名热同步刷新 `tools/list`，全程保持 `agy-NOV` 零 CDP 纯净。
+- **在 Antigravity 原生设置里直接热控 `agy-NOV`（`v0.5–v1.0+`）**：按 5 大分类一键开关全部 **13 个 `agy-NOV` 纯原生模块** 并切换 **5 档场景预设**（`minimal` 6 / `core` 12 / `power` 32 / `local-all` 43 / `full` 47 工具）。通信复用 CDP `Runtime.addBinding`（零额外 HTTP 端口）通知 Sidecar 原子更新 `agy-NOV` 的 `config.json`（`0600`），`agy-NOV` 服务端通过原生文件签名热同步刷新 `tools/list`，全程保持 `agy-NOV` 零 CDP 纯净。
 - **提示词库只读消费 `agy-NOV` 工程模板（`promptLibrary` × `agy-NOV ops`）**：通过零端口 `sag:nov_templates` 只读通道读取 `agy-NOV` 的 `ops/prompts.json`（严格 symlink 拒止、`<= 256 KB` 上限、零磁盘写入），在 `Ctrl/Cmd+Alt+P` 命令面板中一键填表填入输入框。
 - **双星只读数据流与按轮回滚联动（`sag:nov_feed` × `guard` / `spec` / `mem` / `radar`）**：通过零端口只读通道聚合 `agy-NOV` 快照摘要（单文件 `<= 256 KB`、symlink 拒止、零写入）：`spec` 写锁激活时自动暂停 `promptQueue` 出队，底栏 HUD 与 `双星 NOV` 面板实时展示 `NOV 🔒` / `NOV · ΔN` 记忆漂移与 Guard 拦截数，并在每轮消息栏提供按需 `↺` 回滚提示词填充按钮（仅 `agy-NOV guard` 开启时可见，安全追加不覆盖草稿）。
 - **多层安全护盾协同（`safeAutoAccept` × `agy-NOV guard` / `verify`）**：前端铁壁黑名单自动审批与后端 PreToolUse 密钥防火墙、改前文件快照及 Stop 实测校验门形成多层防护。
@@ -200,7 +200,7 @@ Antigravity 2.0 宿主（Electron 44 + language_server 本地渲染界面）
 ## 本地开发与验证
 
 ```bash
-npm test                 # 运行全量原生 node:test 单测套件（237/237 通过，零外部依赖）
+npm test                 # 运行全量原生 node:test 单测套件（238/238 通过，零外部依赖）
 npm run i18n:validate    # 校验全部 10 国内置 + 9 扩展界面翻译词典与正则模板（0 错误）
 npm run workbench:smoke  # 对离线沙盒执行自动化 HTTP 烟雾校验（22 markers）
 npm run doctor           # 只读本机环境与双星共存诊断

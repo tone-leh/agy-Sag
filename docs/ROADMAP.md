@@ -130,4 +130,22 @@
 - [x] **阶段 11**：队列行内编辑插队 + 30 条脱敏已发历史 `Ctrl+↑/↓` + `//` 与选区快引 + 独立轻量右键菜单
 - [x] **阶段 12**：轮次 3 选 1 恢复微菜单 + 原生 Settings 侧栏锚点 + `Ctrl/Cmd+Alt+/` 动态快捷键速查浮层
 - [x] **阶段 13（v1.3 美学皮肤与 Prism 全面替代）**：15 套深浅与风格皮肤（含自动明暗配对、Browser Hole 透明避让与宿主全表面变量）、8 套一键视觉外观方案、7 档强调色 / 4 档材质 / 4 档圆角 / 6 档代码字体 + 连字、`CSS.highlights` 五级水墨流式淡入、FastDOM 丝滑输入光标、0fps 底缘语义微光（支持关闭 `compactGuard` 时的独立节流兜底状态检测、祖先隐藏态过滤、Prism `data-ag-cs-style` 动态热切换与零残留清理）、`/btw` & `/plan` 独立右键菜单、`readingNav` 一键顺滑滚底、`ui` Tab 三色色板画廊重构与 `cli/bundle.mjs` 词法级空白压缩（严格维持 0 新增顶级模块开关、13 模块 / 6-Tab 单一真源）
-- [x] **阶段 14（v1.3 安全审计、Windows/Linux 跨平台加固与 `agy-NOV` v0.9 协议对齐）**：完成两轮 Codex CLI（`gpt-6.2-sol`）独立安全/缺陷复核与全量修复；新增 `cli/platform-utils.mjs` 打通 Windows/Linux CLI 软链入口、路径边界、PowerShell UTF-8/`pwsh` 与 Linux `/proc`/XDG/Flatpak/Snap 支持、原子替换重试与目的软链防护；对齐 `agy-NOV v0.8/v0.9`（`force_ask`、`permissionMode`、`verify` 信号、`alerts` 与 `/nov-spec` 等 4 条原生斜杠 Playbook 透出）；修复 9 扩展词典零瑕疵、`themeStudio` 计算样式隐藏判断，并通过无损 ASI 安全换行与静态 CSS 压缩将 `ru` 同步包体压至 `1,531,194 B`（Watch 延迟包 `917,748 B`，`236/236` 单测全绿）
+- [x] **阶段 14（v1.3.0 安全审计、Windows/Linux 跨平台加固与 `agy-NOV` v0.9/v1.0 协议对齐）**：完成两轮 Codex CLI（`gpt-6.2-sol`）独立安全/缺陷复核与全量修复；新增 `cli/platform-utils.mjs` 打通 Windows/Linux CLI 软链入口、Linux 不可变系统软链白名单（`/home`、`/var/run` 等）、Windows 8.3 短路径 `canonicalRealpathSync`、PowerShell UTF-8/`pwsh` 与 Linux `/proc`/XDG/Flatpak/Snap 支持、原子替换重试与目的软链防护；补齐 `remove` 与常驻 `watch` 的手动卸载暂停礼让标记；对齐 `agy-NOV v0.8–v1.0`（`force_ask`、`permissionMode`、`verify` 信号、`alerts` 与 `/nov-spec` 等 4 条原生斜杠 Playbook 透出）；修复 9 扩展词典零瑕疵、`themeStudio` 计算样式隐藏判断，并通过无损 ASI 安全换行与静态 CSS 压缩保持充足包体余量（`238/238` 单测全绿，正式发布 `v1.3.0`）
+
+---
+
+## 七、v1.4 演进路线图（结构化架构重构 + 多引擎思考/标题实时翻译）
+
+> 确立 **「结构化、模块化、社区友好」** 开发原则：先打牢代码分治边界与开源贡献体验，再在清晰扩展点上稳健交付新能力，保持零运行时依赖与无损卸载基线。
+
+| 阶段 | 定位与目标 | 核心交付与安全边界 |
+| :---: | :--- | :--- |
+| **阶段 15（架构化拆分与社区协作基建）** | 降低单文件认知负担，便于 GitHub 社区开发者并行提交 PR | ① 将 `packages/core/prism-bridge.js`（当前约 1,800 行）按 Tab 与职责拆分为 `settings-hub.js`（外壳、搜索与抽屉）+ 独立子页渲染器（`settings-tab-overview.js` / `ui` / `conversation` / `guard` / `nov` / `advanced`），并按需梳理 `styles.js` / `theme-studio.js` 内部模块化结构，保持零构建 UMD 与 `cli/bundle.mjs` 确定性打包不变；② 新增 `CONTRIBUTING.md`（模块注册规范、i18n 键校验、CDP 零残留准则、本地单测与 Workbench 验收流程）；③ 持续优化 Watch 模式 `deferExtPack` 按需异步首载默认链路 |
+| **阶段 16（多引擎思考过程与侧栏标题实时翻译）** | 补齐从 Obsidian Prism 平滑迁移后的最后一项高价值实用能力，同时严守默认隐私与凭据安全红线 | ① **严格 Opt-in 默认关闭**：关闭时零网络请求、零 DOM 额外观察器；作为独立可选子能力归入 Settings `ui` / `conversation` 或专用翻译卡片（按开启范围清晰隔离）；② **双轨多引擎架构**：支持 **用户自填 API Key 自选模型**（OpenAI 兼容接口 / Anthropic / Gemini / 本地 Ollama 等自定义 Base URL 与 Model ID）+ **免 Key 轻量机器翻译**（如公开翻译端点或本机端点，带节流与明确外发提示）；③ **安全通信与凭据隔离**：浏览器渲染层绝不直连外网或明文存 Key，复用既有零端口 CDP Bridge（`Runtime.addBinding`）将待译纯文本交给 Node Sidecar 发起受控 HTTPS 请求（规避页面 CORS 与渲染层凭据泄露）；API Key 存于独立 `0600` 本地文件，自动被 `storage-doctor` 备份/导出与配置 JSON 导出严格剔除，并支持按块缓存、原文/译文对照或悬浮切换与流式防抖 |
+| **阶段 17（`agy-NOV` v1.0+ 联动与体验精修）** | 紧跟双星演进与真实跨平台反馈 | 结合 `agy-NOV v1.0+` 后续只读信号扩展双星卡片，按真实 Windows / Linux / Antigravity 2.35+ 实机反馈持续微调 launcher、词典与交互细节（如按需评估轻量推理档位记忆） |
+
+### v1.4 进度总览
+
+- [ ] **阶段 15**：`prism-bridge.js` 按 Tab 结构化拆分、`CONTRIBUTING.md` 社区贡献文档与模块边界梳理
+- [ ] **阶段 16**：多引擎思考过程与侧栏标题实时翻译（严格 Opt-in，自填 API Key 自选模型 + 本地 Ollama + 机器翻译，零端口 Node 侧受控代理与 `0600` 凭据隔离）
+- [ ] **阶段 17**：真实跨平台实机反馈收口与 `agy-NOV v1.0+` 持续对齐

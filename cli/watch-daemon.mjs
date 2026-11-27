@@ -562,6 +562,7 @@ export const PROBE_EXPRESSION = `(() => {
     locale = document.documentElement?.getAttribute?.('data-ag-cs-lang') || navigator.language || 'en';
   }
   if (owner && owner !== 'standalone') return { state: 'yielded', owner, locale };
+  if (window.__agSagManuallyRemoved) return { state: 'removed-by-user', locale };
   const api = window.__agSag || window.__agSessionGuard;
   if (api && !api.getDebugState?.()?.destroyed) {
     return { state: 'mounted', codeHash: api.__agSgHash || '', locale };
@@ -652,6 +653,7 @@ export class SagWatchDaemon {
           source: 'standalone',
           extLocale: extLocale || this.config?.hostI18nLocale || null,
           deferExtPack: this.deferExtPack,
+          respectManualRemove: true,
         }),
       }));
     this.extPacksRepoRoot = options.extPacksRepoRoot || undefined;
@@ -1125,9 +1127,9 @@ export class SagWatchDaemon {
           const probe = await this.evalTarget(page.webSocketDebuggerUrl, PROBE_EXPRESSION);
           if (this._stopped) break;
           if (probe?.locale && typeof probe.locale === 'string') probedLocale = probe.locale;
-          if (probe?.state === 'yielded') {
+          if (probe?.state === 'yielded' || probe?.state === 'removed-by-user') {
             yielded += 1;
-            prev.status = 'yielded';
+            prev.status = probe.state === 'removed-by-user' ? 'removed-by-user' : 'yielded';
             prev.updatedAt = this.now();
             this._closeBridgeSession(key);
             continue;
@@ -1151,7 +1153,7 @@ export class SagWatchDaemon {
             codeHash: bundle.codeHash,
             url: page.url,
             wsUrl: page.webSocketDebuggerUrl,
-            status: 'yielded',
+            status: res.removedByUser ? 'removed-by-user' : 'yielded',
             updatedAt: this.now(),
           });
           this._closeBridgeSession(key);

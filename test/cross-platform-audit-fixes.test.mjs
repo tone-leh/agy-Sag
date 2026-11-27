@@ -10,9 +10,11 @@ import { pathToFileURL } from 'node:url';
 import {
   assertNoSymlinkAncestors,
   atomicRenameWithRetry,
+  canonicalRealpathSync,
   expandTildePath,
   isCliEntry,
   isPathWithinBase,
+  isPlatformSystemRootSymlink,
   normalizePathForCompare,
   quoteShellArgForDisplay,
   stripWindowsDevicePrefix,
@@ -571,6 +573,7 @@ test('7. bundle.mjs: same-hash reuse checks owner yield, merges extPrelude befor
       __agSagHostBridge: () => {},
     },
     globalThis: { __agSagHostBridge: () => {} },
+    navigator: { language: 'en' },
     document: { getElementById: () => null, querySelectorAll: () => [] },
   };
   const standaloneRemoveRes = vm.runInNewContext(REMOVE_EXPRESSION, standaloneRemoveSandbox);
@@ -1057,4 +1060,131 @@ test('13. second-pass hardening: POSIX literal backslash containment, non-host a
   } finally {
     fs.rmSync(tmpInstall, { recursive: true, force: true });
   }
+});
+
+test('14. v1.3.0 release hardening: Linux immutable system root symlinks, canonicalRealpathSync & remove/watch manual-remove yield', async () => {
+  // (a) Linux system root symlinks (Silverblue / ostree / usr-merge) are exempted while arbitrary user links are rejected
+  assert.equal(isPlatformSystemRootSymlink('/home', 'linux'), true);
+  assert.equal(isPlatformSystemRootSymlink('/var/run', 'linux'), true);
+  assert.equal(isPlatformSystemRootSymlink('/var/lock', 'linux'), true);
+  assert.equal(isPlatformSystemRootSymlink('/lib64', 'linux'), true);
+  assert.equal(isPlatformSystemRootSymlink('/opt/custom', 'linux'), false);
+  assert.equal(isPlatformSystemRootSymlink('/home', 'darwin'), false);
+  assert.equal(isPlatformSystemRootSymlink('/var', 'darwin'), true);
+
+  // assertNoSymlinkAncestors honors Linux /home symlink (e.g. Fedora Silverblue /home -> /var/home)
+  assert.doesNotThrow(() => {
+    assertNoSymlinkAncestors('/home/dev/project/file.json', {
+      platform: 'linux',
+      lstatSyncFn: (p) => ({
+        isSymbolicLink: () => p === '/home',
+      }),
+    });
+  });
+  assert.throws(
+    () =>
+      assertNoSymlinkAncestors('/home/dev/project/file.json', {
+        platform: 'linux',
+        lstatSyncFn: (p) => ({
+          isSymbolicLink: () => p === '/home/dev/project',
+        }),
+      }),
+    /Security violation/i
+  );
+
+  // (b) canonicalRealpathSync resolves real paths and supports custom realpath function injection
+  const tmp = makeTempDir('agy-sag-v13-canon-');
+  try {
+    const file = path.join(tmp, 'sample.txt');
+    fs.writeFileSync(file, 'ok', 'utf8');
+    const canonical = canonicalRealpathSync(file);
+    assert.equal(path.basename(canonical), 'sample.txt');
+    let customCalled = false;
+    const customOut = canonicalRealpathSync(file, (p) => {
+      customCalled = true;
+      return `${p}#custom`;
+    });
+    assert.equal(customCalled, true);
+    assert.equal(customOut, `${file}#custom`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+
+  // (c) REMOVE_EXPRESSION marks __agSagManuallyRemoved; PROBE_EXPRESSION & watch inject yield; explicit attach clears mark
+  const sandbox = {
+    window: {
+      __agSagOwner: 'standalone',
+      __agSag: { destroy: () => {} },
+      __agSagHostBridge: () => {},
+    },
+    globalThis: { __agSagHostBridge: () => {} },
+    navigator: { language: 'en' },
+    document: { getElementById: () => null, querySelectorAll: () => [] },
+  };
+  sandbox.window.self = sandbox.window;
+  sandbox.window.top = sandbox.window;
+
+  const rmRes = vm.runInNewContext(REMOVE_EXPRESSION, sandbox);
+  assert.equal(rmRes.ok, true);
+  assert.equal(rmRes.status, 'removed');
+  assert.equal(sandbox.window.__agSagManuallyRemoved, true);
+
+  const probeRes = vm.runInNewContext(PROBE_EXPRESSION, sandbox);
+  assert.equal(probeRes.state, 'removed-by-user');
+
+  // Watch-style injection (respectManualRemove: true) yields without re-mounting
+  const watchExpr = buildInjectExpression({ hostI18nLocale: 'en' }, {
+    source: 'standalone',
+    deferExtPack: true,
+    respectManualRemove: true,
+  });
+  const watchInjectRes = vm.runInNewContext(watchExpr, sandbox);
+  assert.equal(watchInjectRes.ok, true);
+  assert.equal(watchInjectRes.yielded, true);
+  assert.equal(watchInjectRes.removedByUser, true);
+  assert.equal(sandbox.window.__agSagManuallyRemoved, true);
+
+  // WatchDaemon reconcileOnce runs real expressions against the removed sandbox across cold + steady cycles
+  let probeCalls = 0;
+  let injectCalls = 0;
+  const daemon = new SagWatchDaemon({
+    port: 9222,
+    enableHostBridge: false,
+    deferExtPack: true,
+    discoverPort: () => 9222,
+    listTargets: async () => [
+      {
+        id: 'win-1',
+        type: 'page',
+        title: 'Antigravity',
+        url: 'app://antigravity/index.html',
+        webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/1',
+      },
+    ],
+    evalTarget: async (_ws, expr) => {
+      if (expr === PROBE_EXPRESSION) probeCalls += 1;
+      else injectCalls += 1;
+      return vm.runInNewContext(expr, sandbox);
+    },
+  });
+  const firstCycle = await daemon.reconcileOnce();
+  assert.equal(firstCycle.yielded, 1);
+  assert.equal(firstCycle.attached, 0);
+  assert.equal(injectCalls, 1);
+  assert.equal(daemon.attachedTargets.get('win-1')?.status, 'removed-by-user');
+
+  const secondCycle = await daemon.reconcileOnce();
+  assert.equal(secondCycle.yielded, 1);
+  assert.equal(secondCycle.attached, 0);
+  assert.equal(probeCalls, 1);
+  assert.equal(injectCalls, 1, 'Steady-state cycle must stop at PROBE_EXPRESSION with zero re-injection');
+  assert.equal(daemon.attachedTargets.get('win-1')?.status, 'removed-by-user');
+
+  // Explicit attach (respectManualRemove: false) clears __agSagManuallyRemoved before mounting
+  const attachExpr = buildInjectExpression({ hostI18nLocale: 'en' }, {
+    source: 'standalone',
+    deferExtPack: true,
+    respectManualRemove: false,
+  });
+  assert.ok(attachExpr.includes('delete window.__agSagManuallyRemoved'), 'Explicit attach must clear manual-remove marker');
 });
