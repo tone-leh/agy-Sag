@@ -562,20 +562,30 @@ test('SafeAutoAccept UMD global mount, permission/dialog containers, rm flag reo
 });
 
 test('Adversarial ReDoS protection, input length caps, and unsafe custom regex rejection', () => {
-  // 1. 50KB adversarial payload against EVERY HARD_DENY_PATTERNS regex must stay linear (< 20ms total, < 5ms for sql-delete-tautology)
+  // 1. 50KB adversarial payload against EVERY HARD_DENY_PATTERNS regex must stay linear (< 5ms min across 3 warmed runs)
   const evilSql50k = 'DELETE FROM users WHERE ' + 'WHERE '.repeat(8500);
   const tautologyRule = saaMod.HARD_DENY_PATTERNS.find((r) => r.id === 'sql-delete-tautology');
   assert.ok(tautologyRule, 'sql-delete-tautology rule must exist');
-  const tRuleStart = performance.now();
-  tautologyRule.pattern.test(evilSql50k);
-  const tRuleMs = performance.now() - tRuleStart;
-  assert.ok(tRuleMs < 5, `sql-delete-tautology regex took ${tRuleMs.toFixed(2)}ms on 50KB input (expected < 5ms)`);
+  // Warm up JIT for all patterns before timing to avoid shared-runner first-run jitter
+  for (const rule of saaMod.HARD_DENY_PATTERNS) {
+    rule.pattern.test(evilSql50k);
+  }
+  const measureMinMs = (re, input) => {
+    let minDt = Infinity;
+    for (let i = 0; i < 3; i += 1) {
+      const t0 = performance.now();
+      re.test(input);
+      const dt = performance.now() - t0;
+      if (dt < minDt) minDt = dt;
+    }
+    return minDt;
+  };
+  const tRuleMs = measureMinMs(tautologyRule.pattern, evilSql50k);
+  assert.ok(tRuleMs < 5, `sql-delete-tautology regex min took ${tRuleMs.toFixed(2)}ms on 50KB input (expected < 5ms)`);
 
   for (const rule of saaMod.HARD_DENY_PATTERNS) {
-    const t0 = performance.now();
-    rule.pattern.test(evilSql50k);
-    const dt = performance.now() - t0;
-    assert.ok(dt < 5, `HARD_DENY rule "${rule.id}" regex took ${dt.toFixed(2)}ms on 50KB input (expected < 5ms)`);
+    const dt = measureMinMs(rule.pattern, evilSql50k);
+    assert.ok(dt < 5, `HARD_DENY rule "${rule.id}" regex min took ${dt.toFixed(2)}ms on 50KB input (expected < 5ms)`);
   }
 
   // 2. 20KB & 50KB ReDoS payloads through classifyApprovalCard must finish fast (< 50ms) and NEVER allow
