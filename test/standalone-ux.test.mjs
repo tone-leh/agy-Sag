@@ -211,17 +211,19 @@ test('Standalone user (NO Obsidian Prism): sees calm composer % pill, floating q
   card.querySelector('[data-ag-sg-card-th="75"]').click();
   assert.equal(guard.getConfig().compactThreshold, 75);
 
-  // Native Antigravity Settings Dialog gets a clean standalone card (WITHOUT Obsidian Prism!, <= 4 rows)
+  // Native Antigravity Settings Dialog gets unified single-source 6-Tab Settings Hub (WITHOUT Obsidian Prism!)
   const nativeSec = doc.querySelector(`[data-testid="${prismBridge.NATIVE_SECTION_TESTID}"]`);
-  assert.ok(nativeSec, 'Standalone user must see a clean native Settings section inside Antigravity Settings');
+  assert.ok(nativeSec, 'Standalone user must see unified Settings Hub inside Antigravity Settings');
   assert.equal(guard.getDebugState().prismBridge.mountedMode, 'native');
-  assert.ok(nativeSec.querySelectorAll('[data-ag-sg-prism-row]').length <= 4, 'Settings card must stay minimal (<= 4 rows)');
-  assert.equal(nativeSec.querySelector('[data-ag-sg-prism-th="75"]').getAttribute('aria-pressed'), 'true');
+  assert.equal(guard.prismBridge.getActiveSubTab(), 'overview');
+  assert.equal(nativeSec.querySelectorAll('[data-ag-sag-group]').length, 3, 'Overview groups into L1/L2/L3');
+  assert.equal(nativeSec.querySelectorAll('[data-ag-sag-mod]').length, 11, 'Each of the 11 module switches appears once in Overview');
   assert.equal(nativeSec.textContent.includes('Prism'), false, 'Native standalone settings must never show Prism jargon');
-  const modGuide = nativeSec.querySelector('[data-testid="ag-sg-mod-guide"]');
-  assert.ok(modGuide, 'Settings must render plain-language per-module descriptions right beside module toggles');
-  assert.equal(modGuide.querySelectorAll('.ag-sg-mod-guide-item').length, 4);
   assert.equal(guard.getConfig().modules.outlineBookmarks, false, 'outlineBookmarks must default to opt-in (false) for clean first-run UX');
+
+  // Switch to conversation tab and confirm status card 75% threshold stayed synchronized
+  nativeSec.querySelector('[data-ag-sag-subtab="conversation"]').click();
+  assert.equal(nativeSec.querySelector('[data-ag-sag-th="75"]').getAttribute('aria-pressed'), 'true');
 
   guard.destroy();
   assert.equal(doc.querySelectorAll('[data-ag-sg-owned="1"]').length, 0);

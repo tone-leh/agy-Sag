@@ -9,7 +9,7 @@
 - **Strict Workspace Scope**: Operate **only** inside the `agy-Sag` repository. Do **not** modify `agy-NOV` source files from `agy-Sag` sessions; coordinate across the two repositories strictly through the documented `config.json` schema and README links.
 - **Core Positioning**:
   - **`agy-Sag` (This Repo)**: Modular, pick-what-you-need Zero-ASAR CDP deep-enhancement suite for Google Antigravity 2.0 (native Settings embedded control center, 10-language UI translation, composer & main-chat automation, optical themes, read-only quota pulse, offline storage doctor).
-  - **`agy-NOV` (Companion Repo)**: 100% official native protocols (MCP Apps SEP-1865 + Lifecycle Hooks), zero ASAR, zero CDP, 9 native modules (`review`, `guard`, `xray`, `turbo`, `radar`, `canvas`, `mem`, `ops`, `remote`) and 5 presets (`minimal`, `core`, `power`, `local-all`, `full`).
+  - **`agy-NOV` (Companion Repo)**: 100% official native protocols (MCP Apps SEP-1865 + Lifecycle Hooks), zero ASAR, zero CDP, 13 native modules across 5 categories (`review`, `guard`, `xray`, `turbo`, `radar`, `verify`, `worktree`, `spec`, `studio`, `canvas`, `mem`, `ops`, `remote`) and 5 presets (`minimal` 6 / `core` 12 / `power` 32 / `local-all` 43 / `full` 47 tools).
 
 ## 2. Implemented Capabilities (Verified v1.0.0)
 
@@ -44,7 +44,11 @@
 - `workbench/server.mjs`: Zero-touch offline simulator (`http://127.0.0.1:4179`) covering all modules, 10-language live translation (including `/ext/<locale>.json` extended packs), and interactive `agy-NOV` bidirectional synergy.
 
 ### Post-1.0 Polish & Expansion (Unreleased)
-- **Phase 0 — Roadmap & Single-Source Product IA (`docs/ROADMAP.md`, `docs/PRODUCT-IA.md`, `AGENTS.md`)**: Defined the 5-layer feature hierarchy (`L0–L4`), 6-tab single-source Settings Hub architecture, `--sag-*` visual tokens aligned with `agy-NOV`, phased 0–7 execution roadmap, and zero-overlap dual-star boundaries (including `agy-NOV` v0.5.0 13-module alignment). *IA Simplification Check*: Documentation baseline established; duplicate switch/tab cleanup is scheduled as Phase 1.
+- **Phase 0 — Roadmap & Single-Source Product IA (`docs/ROADMAP.md`, `docs/PRODUCT-IA.md`, `AGENTS.md`)**: Defined the 5-layer feature hierarchy (`L0–L4`), 6-tab single-source Settings Hub architecture, `--sag-*` visual tokens aligned with `agy-NOV`, phased 0–7 execution roadmap, and zero-overlap dual-star boundaries (including `agy-NOV` v0.5.0 13-module alignment). *IA Simplification Check*: Documentation baseline established; duplicate switch/tab cleanup completed in Phase 1.
+- **Phase 1 — Unified 6-Tab Settings Hub, `agy-NOV` v0.5.0 Sync & Visual Tokens (`packages/core/prism-bridge.js`, `packages/core/styles.js`, `packages/core/coexist.js`, `packages/core/i18n.js`, `packages/core/compact-guard.js`, `packages/core/status-pill.js`, `packages/core/nov-synergy.js`, `cli/nov-bridge.mjs`, `workbench/server.mjs`, `test/settings-hub.test.mjs`)**:
+  - Consolidated all 11 module master switches exclusively into the `overview` tab (`precompactExport` nested inside `compactGuard`), removed duplicate top cards and legacy `compact-guard.js` popovers, and migrated legacy `all`/`flow`/`auto` tab keys.
+  - Added instant cross-tab search across hidden `<details>` sections (matching nested child modules), inline 2-step config reset, JSON export/sanitized import, `420px` global drawer (`Ctrl/Cmd+Alt+,`, `Esc`), `agy-NOV` v0.5.0 13-module/5-category sync, `--sag-*` visual tokens, `40×22` switches, and gradient hexagon SVG badges.
+  - *IA Simplification Check (PASS)*: Verified 0 duplicate `[data-ag-sag-mod]` toggles outside `overview`, 0 `"Prism"` occurrences across `SAG_UI_PACKS`, 0 `:has()` CSS rules, single-locale `ru` bundle size `1,467,179 B` (`<= 1,677,721 B`), independent `auditor` review passed after fixing nested `precompactExport` search and cross-tab NOV auto-refresh scoping.
 - **Layered 9-Locale Extended UI Dictionaries (`packages/core/locales/ext/*.json`, `scripts/i18n/`, `THIRD_PARTY_NOTICES.md`)**: Expanded target-locale coverage to ~5,375–5,491 entries per locale (`zh-CN`: 465 core + 4,602 ext + 424 patterns = 5,491; `zh-TW`: 5,430; `ja`: 5,421; `ko`: 5,422; `es`: 5,407; `fr`: 5,375; `de`: 5,381; `ru`: 5,424; `pt-BR`: 5,399) using strict precedence (`Custom > 465 Core > Extended`), loaded via single-locale CDP preload (`<= 1.6 MB`), zero-port `sag:ext_pack` bridge requests, or Workbench `/ext/<locale>.json`. `zh-CN` adapts MIT-licensed `yiheng8023/antigravity-chinese` (`v3.3.65`); the other 8 locales were independently translated from the deduplicated English source table.
 - **Cross-Platform CDP Launcher & Prism JSON PID Fix (`cli/launcher.mjs`, `cli/watch-daemon.mjs`)**: Fixed `isPrismDaemonActive()` to parse JSON `.daemon.pid` files and added safe cross-platform `launch` / `keepalive` automation.
 - **Visual & Accessibility Fixes (7 items, see `CHANGELOG.md`)**: Keyboard `Enter`/`Space` header toggle with focus retention across re-renders, removal of redundant `✦` prefix adjacent to status dots, `168px` minimum column width on `.ag-sag-nov-grid` eliminating English label truncation, pure-CSS dropdown indicator on `.ag-sag-select`, high-contrast light-theme active chips, unified `:focus-visible` focus rings, and workbench multi-locale sync.
@@ -56,9 +60,9 @@
 
 Run inside repository root:
 ```bash
-npm test                                  # 158/158 tests passing (node --test)
+npm test                                  # 163/163 tests passing (node --test)
 npm run i18n:validate                     # 10 built-in + 9 extended packs, 0 errors
-npm run workbench:smoke                   # HTTP 200, 14 markers verified
+npm run workbench:smoke                   # HTTP 200, 907125 B, 14 markers verified
 node cli/sag-cli.mjs launch --dry-run --json  # Read-only launch plan + Prism yield check
 ```
 

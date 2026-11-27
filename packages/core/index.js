@@ -165,6 +165,8 @@
       coexist,
       prismBridgeMod,
       onOpenVault: openVault,
+      onOpenSettingsDrawer: (tabId) => prismBridge?.openDrawer?.(tabId),
+      isSettingsDrawerOpen: () => Boolean(prismBridge?.isDrawerOpen?.()),
       onEvaluated: (snap) => {
         if (quotaPulse && compactGuard.getConfig().modules?.quotaPulse) {
           const usedTokens = Number(snap?.usedTokens);
@@ -496,6 +498,7 @@
           onCompactNow: () => compactGuard.insertCompact({ submit: true }),
           onCleanRestart: (opts) => cleanSlate?.triggerCleanClear?.(opts),
           onOpenVault: openVault,
+          onOpenSettings: (tabId) => prismBridge?.openDrawer?.(tabId),
         })
       : null;
 
@@ -558,6 +561,11 @@
           getHostI18nState: () => hostI18n?.getDebugState?.() || null,
           getAutoAcceptState: () => safeAutoAccept?.getDebugState?.() || null,
           getQuotaSummary: () => quotaPulse?.getSummary?.() || null,
+          getQueueState: () => promptQueue?.getDebugState?.() || null,
+          getDraftState: () => draftGuard?.getDebugState?.() || null,
+          getBookmarkState: () => outlineBookmarks?.getDebugState?.() || null,
+          onOpenVault: (q) => openVault(q),
+          bindDrawerShortcut: options.bindDrawerShortcut !== false,
           onHostContextChange: () => {
             compactGuard.refreshUi?.();
             draftGuard?.sync?.();
@@ -646,7 +654,9 @@
       clearAndRestart: (opts) => cleanSlate?.triggerCleanClear?.(opts),
       copyNewSessionHandoff: () => compactGuard.copyNewSessionHandoff(),
       openStatusCard: () => statusPill?.open?.(),
-      openSettingsPopover: () => compactGuard.openSettingsPopover(),
+      openSettingsPopover: (tabId) => prismBridge?.openDrawer?.(tabId),
+      openSettingsDrawer: (tabId) => prismBridge?.openDrawer?.(tabId),
+      closeSettingsDrawer: () => prismBridge?.closeDrawer?.(),
       openBookmarkVault: (q) => bookmarkVault?.open?.(q),
       getDebugState: () => ({
         version: VERSION,

@@ -54,7 +54,6 @@
     let lastSnapshot = null;
     let lastWatchdog = null;
     let activeRecovery = null;
-    let popoverOpen = false;
     let bannerEl = null;
     let recoveryEl = null;
     let recoveryMsgEl = null;
@@ -69,7 +68,6 @@
     let cancelCdBtn = null;
     let dismissBtn = null;
     let toastEl = null;
-    let popEl = null;
     let styleEl = null;
     let activePaneEl = null;
     let composerListenerOff = null;
@@ -972,225 +970,6 @@
       recoveryDismissBtn.textContent = strings.recoveryDismissBtn;
     };
 
-    const renderPopover = () => {
-      if (!popEl) return;
-      popEl.hidden = !popoverOpen;
-      if (!popoverOpen) return;
-      const strings = S();
-      while (popEl.firstChild) popEl.removeChild(popEl.firstChild);
-
-      const title = doc.createElement('div');
-      title.className = 'ag-sg-pop-title';
-      const titleTxt = doc.createElement('span');
-      titleTxt.textContent = strings.cfgTitle;
-      title.appendChild(titleTxt);
-
-      if (typeof options.onOpenVault === 'function') {
-        const vaultBtn = doc.createElement('button');
-        vaultBtn.type = 'button';
-        vaultBtn.className = 'ag-sg-btn';
-        vaultBtn.setAttribute('data-ag-sg-act', 'open-vault');
-        vaultBtn.textContent = strings.bmOpenVaultBtn;
-        vaultBtn.addEventListener('click', (ev) => {
-          ev?.preventDefault?.();
-          ev?.stopPropagation?.();
-          popoverOpen = false;
-          renderPopover();
-          options.onOpenVault();
-        });
-        title.appendChild(vaultBtn);
-      }
-      popEl.appendChild(title);
-
-      // Row 1: Threshold presets
-      const r1 = doc.createElement('div');
-      r1.className = 'ag-sg-pop-row';
-      const l1 = doc.createElement('span');
-      l1.className = 'ag-sg-pop-lbl';
-      l1.textContent = strings.cfgThreshold;
-      const seg1 = doc.createElement('div');
-      seg1.className = 'ag-sg-seg';
-      for (const preset of THRESHOLD_PRESETS) {
-        const b = doc.createElement('button');
-        b.type = 'button';
-        b.textContent = preset === 'off' ? strings.cfgThresholdOff : `${preset}%`;
-        b.setAttribute('data-ag-sg-th', String(preset));
-        b.setAttribute('aria-pressed', String(config.compactThreshold === preset));
-        b.addEventListener('click', (ev) => {
-          ev?.preventDefault?.();
-          ev?.stopPropagation?.();
-          updateConfig({ compactThreshold: preset });
-        });
-        seg1.appendChild(b);
-      }
-      r1.appendChild(l1);
-      r1.appendChild(seg1);
-      popEl.appendChild(r1);
-
-      // Row 2: Trigger mode
-      const r2 = doc.createElement('div');
-      r2.className = 'ag-sg-pop-row';
-      const l2 = doc.createElement('span');
-      l2.className = 'ag-sg-pop-lbl';
-      l2.textContent = strings.cfgMode;
-      const seg2 = doc.createElement('div');
-      seg2.className = 'ag-sg-seg';
-      for (const [mKey, mLabel] of [
-        ['auto-silent', strings.cfgModeSilent],
-        ['confirm', strings.cfgModeConfirm],
-        ['fill-only', strings.cfgModeFill],
-      ]) {
-        const b = doc.createElement('button');
-        b.type = 'button';
-        b.textContent = mLabel;
-        b.setAttribute('data-ag-sg-mode', mKey);
-        b.setAttribute('aria-pressed', String(config.compactTriggerMode === mKey));
-        b.addEventListener('click', (ev) => {
-          ev?.preventDefault?.();
-          ev?.stopPropagation?.();
-          updateConfig({ compactTriggerMode: mKey });
-        });
-        seg2.appendChild(b);
-      }
-      r2.appendChild(l2);
-      r2.appendChild(seg2);
-      popEl.appendChild(r2);
-
-      // Row 3: Smart /compact Focus Presets
-      const rFocus = doc.createElement('div');
-      rFocus.className = 'ag-sg-pop-row';
-      const lFocus = doc.createElement('span');
-      lFocus.className = 'ag-sg-pop-lbl';
-      lFocus.textContent = strings.cfgFocus;
-      const segFocus = doc.createElement('div');
-      segFocus.className = 'ag-sg-seg';
-      for (const [fKey, fLabel] of [
-        ['default', strings.cfgFocusDefault],
-        ['code-errors', strings.cfgFocusCode],
-        ['bookmarks', strings.cfgFocusBookmarks],
-        ['custom', strings.cfgFocusCustom],
-      ]) {
-        const b = doc.createElement('button');
-        b.type = 'button';
-        b.textContent = fLabel;
-        b.setAttribute('data-ag-sg-focus', fKey);
-        b.setAttribute('aria-pressed', String(config.compactFocusPreset === fKey));
-        b.addEventListener('click', (ev) => {
-          ev?.preventDefault?.();
-          ev?.stopPropagation?.();
-          updateConfig({ compactFocusPreset: fKey });
-        });
-        segFocus.appendChild(b);
-      }
-      rFocus.appendChild(lFocus);
-      rFocus.appendChild(segFocus);
-      if (config.compactFocusPreset === 'custom') {
-        const inp = doc.createElement('input');
-        inp.type = 'text';
-        inp.className = 'ag-sg-pop-input';
-        inp.setAttribute('data-ag-sg-custom-focus', '1');
-        inp.placeholder = strings.cfgFocusCustomPlaceholder;
-        inp.value = config.customCompactFocus || '';
-        inp.addEventListener('input', () => {
-          config = coexist.sanitizeConfig({ ...config, customCompactFocus: inp.value }, config);
-          if (options.persistConfig !== false) coexist.writeStoredConfig(storage, config);
-        });
-        rFocus.appendChild(inp);
-      }
-      popEl.appendChild(rFocus);
-
-      // Row 4: Stall Watchdog timeout presets
-      const rStall = doc.createElement('div');
-      rStall.className = 'ag-sg-pop-row';
-      const lStall = doc.createElement('span');
-      lStall.className = 'ag-sg-pop-lbl';
-      lStall.textContent = strings.cfgStall;
-      const segStall = doc.createElement('div');
-      segStall.className = 'ag-sg-seg';
-      for (const sec of STALL_PRESETS) {
-        const b = doc.createElement('button');
-        b.type = 'button';
-        b.textContent = sec === 'off' ? strings.cfgStallOff : `${Math.round(sec / 60)}m`;
-        b.setAttribute('data-ag-sg-stall', String(sec));
-        b.setAttribute('aria-pressed', String(config.stallThresholdSeconds === sec));
-        b.addEventListener('click', (ev) => {
-          ev?.preventDefault?.();
-          ev?.stopPropagation?.();
-          updateConfig({ stallThresholdSeconds: sec });
-        });
-        segStall.appendChild(b);
-      }
-      rStall.appendChild(lStall);
-      rStall.appendChild(segStall);
-      popEl.appendChild(rStall);
-
-      // Row 5: Modules
-      const r3 = doc.createElement('div');
-      r3.className = 'ag-sg-pop-row';
-      const l3 = doc.createElement('span');
-      l3.className = 'ag-sg-pop-lbl';
-      l3.textContent = strings.cfgModules;
-      const seg3 = doc.createElement('div');
-      seg3.className = 'ag-sg-seg';
-      for (const [mKey, mLabel] of [
-        ['draftGuard', strings.cfgModDraftGuard],
-        ['outlineBookmarks', strings.cfgModBookmarks],
-        ['sessionRadar', strings.cfgModRadar],
-        ['sessionWatchdog', strings.cfgModWatchdog],
-      ]) {
-        const b = doc.createElement('button');
-        b.type = 'button';
-        b.textContent = mLabel;
-        b.setAttribute('data-ag-sg-mod', mKey);
-        b.setAttribute('aria-pressed', String(Boolean(config.modules[mKey])));
-        b.addEventListener('click', (ev) => {
-          ev?.preventDefault?.();
-          ev?.stopPropagation?.();
-          updateConfig({ modules: { ...config.modules, [mKey]: !config.modules[mKey] } });
-        });
-        seg3.appendChild(b);
-      }
-      r3.appendChild(l3);
-      r3.appendChild(seg3);
-      popEl.appendChild(r3);
-
-      // Row 6: Blurred OS Notification mode (when Session Radar is active)
-      if (config.modules.sessionRadar) {
-        const r4 = doc.createElement('div');
-        r4.className = 'ag-sg-pop-row';
-        const l4 = doc.createElement('span');
-        l4.className = 'ag-sg-pop-lbl';
-        l4.textContent = strings.cfgRadarNotify;
-        const seg4 = doc.createElement('div');
-        seg4.className = 'ag-sg-seg';
-        for (const [nKey, nLabel] of [
-          ['off', strings.cfgNotifyOff],
-          ['awaiting', strings.cfgNotifyAwaiting],
-          ['all', strings.cfgNotifyAll],
-        ]) {
-          const b = doc.createElement('button');
-          b.type = 'button';
-          b.textContent = nLabel;
-          b.setAttribute('data-ag-sg-notify', nKey);
-          b.setAttribute('aria-pressed', String(config.radarNotifyMode === nKey));
-          b.addEventListener('click', (ev) => {
-            ev?.preventDefault?.();
-            ev?.stopPropagation?.();
-            updateConfig({ radarNotifyMode: nKey });
-          });
-          seg4.appendChild(b);
-        }
-        r4.appendChild(l4);
-        r4.appendChild(seg4);
-        popEl.appendChild(r4);
-      }
-
-      const hint = doc.createElement('p');
-      hint.className = 'ag-sg-pop-hint';
-      hint.textContent = strings.cfgHint;
-      popEl.appendChild(hint);
-    };
-
     const ensureBanner = () => {
       if (!doc) return null;
       const anchor = findBannerAnchor();
@@ -1253,7 +1032,6 @@
         } else if (lastSnapshot) {
           getSess(lastSnapshot.cascadeId).dismissedAtPct = lastSnapshot.usedPct;
         }
-        popoverOpen = false;
         render();
       });
 
@@ -1266,15 +1044,9 @@
       toastEl.className = 'ag-sg-toast';
       toastEl.hidden = true;
 
-      popEl = doc.createElement('div');
-      popEl.className = 'ag-sg-popover';
-      popEl.setAttribute('data-testid', 'ag-sg-settings-popover');
-      popEl.hidden = true;
-
       wrap.appendChild(left);
       wrap.appendChild(actionsEl);
       wrap.appendChild(toastEl);
-      wrap.appendChild(popEl);
 
       anchor.parentElement.insertBefore(wrap, anchor);
       bannerEl = wrap;
@@ -1454,7 +1226,7 @@
 
       // Zero-popup silent mode: never pop up a countdown banner above the composer;
       // silently trigger native two-step /compact once idle and empty.
-      if (config.compactTriggerMode === 'auto-silent' && !isStallAlert && !popoverOpen) {
+      if (config.compactTriggerMode === 'auto-silent' && !isStallAlert) {
         stopCountdown();
         if (bannerEl) bannerEl.hidden = true;
         maybeManageSilentAutoCompact(snap, visible, false);
@@ -1463,7 +1235,7 @@
 
       stopSilent();
 
-      if (!visible && !popoverOpen) {
+      if (!visible) {
         stopCountdown();
         if (bannerEl) bannerEl.hidden = true;
         return;
@@ -1480,7 +1252,7 @@
       const isOverflow = pct >= 100;
       const isCounting = Boolean(countdownTimer && countdownRemaining > 0);
 
-      el.hidden = !visible && !popoverOpen;
+      el.hidden = !visible;
       el.setAttribute('data-severity', isStallAlert ? 'stall' : isCounting ? 'countdown' : isOverflow ? 'overflow' : 'warn');
 
       if (isStallAlert) {
@@ -1533,15 +1305,13 @@
       dismissBtn.title = strings.btnDismiss;
       dismissBtn.setAttribute('aria-label', strings.btnDismiss);
       dismissBtn.hidden = isCounting;
-
-      renderPopover();
     };
 
     async function evaluateNow() {
       if (destroyed || coexist.isWindowHibernated(doc, win, blurred)) return lastSnapshot;
       if (!config.modules.compactGuard) {
         stopCountdown();
-        if (bannerEl && !popoverOpen) bannerEl.hidden = true;
+        if (bannerEl) bannerEl.hidden = true;
         if (recoveryEl) recoveryEl.hidden = true;
         return lastSnapshot;
       }
@@ -1674,10 +1444,11 @@
       }
     });
 
-    function openSettingsPopover() {
-      popoverOpen = true;
-      ensureBanner();
-      render();
+    function openSettingsPopover(tabId) {
+      if (typeof options.onOpenSettingsDrawer === 'function') {
+        return options.onOpenSettingsDrawer(tabId);
+      }
+      return false;
     }
 
     function getDebugState() {
@@ -1686,7 +1457,7 @@
         config: { ...config, modules: { ...config.modules } },
         visible: Boolean(bannerEl && !bannerEl.hidden),
         recoveryVisible: Boolean(recoveryEl && !recoveryEl.hidden),
-        popoverOpen,
+        popoverOpen: Boolean(options.isSettingsDrawerOpen?.()),
         countdownActive: Boolean(countdownTimer),
         countdownRemaining,
         silentPending: Boolean(silentTimer),
@@ -1716,7 +1487,7 @@
       try { recoveryEl?.remove?.(); } catch {}
       try { styleEl?.remove?.(); } catch {}
       bannerEl = recoveryEl = recoveryMsgEl = recoveryFillBtn = recoveryCopyBtn = recoveryDismissBtn = null;
-      msgEl = focusTagEl = actionsEl = primaryBtn = snoozeBtn = cancelCdBtn = dismissBtn = toastEl = popEl = styleEl = null;
+      msgEl = focusTagEl = actionsEl = primaryBtn = snoozeBtn = cancelCdBtn = dismissBtn = toastEl = styleEl = null;
       activeRecovery = null;
       lastWatchdog = null;
       watchdog?.resetAll?.();

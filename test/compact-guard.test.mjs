@@ -377,17 +377,20 @@ test('CompactGuard: minimal banner has max 2 actions (no export clutter), quick 
   assert.ok(downloaded.filename.endsWith('.md'));
   assert.equal(downloaded.markdown.includes('sk-superSecret'), false);
 
-  // Open settings popover programmatically and switch threshold to 70% & mode to fill-only
-  guard.openSettingsPopover();
-  const pop = env.doc.querySelector('[data-testid="ag-sg-settings-popover"]');
-  assert.equal(pop.hidden, false);
-  pop.querySelector('[data-ag-sg-th="70"]').click();
-  pop.querySelector('[data-ag-sg-mode="fill-only"]').click();
+  // Open unified settings drawer programmatically, switch threshold to 70% & mode to fill-only
+  guard.openSettingsPopover('conversation');
+  const drawer = env.doc.querySelector('[data-testid="ag-sag-settings-drawer"]');
+  assert.ok(drawer);
+  const drawerBackdrop = env.doc.querySelector('[data-testid="ag-sag-drawer-backdrop"]');
+  assert.equal(drawerBackdrop.hidden, false);
+  drawer.querySelector('[data-ag-sag-subtab="conversation"]')?.click?.();
+  drawer.querySelector('[data-ag-sg-th="75"]')?.click?.();
+  drawer.querySelector('[data-ag-sg-mode="fill-only"]').click();
 
-  assert.equal(guard.getConfig().compactThreshold, 70);
+  assert.equal(guard.getConfig().compactThreshold, 75);
   assert.equal(guard.getConfig().compactTriggerMode, 'fill-only');
   const persisted = coexist.readStoredConfig(env.storage);
-  assert.equal(persisted.compactThreshold, 70);
+  assert.equal(persisted.compactThreshold, 75);
   assert.equal(persisted.compactTriggerMode, 'fill-only');
 
   guard.destroy();

@@ -235,6 +235,7 @@ test('settings-locale-sync: switching host locale to ru (with translated heading
     h2.textContent = 'Внешний вид';
     doc.documentElement.setAttribute('data-ag-cs-lang', 'en');
     guard.setHostLocale('ru');
+    guard.prismBridge.setActiveSubTab('ui');
     guard.prismBridge.sync();
 
     const badge = doc.querySelector('[data-testid="ag-sag-lang-badge"]');

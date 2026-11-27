@@ -53,6 +53,26 @@
     Object.freeze({ id: 'quotaPulse', category: 'telemetry', defaultEnabled: false, aggressive: false }),
   ]);
 
+  const MODULE_GROUPS = Object.freeze([
+    Object.freeze({ id: 'ui', layer: 'L1', settingsTab: 'ui' }),
+    Object.freeze({ id: 'conversation', layer: 'L2', settingsTab: 'conversation' }),
+    Object.freeze({ id: 'guard', layer: 'L3', settingsTab: 'guard' }),
+  ]);
+
+  const MODULE_META = Object.freeze({
+    hostI18n: Object.freeze({ id: 'hostI18n', group: 'ui', layer: 'L1', settingsTab: 'ui', labelKey: 'modHostI18n', descKey: 'modDescHostI18n', defaultEnabled: true, aggressive: false, parentId: null }),
+    themeStudio: Object.freeze({ id: 'themeStudio', group: 'ui', layer: 'L1', settingsTab: 'ui', labelKey: 'modThemeStudio', descKey: 'modDescThemeStudio', defaultEnabled: false, aggressive: false, parentId: null }),
+    compactGuard: Object.freeze({ id: 'compactGuard', group: 'conversation', layer: 'L2', settingsTab: 'conversation', labelKey: 'modCompactGuard', descKey: 'modDescCompactGuard', defaultEnabled: true, aggressive: false, parentId: null }),
+    precompactExport: Object.freeze({ id: 'precompactExport', group: 'conversation', layer: 'L2', settingsTab: 'conversation', labelKey: 'modPrecompactExport', descKey: 'modDescPrecompactExport', defaultEnabled: true, aggressive: false, parentId: 'compactGuard' }),
+    draftGuard: Object.freeze({ id: 'draftGuard', group: 'conversation', layer: 'L2', settingsTab: 'conversation', labelKey: 'cfgModDraftGuard', descKey: 'modDescDraftGuard', defaultEnabled: true, aggressive: false, parentId: null }),
+    promptQueue: Object.freeze({ id: 'promptQueue', group: 'conversation', layer: 'L2', settingsTab: 'conversation', labelKey: 'modPromptQueue', descKey: 'modDescPromptQueue', defaultEnabled: true, aggressive: false, parentId: null }),
+    outlineBookmarks: Object.freeze({ id: 'outlineBookmarks', group: 'conversation', layer: 'L2', settingsTab: 'conversation', labelKey: 'cfgModBookmarks', descKey: 'modDescBookmarks', defaultEnabled: false, aggressive: false, parentId: null }),
+    sessionWatchdog: Object.freeze({ id: 'sessionWatchdog', group: 'guard', layer: 'L3', settingsTab: 'guard', labelKey: 'cfgModWatchdog', descKey: 'modDescWatchdog', defaultEnabled: true, aggressive: false, parentId: null }),
+    sessionRadar: Object.freeze({ id: 'sessionRadar', group: 'guard', layer: 'L3', settingsTab: 'guard', labelKey: 'cfgModRadar', descKey: 'modDescRadar', defaultEnabled: false, aggressive: false, parentId: null }),
+    safeAutoAccept: Object.freeze({ id: 'safeAutoAccept', group: 'guard', layer: 'L3', settingsTab: 'guard', labelKey: 'modSafeAutoAccept', descKey: 'modDescSafeAutoAccept', defaultEnabled: false, aggressive: true, parentId: null }),
+    quotaPulse: Object.freeze({ id: 'quotaPulse', group: 'guard', layer: 'L3', settingsTab: 'guard', labelKey: 'modQuotaPulse', descKey: 'modDescQuotaPulse', defaultEnabled: false, aggressive: false, parentId: null }),
+  });
+
   const DEFAULT_CONFIG = Object.freeze({
     compactThreshold: 80, // 'off' | 50..98 (recommended default: 80%)
     compactTriggerMode: 'auto-silent', // 'auto-silent' | 'confirm' | 'fill-only' | 'auto-countdown'
@@ -472,6 +492,8 @@
     ALLOWED_THEME_PRESETS,
     ALLOWED_THEME_DENSITIES,
     MODULE_CATALOG,
+    MODULE_GROUPS,
+    MODULE_META,
     PRESETS,
     DEFAULT_CONFIG,
     resolvePresetPatch,

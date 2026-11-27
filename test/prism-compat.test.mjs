@@ -187,20 +187,25 @@ test('Obsidian Prism Side-by-Side Coexistence: embeds unified settings in Prism 
   assert.equal(embedded.querySelector('[data-testid="ag-sg-prism-badge"]'), null, 'No defensive Prism badge in consumer UI');
   assert.ok(embedded.textContent.includes('agy-Sag'));
 
-  // Prism -> agy-Sag bidirectional config sync (click 75% threshold inside Prism settings panel)
-  const th75 = embedded.querySelector('[data-ag-sg-prism-th="75"]');
+  // Switch embedded hub to conversation tab -> click 75% threshold & verify bidirectional sync
+  const convTab = embedded.querySelector('[data-ag-sag-subtab="conversation"]');
+  assert.ok(convTab);
+  convTab.click();
+  const th75 = embedded.querySelector('[data-ag-sag-th="75"]');
   assert.ok(th75);
   th75.click();
   assert.equal(guard.getConfig().compactThreshold, 75);
-  assert.equal(embedded.querySelector('[data-ag-sg-prism-th="75"]').getAttribute('aria-pressed'), 'true');
+  assert.equal(embedded.querySelector('[data-ag-sag-th="75"]').getAttribute('aria-pressed'), 'true');
 
-  // agy-Sag inline popover -> Prism bidirectional sync
-  guard.openSettingsPopover();
-  const pop = doc.querySelector('[data-testid="ag-sg-settings-popover"]');
-  assert.equal(pop.querySelector('[data-testid="ag-sg-pop-prism-badge"]'), null, 'Inline popover must stay clean without Prism badges');
-  pop.querySelector('[data-ag-sg-th="90"]').click();
+  // agy-Sag global settings drawer -> Prism bidirectional sync
+  guard.openSettingsPopover('conversation');
+  const drawer = doc.querySelector('[data-testid="ag-sag-settings-drawer"]');
+  assert.ok(drawer, 'openSettingsPopover must open unified settings drawer');
+  assert.equal(drawer.querySelector('[data-testid="ag-sg-pop-prism-badge"]'), null, 'Settings drawer must stay clean without Prism badges');
+  drawer.querySelector('[data-ag-sg-th="90"]').click();
   assert.equal(guard.getConfig().compactThreshold, 90);
-  assert.equal(embedded.querySelector('[data-ag-sg-prism-th="90"]').getAttribute('aria-pressed'), 'true');
+  assert.equal(embedded.querySelector('[data-ag-sag-th="90"]').getAttribute('aria-pressed'), 'true');
+  guard.closeSettingsDrawer();
 
   // Live language switch driven by Obsidian Prism (zh-CN -> en)
   doc.documentElement.setAttribute('data-ag-cs-lang', 'en');

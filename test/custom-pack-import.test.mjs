@@ -464,6 +464,9 @@ test('custom-pack-import: Settings UI handles apply/export/missing/clear safely 
     config: { hostI18nLocale: 'zh-CN', hostI18nCollectMissing: false },
   });
 
+  // Switch to 'ui' SubTab (where custom pack tools live under <details>)
+  env.doc.querySelector('[data-ag-sag-subtab="ui"]').click();
+
   const missingBtn = env.doc.querySelector('[data-testid="ag-sag-pack-missing-btn"]');
   assert.ok(missingBtn);
   assert.equal(missingBtn.disabled, true, 'Missing template export must be disabled until collectMissing is enabled');

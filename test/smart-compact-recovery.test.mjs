@@ -180,11 +180,12 @@ test('Smart /compact Focus Presets build redacted commands across default, code-
   await guard.evaluateNow();
   assert.equal(guard.compactGuard.buildCompactCommand(), '/compact');
 
-  // Switch to code-errors via settings popover
+  // Switch to code-errors via unified settings drawer
   const banner = env.doc.querySelector('[data-testid="ag-sg-compact-banner"]');
-  guard.openSettingsPopover();
-  const pop = env.doc.querySelector('[data-testid="ag-sg-settings-popover"]');
-  pop.querySelector('[data-ag-sg-focus="code-errors"]').click();
+  guard.openSettingsPopover('conversation');
+  const drawer = env.doc.querySelector('[data-testid="ag-sag-settings-drawer"]');
+  assert.ok(drawer);
+  drawer.querySelector('[data-ag-sg-focus="code-errors"]').click();
 
   const codeCmd = guard.compactGuard.buildCompactCommand();
   assert.ok(codeCmd.startsWith('/compact preserve modified files'));
@@ -193,7 +194,7 @@ test('Smart /compact Focus Presets build redacted commands across default, code-
 
   // Star Turn 1 (which contains a secret) and switch to bookmarks focus preset
   env.u1.querySelector('.ag-sg-bm-star').click();
-  pop.querySelector('[data-ag-sg-focus="bookmarks"]').click();
+  drawer.querySelector('[data-ag-sg-focus="bookmarks"]').click();
   const bmCmd = guard.compactGuard.buildCompactCommand();
   assert.ok(bmCmd.startsWith('/compact preserve these bookmarked'));
   assert.ok(bmCmd.includes('#1 Fix database migration lock'));

@@ -447,6 +447,14 @@
         cleanBtn.title = strings.clearKeepTip;
         foot.appendChild(cleanBtn);
       }
+      if (typeof options.onOpenSettings === 'function' && strings.cardOpenSettingsBtn) {
+        foot.appendChild(
+          mkAct('ag-sg-btn', strings.cardOpenSettingsBtn, 'open-settings', () => {
+            close();
+            options.onOpenSettings();
+          })
+        );
+      }
       if (foot.children.length > 0) cardEl.appendChild(foot);
     }
 

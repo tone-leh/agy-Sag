@@ -177,7 +177,7 @@ export function buildHtmlPage() {
 
     <div class="ctl-group" id="nov-mirror-panel" data-testid="ag-sag-synergy-mirror">
       <h2>✦ 实时 agy-NOV 运行态镜像监视器</h2>
-      <div class="hud-box" id="nov-mirror-hud">agy-NOV v0.2.0 · preset=core · 3/9 模块 · 12 工具</div>
+      <div class="hud-box" id="nov-mirror-hud">agy-NOV v0.5.0 · preset=core · 3/13 模块 · 12 工具</div>
       <div class="nov-mirror-grid" id="nov-mirror-grid"></div>
       <div class="ctl-row">
         <button class="ctl approve" id="btn-ext-nov-power">模拟外部 agy-NOV 切到 power 预设</button>
@@ -289,7 +289,7 @@ export function buildHtmlPage() {
       </label>
       <div class="ctl-row">
         <button class="ctl" id="btn-compact-sim">模拟压缩完成 (回落 18%)</button>
-        <button class="ctl" id="btn-open-cfg">打开 ⚙ 设置浮窗</button>
+        <button class="ctl" id="btn-open-cfg">打开设置抽屉 (Ctrl+Alt+,)</button>
         <button class="ctl" id="btn-remount">卸载重挂 (0 残留)</button>
       </div>
     </div>
@@ -676,12 +676,12 @@ ${coreScript}
       refreshModuleHuds();
     }
 
-    // Simulated in-memory agy-NOV v0.2.0 runtime + bidirectional novTransport
+    // Simulated in-memory agy-NOV v0.5.0 runtime + bidirectional novTransport
     const novMirrorHud = document.getElementById('nov-mirror-hud');
     const novMirrorGrid = document.getElementById('nov-mirror-grid');
     const simNov = {
       installed: true,
-      version: '0.2.0',
+      version: '0.5.0',
       config: {
         schemaVersion: 1,
         preset: 'core',
@@ -693,6 +693,10 @@ ${coreScript}
           xray: true,
           turbo: false,
           radar: false,
+          verify: false,
+          worktree: false,
+          spec: false,
+          studio: false,
           canvas: false,
           mem: false,
           ops: false,
@@ -728,7 +732,7 @@ ${coreScript}
         novMirrorHud.textContent =
           'agy-NOV v' + snap.version +
           ' · preset=' + snap.config.preset +
-          ' · ' + snap.enabledCount + '/9 模块 · ' + snap.toolCount + ' 工具';
+          ' · ' + snap.enabledCount + '/13 模块 · ' + snap.toolCount + ' 工具';
       }
       while (novMirrorGrid.firstChild) novMirrorGrid.removeChild(novMirrorGrid.firstChild);
       for (const m of metas) {
@@ -752,7 +756,7 @@ ${coreScript}
       const state = getSimNovSnapshot();
       renderNovMirror();
       window.__agSagBridgeReceiver?.onPush?.({ event: 'nov:state', state });
-      appendLog('[AGY-NOV PUSH] ' + reasonLabel + ' -> preset=' + state.config.preset + ' (' + state.enabledCount + '/9 ON, ' + state.toolCount + ' tools)');
+      appendLog('[AGY-NOV PUSH] ' + reasonLabel + ' -> preset=' + state.config.preset + ' (' + state.enabledCount + '/13 ON, ' + state.toolCount + ' tools)');
     }
 
     function simNovTransport(req) {
@@ -899,7 +903,7 @@ ${coreScript}
 
     document.getElementById('btn-ext-nov-toggle-install').addEventListener('click', () => {
       simNov.installed = !simNov.installed;
-      pushSimNovState(simNov.installed ? '恢复模拟本地已安装 agy-NOV v0.2.0' : '切换为未安装 agy-NOV（展示双星搭档推荐卡片）');
+      pushSimNovState(simNov.installed ? '恢复模拟本地已安装 agy-NOV v0.5.0' : '切换为未安装 agy-NOV（展示双星搭档推荐卡片）');
     });
 
     document.querySelectorAll('[data-preset-btn]').forEach((btn) => {
