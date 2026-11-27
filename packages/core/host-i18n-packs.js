@@ -860,6 +860,225 @@
     }
   }
 
+  const MAX_IMPORT_JSON_BYTES = 256 * 1024;
+  const MAX_IMPORT_EXACT = 2000;
+  const MAX_IMPORT_EXACT_STR = 500;
+  const MAX_IMPORT_PATTERNS = 50;
+  const MAX_IMPORT_PATTERN_SRC = 200;
+  const MAX_IMPORT_PATTERN_REPLACE = 500;
+  const NESTED_QUANTIFIER_RE = /\((?:[^()\\]|\\.)*[+*}|?](?:[^()\\]|\\.)*\)\s*[+*{]/;
+  const BACKREFERENCE_RE = /(?:^|[^\\])(?:\\\\)*\\(?:[1-9]|k<[^>]+>)/;
+  const DISALLOWED_PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype', 'toString', 'valueOf', 'hasOwnProperty']);
+
+  function utf8ByteLength(str) {
+    const s = String(str ?? '');
+    if (typeof TextEncoder === 'function') {
+      return new TextEncoder().encode(s).length;
+    }
+    if (typeof Buffer === 'function') {
+      return Buffer.byteLength(s, 'utf8');
+    }
+    return s.length * 3;
+  }
+
+  function hasNestedQuantifierLinear(source) {
+    if (NESTED_QUANTIFIER_RE.test(source)) return true;
+    // O(N) bracket-depth scanner to catch nested groups like ((a+))+ or (?:a+(b*))+
+    const stack = [];
+    let inClass = false;
+    for (let i = 0; i < source.length; i++) {
+      const ch = source[i];
+      if (ch === '\\') {
+        i += 1;
+        continue;
+      }
+      if (inClass) {
+        if (ch === ']') inClass = false;
+        continue;
+      }
+      if (ch === '[') {
+        inClass = true;
+        continue;
+      }
+      if (ch === '(') {
+        stack.push(false);
+        continue;
+      }
+      if (ch === ')') {
+        const hadInnerQuantifier = stack.length > 0 ? stack.pop() : false;
+        if (hadInnerQuantifier) {
+          let j = i + 1;
+          while (j < source.length && /\s/.test(source[j])) j += 1;
+          const next = source[j];
+          if (next === '+' || next === '*' || next === '{') {
+            return true;
+          }
+          if (stack.length > 0) stack[stack.length - 1] = true;
+        }
+        continue;
+      }
+      if (stack.length > 0) {
+        if (ch === '+' || ch === '*' || ch === '?' || ch === '|') {
+          stack[stack.length - 1] = true;
+        } else if (ch === '{' && /^\{\d+(?:,\d*)?\}/.test(source.slice(i))) {
+          stack[stack.length - 1] = true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function sanitizeImportedPack(raw) {
+    const errors = [];
+    const emptyPack = { locale: '', exact: {}, patterns: [] };
+    const fail = (extraStats = {}) => ({
+      ok: false,
+      pack: emptyPack,
+      errors,
+      stats: { exactCount: 0, patternCount: 0, droppedNonString: 0, ...extraStats },
+    });
+
+    let obj = null;
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (!trimmed) {
+        errors.push('JSON input is empty');
+        return fail();
+      }
+      if (utf8ByteLength(raw) > MAX_IMPORT_JSON_BYTES) {
+        errors.push(`JSON exceeds ${MAX_IMPORT_JSON_BYTES} bytes (256 KB) limit`);
+        return fail();
+      }
+      try {
+        obj = JSON.parse(trimmed);
+      } catch (e) {
+        errors.push(`Invalid JSON: ${e?.message || 'parse error'}`);
+        return fail();
+      }
+    } else if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      let serialized = '';
+      try {
+        serialized = JSON.stringify(raw);
+      } catch {
+        errors.push('Pack object is not JSON-serializable');
+        return fail();
+      }
+      if (utf8ByteLength(serialized) > MAX_IMPORT_JSON_BYTES) {
+        errors.push(`Pack exceeds ${MAX_IMPORT_JSON_BYTES} bytes (256 KB) limit`);
+        return fail();
+      }
+      obj = raw;
+    } else {
+      errors.push('Pack must be a JSON string or plain object');
+      return fail();
+    }
+
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      errors.push('Pack root must be a JSON object');
+      return fail();
+    }
+
+    const rawLocale = obj.locale ?? obj.meta?.locale;
+    if (typeof rawLocale !== 'string' || !rawLocale.trim()) {
+      errors.push('Missing target locale');
+      return fail();
+    }
+    const locale = normalizeHostLocale(rawLocale);
+    if (locale === 'en') {
+      errors.push(`Unsupported or source locale "${String(rawLocale).slice(0, 32)}"`);
+      return fail();
+    }
+
+    const exact = {};
+    let droppedNonString = 0;
+    if (obj.exact !== undefined) {
+      if (!obj.exact || typeof obj.exact !== 'object' || Array.isArray(obj.exact)) {
+        errors.push('exact must be a plain object');
+        return fail();
+      }
+      const entries = Object.entries(obj.exact);
+      if (entries.length > MAX_IMPORT_EXACT) {
+        errors.push(`exact exceeds ${MAX_IMPORT_EXACT} entries limit (${entries.length})`);
+        return fail();
+      }
+      for (const [k, v] of entries) {
+        if (typeof k !== 'string' || typeof v !== 'string') {
+          droppedNonString += 1;
+          continue;
+        }
+        if (DISALLOWED_PROTO_KEYS.has(k)) {
+          continue;
+        }
+        if (k.length > MAX_IMPORT_EXACT_STR || v.length > MAX_IMPORT_EXACT_STR) {
+          errors.push(`exact entry exceeds ${MAX_IMPORT_EXACT_STR} chars limit`);
+          return fail({ droppedNonString });
+        }
+        const tk = k.trim();
+        const tv = v.trim();
+        if (!tk || !tv) continue;
+        if (KEEP_SET.has(k) || KEEP_SET.has(tk)) continue;
+        exact[k] = v;
+      }
+    }
+
+    const patterns = [];
+    if (obj.patterns !== undefined) {
+      if (!Array.isArray(obj.patterns)) {
+        errors.push('patterns must be an array');
+        return fail({ droppedNonString });
+      }
+      if (obj.patterns.length > MAX_IMPORT_PATTERNS) {
+        errors.push(`patterns exceeds ${MAX_IMPORT_PATTERNS} entries limit (${obj.patterns.length})`);
+        return fail({ droppedNonString });
+      }
+      for (let i = 0; i < obj.patterns.length; i++) {
+        const item = obj.patterns[i];
+        if (!item || typeof item !== 'object' || Array.isArray(item)) {
+          errors.push(`patterns[${i}] must be an object`);
+          return fail({ droppedNonString });
+        }
+        const rawSrc = item.source instanceof RegExp ? item.source.source : item.source;
+        if (typeof rawSrc !== 'string' || !rawSrc.trim()) {
+          errors.push(`patterns[${i}].source must be a non-empty string`);
+          return fail({ droppedNonString });
+        }
+        if (rawSrc.length > MAX_IMPORT_PATTERN_SRC) {
+          errors.push(`patterns[${i}].source exceeds ${MAX_IMPORT_PATTERN_SRC} chars limit`);
+          return fail({ droppedNonString });
+        }
+        if (BACKREFERENCE_RE.test(rawSrc)) {
+          errors.push(`patterns[${i}].source contains disallowed backreference`);
+          return fail({ droppedNonString });
+        }
+        if (hasNestedQuantifierLinear(rawSrc)) {
+          errors.push(`patterns[${i}].source contains unsafe nested quantifier`);
+          return fail({ droppedNonString });
+        }
+        if (typeof item.replace !== 'string' || item.replace.length > MAX_IMPORT_PATTERN_REPLACE) {
+          errors.push(`patterns[${i}].replace exceeds ${MAX_IMPORT_PATTERN_REPLACE} chars limit`);
+          return fail({ droppedNonString });
+        }
+        const clean = sanitizePatternEntry(item);
+        if (!clean) {
+          errors.push(`patterns[${i}] is invalid or missing replace`);
+          return fail({ droppedNonString });
+        }
+        patterns.push(clean);
+      }
+    }
+
+    return {
+      ok: true,
+      pack: { locale, exact, patterns },
+      errors: [],
+      stats: {
+        exactCount: Object.keys(exact).length,
+        patternCount: patterns.length,
+        droppedNonString,
+      },
+    };
+  }
+
   function validatePacks(packsMap) {
     const sourcePacks = packsMap || BUILTIN_PACKS;
     const errors = [];
@@ -995,6 +1214,7 @@
     listLocales,
     getPack,
     mergeCustomPack,
+    sanitizeImportedPack,
     validatePacks,
   };
 });

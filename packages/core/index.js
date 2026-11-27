@@ -37,6 +37,7 @@
     const prismBridgeMod = options.prismBridgeMod || resolveDep('__agSgPrismBridge', './prism-bridge.js');
     const statusPillMod = options.statusPillMod || resolveDep('__agSgStatusPill', './status-pill.js');
     const hostI18nMod = options.hostI18nMod || resolveDep('__agSagHostI18n', './host-i18n.js');
+    const hostI18nPacksMod = options.hostI18nPacksMod || resolveDep('__agSagHostI18nPacks', './host-i18n-packs.js');
     const promptQueueMod = options.promptQueueMod || resolveDep('__agSagPromptQueue', './prompt-queue.js');
     const safeAutoAcceptMod = options.safeAutoAcceptMod || resolveDep('__agSagSafeAutoAccept', './safe-auto-accept.js');
     const themeStudioMod = options.themeStudioMod || resolveDep('__agSagThemeStudio', './theme-studio.js');
@@ -289,6 +290,64 @@
         })
       : null;
 
+    const customPackStorage = options.storage || win?.localStorage || null;
+    const customPacksStorageKey = coexist.CUSTOM_PACKS_STORAGE_KEY || 'agSag.hostI18n.customPacks.v1';
+
+    function readStoredCustomPacks() {
+      const out = {};
+      if (!customPackStorage || typeof customPackStorage.getItem !== 'function') return out;
+      try {
+        const raw = customPackStorage.getItem(customPacksStorageKey);
+        if (!raw) return out;
+        const parsed = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return out;
+        for (const [loc, pack] of Object.entries(parsed)) {
+          if (!pack || typeof pack !== 'object') continue;
+          const candidate = pack.locale ? pack : { ...pack, locale: loc };
+          if (hostI18nPacksMod?.sanitizeImportedPack) {
+            const res = hostI18nPacksMod.sanitizeImportedPack(candidate);
+            if (res.ok) out[res.pack.locale] = res.pack;
+          } else {
+            out[loc] = candidate;
+          }
+        }
+      } catch {}
+      return out;
+    }
+
+    function writeStoredCustomPacks(packsMap) {
+      if (!customPackStorage) return false;
+      try {
+        const keys = Object.keys(packsMap || {});
+        if (keys.length === 0) {
+          customPackStorage.removeItem?.(customPacksStorageKey);
+        } else {
+          customPackStorage.setItem?.(customPacksStorageKey, JSON.stringify(packsMap));
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    const DISALLOWED_LOC_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+    const storedCustomPacks = readStoredCustomPacks();
+    const initialCustomPacks = Object.create(null);
+    for (const [loc, pack] of Object.entries(storedCustomPacks)) {
+      if (!DISALLOWED_LOC_KEYS.has(loc)) initialCustomPacks[loc] = pack;
+    }
+    if (options.customHostI18nPacks && typeof options.customHostI18nPacks === 'object') {
+      for (const [rawLoc, pack] of Object.entries(options.customHostI18nPacks)) {
+        if (DISALLOWED_LOC_KEYS.has(rawLoc) || !pack || typeof pack !== 'object') continue;
+        const normLoc = hostI18nPacksMod?.normalizeHostLocale
+          ? hostI18nPacksMod.normalizeHostLocale(rawLoc)
+          : rawLoc;
+        if (!DISALLOWED_LOC_KEYS.has(normLoc) && normLoc !== 'en') {
+          initialCustomPacks[normLoc] = pack;
+        }
+      }
+    }
+
     hostI18n = hostI18nMod?.createHostI18nController
       ? hostI18nMod.createHostI18nController({
           win,
@@ -299,7 +358,7 @@
           conflictPolicy: cfg.hostI18nConflictPolicy || 'yield',
           collectMissing: Boolean(cfg.hostI18nCollectMissing),
           autoObserve: options.autoObserve,
-          customPacks: options.customHostI18nPacks,
+          customPacks: initialCustomPacks,
         })
       : null;
 
@@ -403,6 +462,44 @@
         })
       : null;
 
+    function importCustomHostPack(raw) {
+      if (!hostI18nPacksMod?.sanitizeImportedPack) {
+        return { ok: false, pack: { locale: '', exact: {}, patterns: [] }, errors: ['host-i18n-packs unavailable'], stats: { exactCount: 0, patternCount: 0, droppedNonString: 0 } };
+      }
+      const res = hostI18nPacksMod.sanitizeImportedPack(raw);
+      if (!res.ok) return res;
+      const nextStored = readStoredCustomPacks();
+      nextStored[res.pack.locale] = res.pack;
+      writeStoredCustomPacks(nextStored);
+      // Replace prior in-memory custom pack for this locale so runtime matches persistence 1:1
+      hostI18n?.clearCustomPacks?.(res.pack.locale);
+      hostI18n?.mergeCustomPack?.(res.pack, res.pack.locale);
+      prismBridge?.sync?.();
+      syncStatusPill();
+      return res;
+    }
+
+    function exportCustomHostPacks() {
+      return readStoredCustomPacks();
+    }
+
+    function clearCustomHostPacks(targetLocale) {
+      if (targetLocale) {
+        const norm = hostI18nPacksMod?.normalizeHostLocale ? hostI18nPacksMod.normalizeHostLocale(targetLocale) : targetLocale;
+        const nextStored = readStoredCustomPacks();
+        delete nextStored[norm];
+        writeStoredCustomPacks(nextStored);
+      } else {
+        try {
+          customPackStorage?.removeItem?.(customPacksStorageKey);
+        } catch {}
+      }
+      hostI18n?.clearCustomPacks?.(targetLocale);
+      prismBridge?.sync?.();
+      syncStatusPill();
+      return true;
+    }
+
     prismBridge = prismBridgeMod?.createPrismBridgeController
       ? prismBridgeMod.createPrismBridgeController({
           win,
@@ -417,6 +514,10 @@
           onUpdateConfig: (patch) => api.updateConfig(patch),
           onApplyPreset: (presetId) => api.applyPreset(presetId),
           onCopyText: options.onCopyText,
+          onImportCustomPack: (raw) => importCustomHostPack(raw),
+          onExportCustomPacks: () => exportCustomHostPacks(),
+          onClearCustomPacks: (loc) => clearCustomHostPacks(loc),
+          onExportMissingTemplate: (loc) => hostI18n?.exportMissingTemplate?.(loc) || null,
           getHostI18nState: () => hostI18n?.getDebugState?.() || null,
           getAutoAcceptState: () => safeAutoAccept?.getDebugState?.() || null,
           getQuotaSummary: () => quotaPulse?.getSummary?.() || null,
@@ -483,6 +584,10 @@
           modules: { ...api.getConfig().modules, hostI18n: locale !== 'en' },
         });
       },
+      importCustomHostPack,
+      exportCustomHostPacks,
+      clearCustomHostPacks,
+      exportMissingHostTemplate: (loc) => hostI18n?.exportMissingTemplate?.(loc) || null,
       setNovModule: (id, enabled) => {
         if (!novSynergy?.setModule) return Promise.resolve({ ok: false, error: 'nov-synergy unavailable' });
         return novSynergy.setModule(id, enabled);

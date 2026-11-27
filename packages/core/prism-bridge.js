@@ -29,6 +29,8 @@
     'Apparence',
     'Darstellung',
     'Erscheinungsbild',
+    'Внешний вид',
+    'Aparência',
   ]);
 
   function resolveDep(globalKey, relPath) {
@@ -79,6 +81,19 @@
       if (SETTINGS_APPEARANCE_TITLES.has(String(h2.textContent || '').trim())) {
         panel = h2.closest?.('div.p-6') || h2.parentElement?.parentElement || null;
         if (panel) break;
+      }
+    }
+    if (!panel) {
+      for (const h2 of headings) {
+        const dlg = h2.closest?.('[role="dialog"]');
+        const aria = String(dlg?.getAttribute?.('aria-label') || '');
+        if (/settings|设置|設定|설정|ajustes|paramètres|einstellungen|настройки|configurações/i.test(aria)) {
+          const candidate = h2.closest?.('div.p-6') || h2.parentElement?.parentElement || null;
+          if (candidate && candidate.id !== PRISM_SETTINGS_SEC_ID) {
+            panel = candidate;
+            break;
+          }
+        }
       }
     }
     if (!panel || typeof panel.querySelectorAll !== 'function') return null;
@@ -138,6 +153,48 @@
     let activeSubTab = SUBTAB_IDS.includes(savedTab) ? savedTab : 'all';
     const savedExpanded = readUiState(EXPANDED_STORAGE_KEY, '1');
     let panelExpanded = savedExpanded !== '0';
+    let customPackEditorOpen = false;
+    let customPackDraftText = '';
+    let customPackStatusText = '';
+    let customPackStatusTone = 'info';
+
+    function downloadJsonPayload(filename, dataObj) {
+      const jsonText = JSON.stringify(dataObj, null, 2);
+      try {
+        win?.navigator?.clipboard?.writeText?.(jsonText)?.catch?.(() => {});
+      } catch {}
+      if (typeof options.onCopyText === 'function') {
+        try { options.onCopyText(jsonText); } catch {}
+      }
+      const BlobCtor = win?.Blob || (typeof Blob !== 'undefined' ? Blob : null);
+      const UrlApi = win?.URL || (typeof URL !== 'undefined' ? URL : null);
+      if (BlobCtor && UrlApi && typeof UrlApi.createObjectURL === 'function' && doc?.createElement) {
+        let objectUrl = '';
+        let a = null;
+        try {
+          const blob = new BlobCtor([jsonText], { type: 'application/json;charset=utf-8' });
+          objectUrl = UrlApi.createObjectURL(blob);
+          a = coexist.markOwnedNoTranslate(doc.createElement('a'));
+          a.href = objectUrl;
+          a.download = filename;
+          a.setAttribute?.('download', filename);
+          if (a.style) a.style.display = 'none';
+          (doc.body || doc.documentElement)?.appendChild?.(a);
+          a.click?.();
+          const t = setTimeout(() => {
+            try { UrlApi.revokeObjectURL?.(objectUrl); } catch {}
+          }, 1000);
+          t?.unref?.();
+        } catch {
+          if (objectUrl) {
+            try { UrlApi.revokeObjectURL?.(objectUrl); } catch {}
+          }
+        } finally {
+          try { a?.remove?.(); } catch {}
+        }
+      }
+      return jsonText;
+    }
 
     const getConfig = () => (typeof options.getConfig === 'function' ? options.getConfig() : coexist.DEFAULT_CONFIG);
     const updateConfig = (patch) => {
@@ -439,6 +496,16 @@
           writeUiState(EXPANDED_STORAGE_KEY, panelExpanded ? '1' : '0');
           renderIntoSettings();
         });
+        foldHead.addEventListener('keydown', (ev) => {
+          if (ev?.key === 'Enter' || ev?.key === ' ') {
+            ev?.preventDefault?.();
+            ev?.stopPropagation?.();
+            panelExpanded = !panelExpanded;
+            writeUiState(EXPANDED_STORAGE_KEY, panelExpanded ? '1' : '0');
+            renderIntoSettings();
+            mountedEl?.querySelector?.('[data-testid="ag-sag-fold-head"]')?.focus?.();
+          }
+        });
         suite.appendChild(foldHead);
 
         // Collapsible Body
@@ -551,10 +618,14 @@
           tb.addEventListener('click', (ev) => {
             ev?.preventDefault?.();
             ev?.stopPropagation?.();
+            const wasFocused = doc.activeElement === tb;
             activeSubTab = tabId;
             if (tabId === 'nov' || tabId === 'all') novAutoRefreshAttempted = false;
             writeUiState(SUBTAB_STORAGE_KEY, tabId);
             renderIntoSettings();
+            if (wasFocused) {
+              mountedEl?.querySelector?.(`[data-ag-sag-subtab="${tabId}"]`)?.focus?.();
+            }
           });
           subtabs.appendChild(tb);
         }
@@ -616,6 +687,226 @@
             })
           );
           uiPane.appendChild(mkSuiteRow(sagStrings.hostI18nLabel, sagStrings.hostI18nDesc, langCtrl));
+
+          // Custom Language Pack Import / Export Row
+          const packCtrl = doc.createElement('div');
+          packCtrl.className = 'ag-sag-pack-ctrl';
+          const packBtnRow = doc.createElement('div');
+          packBtnRow.className = 'ag-sag-ext-grid';
+
+          const fileInput = coexist.markOwnedNoTranslate(doc.createElement('input'));
+          fileInput.type = 'file';
+          fileInput.accept = 'application/json,.json';
+          fileInput.hidden = true;
+          fileInput.setAttribute('data-testid', 'ag-sag-pack-file-input');
+
+          const editorWrap = doc.createElement('div');
+          editorWrap.className = 'ag-sag-pack-editor';
+          editorWrap.setAttribute('data-testid', 'ag-sag-pack-editor-wrap');
+          editorWrap.hidden = !customPackEditorOpen;
+
+          const textarea = doc.createElement('textarea');
+          textarea.className = 'ag-sag-pack-textarea';
+          textarea.setAttribute('data-testid', 'ag-sag-pack-textarea');
+          textarea.setAttribute('spellcheck', 'false');
+          textarea.placeholder = sagStrings.customPackPlaceholder;
+          textarea.value = customPackDraftText;
+          textarea.addEventListener('input', () => {
+            customPackDraftText = textarea.value;
+          });
+
+          const statusEl = doc.createElement('div');
+          statusEl.className = 'ag-sag-pack-status';
+          statusEl.setAttribute('data-testid', 'ag-sag-pack-status');
+          if (customPackStatusText) {
+            statusEl.textContent = customPackStatusText;
+            statusEl.setAttribute('data-tone', customPackStatusTone || 'info');
+          } else {
+            statusEl.hidden = true;
+          }
+
+          const setPackStatus = (msg, tone = 'info') => {
+            customPackStatusText = String(msg || '');
+            customPackStatusTone = tone;
+            const liveStatusEl = statusEl.isConnected
+              ? statusEl
+              : mountedEl?.querySelector?.('[data-testid="ag-sag-pack-status"]') || statusEl;
+            liveStatusEl.textContent = customPackStatusText;
+            liveStatusEl.setAttribute('data-tone', tone);
+            liveStatusEl.hidden = !customPackStatusText;
+          };
+
+          const importBtn = mkChip({
+            label: sagStrings.customPackImportBtn,
+            active: false,
+            attr: 'data-testid',
+            val: 'ag-sag-pack-import-btn',
+            onClick: () => {
+              fileInput.click?.();
+            },
+          });
+
+          const toggleEditorBtn = mkChip({
+            label: customPackEditorOpen ? sagStrings.customPackHideBtn : sagStrings.customPackEditBtn,
+            active: customPackEditorOpen,
+            attr: 'data-testid',
+            val: 'ag-sag-pack-toggle-btn',
+            onClick: () => {
+              customPackEditorOpen = !customPackEditorOpen;
+              editorWrap.hidden = !customPackEditorOpen;
+              toggleEditorBtn.textContent = customPackEditorOpen ? sagStrings.customPackHideBtn : sagStrings.customPackEditBtn;
+              toggleEditorBtn.setAttribute('aria-pressed', String(customPackEditorOpen));
+            },
+          });
+
+          fileInput.addEventListener('change', async () => {
+            const f = fileInput.files?.[0];
+            if (!f) return;
+            try {
+              let text = '';
+              if (typeof f.text === 'function') {
+                text = await f.text();
+              } else if (typeof win?.FileReader === 'function') {
+                text = await new Promise((resolve, reject) => {
+                  const reader = new win.FileReader();
+                  reader.onload = () => resolve(String(reader.result || ''));
+                  reader.onerror = () => reject(new Error('File read error'));
+                  reader.readAsText(f);
+                });
+              }
+              customPackDraftText = text;
+              textarea.value = text;
+              customPackEditorOpen = true;
+              editorWrap.hidden = false;
+              toggleEditorBtn.textContent = sagStrings.customPackHideBtn;
+              toggleEditorBtn.setAttribute('aria-pressed', 'true');
+            } catch (err) {
+              setPackStatus(err?.message || 'File read failed', 'error');
+            } finally {
+              try { fileInput.value = ''; } catch {}
+            }
+          });
+
+          const exportBtn = mkChip({
+            label: sagStrings.customPackExportBtn,
+            active: false,
+            attr: 'data-testid',
+            val: 'ag-sag-pack-export-btn',
+            onClick: () => {
+              const all = typeof options.onExportCustomPacks === 'function' ? options.onExportCustomPacks() : {};
+              const keys = Object.keys(all || {});
+              if (keys.length === 0) {
+                setPackStatus(sagStrings.customPackEmpty, 'error');
+                return;
+              }
+              const targetLoc = cfg.hostI18nLocale && all[cfg.hostI18nLocale] ? cfg.hostI18nLocale : keys[0];
+              const payload = all[targetLoc] || all;
+              downloadJsonPayload(`agy-sag-pack-${targetLoc}.json`, payload);
+              setPackStatus(i18n.formatTemplate(sagStrings.customPackExported, { locale: targetLoc }), 'ok');
+            },
+          });
+
+          const collectMissingBtn = mkChip({
+            label: sagStrings.customPackCollectBtn,
+            active: Boolean(cfg.hostI18nCollectMissing),
+            attr: 'data-ag-sag-collect-missing',
+            val: cfg.hostI18nCollectMissing ? '1' : '0',
+            onClick: () => {
+              updateConfig({ hostI18nCollectMissing: !cfg.hostI18nCollectMissing });
+            },
+          });
+
+          const exportMissingBtn = mkChip({
+            label: sagStrings.customPackMissingBtn,
+            active: false,
+            attr: 'data-testid',
+            val: 'ag-sag-pack-missing-btn',
+            title: cfg.hostI18nCollectMissing ? undefined : sagStrings.customPackMissingTip,
+            onClick: () => {
+              if (!cfg.hostI18nCollectMissing) return;
+              const tpl = typeof options.onExportMissingTemplate === 'function' ? options.onExportMissingTemplate() : null;
+              const out = tpl || { meta: { locale: cfg.hostI18nLocale || 'zh-CN', schemaVersion: 2, count: 0 }, exact: {}, patterns: [] };
+              const loc = out.meta?.locale || cfg.hostI18nLocale || 'zh-CN';
+              downloadJsonPayload(`agy-sag-missing-template-${loc}.json`, out);
+              setPackStatus(
+                i18n.formatTemplate(sagStrings.customPackMissingExported, { count: out.meta?.count || 0 }),
+                'ok'
+              );
+            },
+          });
+          if (!cfg.hostI18nCollectMissing) {
+            exportMissingBtn.disabled = true;
+          }
+
+          const clearBtn = mkChip({
+            label: sagStrings.customPackClearBtn,
+            active: false,
+            risk: 'high',
+            attr: 'data-testid',
+            val: 'ag-sag-pack-clear-btn',
+            onClick: () => {
+              if (typeof options.onClearCustomPacks === 'function') {
+                options.onClearCustomPacks();
+              }
+              customPackDraftText = '';
+              textarea.value = '';
+              setPackStatus(sagStrings.customPackCleared, 'ok');
+            },
+          });
+
+          packBtnRow.appendChild(fileInput);
+          packBtnRow.appendChild(importBtn);
+          packBtnRow.appendChild(toggleEditorBtn);
+          packBtnRow.appendChild(exportBtn);
+          packBtnRow.appendChild(collectMissingBtn);
+          packBtnRow.appendChild(exportMissingBtn);
+          packBtnRow.appendChild(clearBtn);
+
+          const applyBtn = mkChip({
+            label: sagStrings.customPackApplyBtn,
+            active: true,
+            attr: 'data-testid',
+            val: 'ag-sag-pack-apply-btn',
+            onClick: () => {
+              const rawText = textarea.value;
+              customPackDraftText = rawText;
+              const importer =
+                typeof options.onImportCustomPack === 'function'
+                  ? options.onImportCustomPack
+                  : (v) => {
+                      const packsMod = resolveDep('__agSagHostI18nPacks', './host-i18n-packs.js');
+                      return packsMod?.sanitizeImportedPack
+                        ? packsMod.sanitizeImportedPack(v)
+                        : { ok: false, errors: ['Pack sanitizer unavailable'], stats: { exactCount: 0, patternCount: 0 } };
+                    };
+              const res = importer(rawText);
+              if (!res || !res.ok) {
+                const msg = (res?.errors && res.errors.length ? res.errors : ['Invalid pack']).join('; ');
+                setPackStatus(msg, 'error');
+                return;
+              }
+              setPackStatus(
+                i18n.formatTemplate(sagStrings.customPackApplied, {
+                  exact: res.stats?.exactCount ?? Object.keys(res.pack?.exact || {}).length,
+                  patterns: res.stats?.patternCount ?? (res.pack?.patterns?.length || 0),
+                  locale: res.pack?.locale || '',
+                }),
+                'ok'
+              );
+            },
+          });
+
+          const editorFoot = doc.createElement('div');
+          editorFoot.className = 'ag-sag-pack-actions';
+          editorFoot.appendChild(applyBtn);
+
+          editorWrap.appendChild(textarea);
+          editorWrap.appendChild(editorFoot);
+
+          packCtrl.appendChild(packBtnRow);
+          packCtrl.appendChild(editorWrap);
+          packCtrl.appendChild(statusEl);
+          uiPane.appendChild(mkSuiteRow(sagStrings.customPackLabel, sagStrings.customPackDesc, packCtrl, true));
 
           // Optical Theme Studio: 5 skins + CJK font + density
           if (cfg.modules?.themeStudio || activeSubTab === 'ui') {
@@ -1171,6 +1462,18 @@
         mountedEl = section;
         mountedMode = 'native';
         populateSettingsCard(section, false);
+        return true;
+      }
+
+      // Fallback: if already mounted inside native Settings (e.g. custom i18n translated <h2>Appearance</h2>), keep syncing
+      const existingNative =
+        mountedMode === 'native' && mountedEl && mountedEl.isConnected
+          ? mountedEl
+          : doc.querySelector?.(`[data-testid="${NATIVE_SECTION_TESTID}"]`) || null;
+      if (existingNative && existingNative.isConnected) {
+        mountedEl = existingNative;
+        mountedMode = 'native';
+        populateSettingsCard(existingNative, false);
         return true;
       }
 

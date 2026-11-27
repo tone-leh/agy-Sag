@@ -33,6 +33,7 @@ export const SMOKE_REQUIRED_MARKERS = Object.freeze([
   '__agSagQuotaPulse',
   '__agSagNovSynergy',
   'ag-sag-synergy',
+  'agSag.hostI18n.customPacks.v1',
 ]);
 
 export function buildHtmlPage() {
@@ -198,6 +199,9 @@ export function buildHtmlPage() {
           <option value="pt-BR">pt-BR · Português (Brasil)</option>
         </select>
       </label>
+      <div class="ctl-row">
+        <button class="ctl" id="btn-demo-custom-pack">加载示例自定义语言包</button>
+      </div>
       <div class="hud-box" id="host-i18n-hud">Host i18n：就绪</div>
     </div>
 
@@ -896,11 +900,33 @@ ${coreScript}
     hostLangSel.addEventListener('change', () => {
       const loc = hostLangSel.value;
       guard.setHostLocale(loc);
-      if (loc === 'zh-CN' || loc === 'zh-TW' || loc === 'en' || loc === 'ja') {
-        document.documentElement.setAttribute('data-ag-cs-lang', loc);
-      }
+      const uiLang = ['zh-CN', 'zh-TW', 'yue', 'en', 'ja', 'ko', 'es', 'fr', 'de'].includes(loc) ? loc : 'en';
+      document.documentElement.setAttribute('data-ag-cs-lang', uiLang);
+      guard.prismBridge?.sync?.();
       guard.evaluateNow().then(refreshModuleHuds);
       appendLog('[HOST I18N] 已切换原生 UI 语言 -> ' + loc + '（代码块与 /compact 保持原样）');
+    });
+
+    document.getElementById('btn-demo-custom-pack')?.addEventListener('click', () => {
+      const targetLoc = hostLangSel.value && hostLangSel.value !== 'en' ? hostLangSel.value : 'zh-CN';
+      const samplePack = {
+        locale: targetLoc,
+        exact: {
+          Settings: targetLoc === 'zh-TW' ? '偏好設定 (自訂)' : targetLoc === 'zh-CN' ? '系统偏好 (自定义)' : 'Settings (' + targetLoc + ' Custom)',
+          Appearance: targetLoc === 'zh-TW' ? '視覺外觀 (自訂)' : targetLoc === 'zh-CN' ? '视觉外观 (自定义)' : 'Appearance (' + targetLoc + ' Custom)',
+        },
+        patterns: [
+          { source: '^(\\\\d+)\\\\s+files\\\\s+changed$', flags: 'i', replace: '[自定义] 变更 {1} 个文件' },
+        ],
+      };
+      if (hostLangSel.value === 'en') {
+        hostLangSel.value = 'zh-CN';
+        guard.setHostLocale('zh-CN');
+        document.documentElement.setAttribute('data-ag-cs-lang', 'zh-CN');
+      }
+      const res = guard.importCustomHostPack?.(samplePack);
+      guard.evaluateNow().then(refreshModuleHuds);
+      appendLog('[HOST I18N CUSTOM PACK] ' + JSON.stringify(res));
     });
 
     document.getElementById('btn-queue-push').addEventListener('click', () => {

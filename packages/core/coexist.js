@@ -19,6 +19,7 @@
   const SAG_STORAGE_KEY = STORAGE_KEY; // deprecated alias
   const LEGACY_STORAGE_PREFIX = 'agSessionGuard.';
   const SAG_STORAGE_PREFIX = 'agSag.';
+  const CUSTOM_PACKS_STORAGE_KEY = 'agSag.hostI18n.customPacks.v1';
 
   const ALLOWED_HOST_LOCALES = Object.freeze([
     'auto',
@@ -464,6 +465,7 @@
     SAG_STORAGE_KEY,
     LEGACY_STORAGE_PREFIX,
     SAG_STORAGE_PREFIX,
+    CUSTOM_PACKS_STORAGE_KEY,
     ALLOWED_HOST_LOCALES,
     ALLOWED_CONFLICT_POLICIES,
     ALLOWED_AUTO_ACCEPT_POLICIES,
