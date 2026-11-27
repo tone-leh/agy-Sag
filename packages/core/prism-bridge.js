@@ -2343,19 +2343,24 @@
         synBox.appendChild(synList);
         pane.appendChild(synBox);
 
-        // Dual-Star Live Read-Only Feed (guard / radar / mem / spec)
+        // Dual-Star Live Read-Only Feed (guard / radar / mem / spec / verify)
         const feed = typeof novSynergy?.getFeed === 'function' ? novSynergy.getFeed() : null;
         if (feed) {
           const parts = [];
-          if (feed.guard?.blockedCount > 0 || feed.guard?.snapshotCount > 0) {
+          if (feed.guard?.blockedCount > 0 || feed.guard?.forceAskCount > 0 || feed.guard?.snapshotCount > 0 || feed.guard?.permissionMode) {
+            const modeTag = feed.guard.permissionMode ? ` [${feed.guard.permissionMode}]` : '';
+            const faTag = feed.guard.forceAskCount > 0 ? (isZh ? ` · 强确认 ${feed.guard.forceAskCount}` : ` · force_ask ${feed.guard.forceAskCount}`) : '';
             parts.push(
               isZh
-                ? `Guard 拦截 ${feed.guard.blockedCount} · 快照 ${feed.guard.snapshotCount}`
-                : `Guard blocked ${feed.guard.blockedCount} · snapshots ${feed.guard.snapshotCount}`
+                ? `Guard${modeTag} 拦截 ${feed.guard.blockedCount}${faTag} · 快照 ${feed.guard.snapshotCount}`
+                : `Guard${modeTag} blocked ${feed.guard.blockedCount}${faTag} · snapshots ${feed.guard.snapshotCount}`
             );
           }
           if (feed.spec?.writeLockActive) {
             parts.push(isZh ? `Spec 写锁激活（队列已暂停）` : `Spec write-lock active (queue paused)`);
+          }
+          if (feed.verify?.lastStatus === 'fail') {
+            parts.push(isZh ? `Verify 门禁未通过` : `Verify gate failed`);
           }
           if (feed.mem?.driftedCount > 0) {
             parts.push(isZh ? `记忆漂移 ${feed.mem.driftedCount}` : `Memory drift ${feed.mem.driftedCount}`);

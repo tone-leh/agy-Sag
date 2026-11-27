@@ -692,12 +692,16 @@
       return {
         guard: {
           blockedCount: Math.max(0, Number(f.guard?.blockedCount) || 0),
+          askCount: Math.max(0, Number(f.guard?.askCount) || 0),
+          forceAskCount: Math.max(0, Number(f.guard?.forceAskCount) || 0),
+          permissionMode: typeof f.guard?.permissionMode === 'string' ? f.guard.permissionMode : null,
           snapshotCount: Math.max(0, Number(f.guard?.snapshotCount) || 0),
           latestSnapshotId: typeof f.guard?.latestSnapshotId === 'string' ? f.guard.latestSnapshotId : null,
           latestBlocked: f.guard?.latestBlocked && typeof f.guard.latestBlocked === 'object'
             ? {
                 ts: String(f.guard.latestBlocked.ts || ''),
                 tool: String(f.guard.latestBlocked.tool || ''),
+                decision: String(f.guard.latestBlocked.decision || 'deny'),
                 reason: String(f.guard.latestBlocked.reason || ''),
               }
             : null,
@@ -716,6 +720,12 @@
           activeSpecId: typeof f.spec?.activeSpecId === 'string' ? f.spec.activeSpecId : null,
           activeSpecTitle: String(f.spec?.activeSpecTitle || ''),
         },
+        verify: {
+          enforceOnStop: Boolean(f.verify?.enforceOnStop),
+          lastStatus: typeof f.verify?.lastStatus === 'string' ? f.verify.lastStatus : null,
+          dirtyFilesCount: Math.max(0, Number(f.verify?.dirtyFilesCount) || 0),
+        },
+        alerts: Array.isArray(f.alerts) ? f.alerts.filter((a) => typeof a === 'string' && a.trim()).slice(0, 4) : [],
       };
     };
     let currentFeed = normalizeNovFeed(options.initialFeed || null);
@@ -1057,6 +1067,8 @@
         radar: { ...currentFeed.radar },
         mem: { ...currentFeed.mem },
         spec: { ...currentFeed.spec },
+        verify: { ...currentFeed.verify },
+        alerts: [...(currentFeed.alerts || [])],
       };
     }
 

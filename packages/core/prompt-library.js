@@ -91,6 +91,49 @@
     }),
   ]);
 
+  const NOV_PLAYBOOK_ITEMS = Object.freeze([
+    Object.freeze({
+      id: 'nov-playbook-spec',
+      source: 'nov',
+      titleZh: '/nov-spec · 需求规格与任务图',
+      titleEn: '/nov-spec · Spec flow & task DAG',
+      descZh: 'agy-NOV 原生 Playbook：生成结构化 Spec 与依赖任务图',
+      descEn: 'agy-NOV native playbook: structured spec & dependency task DAG',
+      tags: ['nov', 'slash', 'spec'],
+      body: '/nov-spec ',
+    }),
+    Object.freeze({
+      id: 'nov-playbook-debug',
+      source: 'nov',
+      titleZh: '/nov-debug · 证据链根因排障',
+      titleEn: '/nov-debug · Evidence-based root cause debug',
+      descZh: 'agy-NOV 原生 Playbook：系统化复现、定位根因与最小验证修复',
+      descEn: 'agy-NOV native playbook: reproduce, isolate root cause & verify fix',
+      tags: ['nov', 'slash', 'debug'],
+      body: '/nov-debug ',
+    }),
+    Object.freeze({
+      id: 'nov-playbook-review',
+      source: 'nov',
+      titleZh: '/nov-review · 盲审级 Diff 审查',
+      titleEn: '/nov-review · Blind diff review',
+      descZh: 'agy-NOV 原生 Playbook：只读双阶段代码与安全审查',
+      descEn: 'agy-NOV native playbook: two-stage read-only code & security review',
+      tags: ['nov', 'slash', 'review'],
+      body: '/nov-review ',
+    }),
+    Object.freeze({
+      id: 'nov-playbook-handoff',
+      source: 'nov',
+      titleZh: '/nov-handoff · 脱敏交接与 Clean Fork',
+      titleEn: '/nov-handoff · Redacted handoff & Clean Fork',
+      descZh: 'agy-NOV 原生 Playbook：生成脱敏交接摘要并支持 Clean Fork 轻装续跑',
+      descEn: 'agy-NOV native playbook: redacted continuity brief & Clean Fork pack',
+      tags: ['nov', 'slash', 'handoff'],
+      body: '/nov-handoff ',
+    }),
+  ]);
+
   const BUILTIN_TEMPLATES = Object.freeze([
     Object.freeze({
       id: 'tpl-diff-review',
@@ -463,7 +506,18 @@
         body: zh ? item.bodyZh : item.bodyEn,
       }));
       const user = userSnippets.map((item) => ({ ...item, source: 'user' }));
-      const nov = novTemplates.map((item) => ({ ...item, source: 'nov' }));
+      const novConnected = typeof options.isNovConnected === 'function' ? Boolean(options.isNovConnected()) : false;
+      const playbooks = novConnected
+        ? NOV_PLAYBOOK_ITEMS.map((item) => ({
+            id: item.id,
+            source: 'nov',
+            title: zh ? item.titleZh : item.titleEn,
+            description: zh ? item.descZh : item.descEn,
+            tags: item.tags,
+            body: item.body,
+          }))
+        : [];
+      const nov = [...playbooks, ...novTemplates.map((item) => ({ ...item, source: 'nov' }))];
       return [...user, ...slash, ...builtin, ...nov];
     }
 
@@ -1030,7 +1084,7 @@
         ['slash', t('plTabSlash', 'Slash')],
         ['builtin', t('plTabBuiltin', 'Templates')],
         ['user', `${t('plTabUser', 'Mine')} (${userSnippets.length})`],
-        ['nov', `agy-NOV (${novTemplates.length})`],
+        ['nov', `agy-NOV (${novTemplates.length + (typeof options.isNovConnected === 'function' && options.isNovConnected() ? NOV_PLAYBOOK_ITEMS.length : 0)})`],
       ];
       for (const [fid, flbl] of tabDefs) {
         const b = doc.createElement('button');

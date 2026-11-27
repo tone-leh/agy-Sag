@@ -653,6 +653,7 @@
           getLang: options.getLang,
           initialNovTemplates: options.initialNovTemplates,
           requestNovTemplates,
+          isNovConnected: () => Boolean(novSynergy?.isConnected?.()),
           onChange: () => {
             prismBridge?.sync?.();
           },

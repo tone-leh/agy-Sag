@@ -672,10 +672,11 @@
   const CONV_STREAMING_SEL =
     '[data-testid="agent-input-box"] [data-testid="input-cancel-button"], [data-testid="agent-input-box"] [data-testid="stop-button"], [data-testid="stop-button"], [data-testid="cancel-button"]';
 
-  function isVisibleHostSignal(el) {
+  function isVisibleHostSignal(el, winRef = null) {
     if (!el) return false;
     let cur = el;
     let depth = 0;
+    const gcs = typeof winRef?.getComputedStyle === 'function' ? winRef.getComputedStyle.bind(winRef) : null;
     while (cur && cur.nodeType === 1 && depth < 24) {
       if (cur.hidden === true) return false;
       if (
@@ -687,6 +688,12 @@
       }
       if (cur.getAttribute?.('aria-hidden') === 'true') return false;
       if (cur.style?.display === 'none' || cur.style?.visibility === 'hidden') return false;
+      if (gcs) {
+        try {
+          const cs = gcs(cur);
+          if (cs && (cs.display === 'none' || cs.visibility === 'hidden')) return false;
+        } catch {}
+      }
       if (cur.getAttribute?.('data-ag-sag-owned') === '1' || cur.getAttribute?.('data-ag-sg-owned') === '1') return false;
       cur = cur.parentElement || null;
       depth += 1;
@@ -694,28 +701,30 @@
     return true;
   }
 
-  function hasVisibleHostSignal(doc, selector) {
+  function hasVisibleHostSignal(doc, selector, winRef = null) {
     if (!doc) return false;
+    const effWin = winRef || doc.defaultView || null;
     if (typeof doc.querySelectorAll === 'function') {
       const nodes = doc.querySelectorAll(selector) || [];
       for (let i = 0; i < nodes.length; i += 1) {
-        if (isVisibleHostSignal(nodes[i])) return true;
+        if (isVisibleHostSignal(nodes[i], effWin)) return true;
       }
       return false;
     }
     if (typeof doc.querySelector === 'function') {
-      return isVisibleHostSignal(doc.querySelector(selector));
+      return isVisibleHostSignal(doc.querySelector(selector), effWin);
     }
     return false;
   }
 
   function detectConvStateFromDom(doc, opts = {}) {
-    if (hasVisibleHostSignal(doc, CONV_AWAITING_SEL)) return 'awaiting';
-    if (hasVisibleHostSignal(doc, CONV_ERROR_SEL)) return 'error';
+    const winRef = opts?.win || doc?.defaultView || null;
+    if (hasVisibleHostSignal(doc, CONV_AWAITING_SEL, winRef)) return 'awaiting';
+    if (hasVisibleHostSignal(doc, CONV_ERROR_SEL, winRef)) return 'error';
     if (opts && typeof opts.streaming === 'boolean') {
       return opts.streaming ? 'running' : 'idle';
     }
-    if (hasVisibleHostSignal(doc, CONV_STREAMING_SEL)) return 'running';
+    if (hasVisibleHostSignal(doc, CONV_STREAMING_SEL, winRef)) return 'running';
     return 'idle';
   }
 

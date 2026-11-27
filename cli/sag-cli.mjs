@@ -51,8 +51,8 @@ const packsMod = require('../packages/core/host-i18n-packs.js');
 const PRESET_DESCRIPTIONS = Object.freeze({
   essential: 'Balanced default: 10-language UI translation, compact guard, draft vault, prompt queue & watchdog.',
   'i18n-only': 'Minimal footprint: native Antigravity UI translation only; all other modules disabled.',
-  power: 'Power workspace: essential modules + turn bookmarks, optical theme studio & read-only quota pulse.',
-  'full-auto': 'All 11 modules active, including sidebar radar and policy-gated safe auto-accept (readonly-safe).',
+  power: 'Power workspace: essential modules + prompt library, reading navigation, turn bookmarks, optical theme studio & read-only quota pulse.',
+  'full-auto': 'All 13 modules active, including sidebar radar and policy-gated safe auto-accept (readonly-safe).',
 });
 
 function formatBytes(bytes) {

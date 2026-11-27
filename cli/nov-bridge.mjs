@@ -877,20 +877,40 @@ export function readNovFeed(opts = {}) {
       available: false,
       errors: [snapFeedRes.error || 'Failed to read feed-snapshot.json'],
       feed: {
-        guard: { blockedCount: 0, snapshotCount: 0, latestSnapshotId: null, latestBlocked: null },
+        guard: { blockedCount: 0, askCount: 0, forceAskCount: 0, permissionMode: null, snapshotCount: 0, latestSnapshotId: null, latestBlocked: null },
         radar: { awaitingCount: 0, runningCount: 0, headline: '' },
         mem: { totalCount: 0, driftedCount: 0 },
         spec: { writeLockActive: false, activeSpecId: null, activeSpecTitle: '' },
+        verify: { enforceOnStop: false, lastStatus: null, dirtyFilesCount: 0 },
+        alerts: [],
       },
     };
   }
+  const ALLOWED_PERM_MODES = new Set(['readonly-audit', 'balanced-dev', 'strict-gate']);
+  const ALLOWED_VERIFY_STATUS = new Set(['pass', 'fail', 'warn', 'skipped', 'running', 'idle']);
   if (snapFeedRes.exists && snapFeedRes.data && typeof snapFeedRes.data === 'object') {
     const snap = snapFeedRes.data;
     const g = snap.guard && typeof snap.guard === 'object' ? snap.guard : {};
     const r = snap.radar && typeof snap.radar === 'object' ? snap.radar : {};
     const m = snap.mem && typeof snap.mem === 'object' ? snap.mem : {};
     const sp = snap.spec && typeof snap.spec === 'object' ? snap.spec : {};
+    const vf = snap.verify && typeof snap.verify === 'object' ? snap.verify : {};
     const lastEv = g.lastEvent && typeof g.lastEvent === 'object' ? g.lastEvent : null;
+    const lastEvDecision = typeof lastEv?.decision === 'string' ? lastEv.decision.trim().toLowerCase().slice(0, 24) : '';
+    const permMode = typeof g.permissionMode === 'string' && ALLOWED_PERM_MODES.has(g.permissionMode.trim()) ? g.permissionMode.trim() : null;
+    const verifyStatus = typeof vf.lastStatus === 'string' && ALLOWED_VERIFY_STATUS.has(vf.lastStatus.trim().toLowerCase()) ? vf.lastStatus.trim().toLowerCase() : null;
+    const forceAskCount = toSafeNonNegInt(
+      g.forceAskCount ?? (lastEvDecision === 'force_ask' ? Math.max(1, toSafeNonNegInt(g.askCount)) : 0)
+    );
+    const rawAlerts = Array.isArray(snap.alerts) ? snap.alerts : [];
+    const alerts = rawAlerts
+      .slice(0, 4)
+      .map((a) => {
+        if (typeof a === 'string') return redactNovFeedText(a, 100);
+        if (a && typeof a === 'object') return redactNovFeedText(a.message || a.title || a.summary || '', 100);
+        return '';
+      })
+      .filter(Boolean);
     return {
       ok: true,
       available: true,
@@ -899,12 +919,16 @@ export function readNovFeed(opts = {}) {
       feed: {
         guard: {
           blockedCount: toSafeNonNegInt(g.blockedCount),
+          askCount: toSafeNonNegInt(g.askCount),
+          forceAskCount,
+          permissionMode: permMode,
           snapshotCount: toSafeNonNegInt(g.snapshotCount),
           latestSnapshotId: typeof g.latestSnapshotId === 'string' ? redactNovFeedText(g.latestSnapshotId, 64) : null,
           latestBlocked: lastEv
             ? {
                 ts: typeof lastEv.ts === 'string' ? lastEv.ts.slice(0, 40) : '',
                 tool: redactNovFeedText(lastEv.tool, 48),
+                decision: lastEvDecision || 'deny',
                 reason: redactNovFeedText(lastEv.reason || lastEv.summary, 120),
               }
             : null,
@@ -923,6 +947,12 @@ export function readNovFeed(opts = {}) {
           activeSpecId: typeof sp.activeSpecId === 'string' ? redactNovFeedText(sp.activeSpecId, 64) : null,
           activeSpecTitle: redactNovFeedText(sp.title || sp.activeSpecTitle, 80),
         },
+        verify: {
+          enforceOnStop: Boolean(vf.enforceOnStop),
+          lastStatus: verifyStatus,
+          dirtyFilesCount: toSafeNonNegInt(vf.dirtyFilesCount),
+        },
+        alerts,
       },
     };
   }
@@ -948,7 +978,15 @@ export function readNovFeed(opts = {}) {
     const d = String(e?.decision || e?.action || e?.outcome || '').toLowerCase();
     return d === 'block' || d === 'blocked' || d === 'deny' || d === 'denied';
   });
-  const latestBlk = blocked.length ? blocked[blocked.length - 1] : null;
+  const asked = auditArr.filter((e) => {
+    const d = String(e?.decision || e?.action || e?.outcome || '').toLowerCase();
+    return d === 'ask' || d === 'force_ask';
+  });
+  const forceAsked = auditArr.filter((e) => {
+    const d = String(e?.decision || e?.action || e?.outcome || '').toLowerCase();
+    return d === 'force_ask';
+  });
+  const latestBlk = blocked.length ? blocked[blocked.length - 1] : forceAsked.length ? forceAsked[forceAsked.length - 1] : null;
   const snapArr = Array.isArray(snapRes.data)
     ? snapRes.data
     : Array.isArray(snapRes.data?.snapshots)
@@ -994,12 +1032,16 @@ export function readNovFeed(opts = {}) {
     feed: {
       guard: {
         blockedCount: blocked.length,
+        askCount: asked.length,
+        forceAskCount: forceAsked.length,
+        permissionMode: null,
         snapshotCount: snapArr.length,
         latestSnapshotId: typeof latestSnap?.id === 'string' ? redactNovFeedText(latestSnap.id, 64) : null,
         latestBlocked: latestBlk
           ? {
               ts: typeof latestBlk.ts === 'string' ? latestBlk.ts.slice(0, 40) : '',
               tool: redactNovFeedText(latestBlk.tool, 48),
+              decision: String(latestBlk.decision || latestBlk.action || 'deny').toLowerCase().slice(0, 24),
               reason: redactNovFeedText(latestBlk.reason, 120),
             }
           : null,
@@ -1018,6 +1060,12 @@ export function readNovFeed(opts = {}) {
         activeSpecId: typeof sData.activeSpecId === 'string' ? redactNovFeedText(sData.activeSpecId, 64) : null,
         activeSpecTitle: redactNovFeedText(activeSpec?.title, 80),
       },
+      verify: {
+        enforceOnStop: false,
+        lastStatus: null,
+        dirtyFilesCount: 0,
+      },
+      alerts: [],
     },
   };
 }

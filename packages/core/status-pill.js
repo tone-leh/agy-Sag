@@ -187,10 +187,15 @@
       const locked = Boolean(nov.specWriteLocked);
       const drifted = Math.max(0, Number(nov.memDrifted) || 0);
       const blocked = Math.max(0, Number(nov.guardBlocked) || 0);
+      const forceAsk = Math.max(0, Number(nov.guardForceAsk) || 0);
+      const verifyFail = Boolean(nov.verifyFailed);
       let text = 'NOV';
       let tone = 'accent';
       if (locked) {
         text = 'NOV 🔒';
+        tone = 'warn';
+      } else if (verifyFail) {
+        text = 'NOV !';
         tone = 'warn';
       } else if (drifted > 0) {
         text = `NOV · Δ${drifted}`;
@@ -198,8 +203,10 @@
       }
       const extras = [];
       if (locked) extras.push('Spec Lock');
+      if (verifyFail) extras.push('Verify fail');
       if (drifted > 0) extras.push(`Mem drift ${drifted}`);
       if (blocked > 0) extras.push(`Guard blocked ${blocked}`);
+      if (forceAsk > 0) extras.push(`Guard force_ask ${forceAsk}`);
       const baseTitle = formatTpl(strings.hudNovTitle || 'agy-NOV connected · {on}/{total} modules', { on, total });
       segs.push({
         id: 'nov',
@@ -414,6 +421,8 @@
         specWriteLocked: Boolean(nf?.spec?.writeLockActive),
         memDrifted: Number(nf?.mem?.driftedCount) || 0,
         guardBlocked: Number(nf?.guard?.blockedCount) || 0,
+        guardForceAsk: Number(nf?.guard?.forceAskCount) || 0,
+        verifyFailed: nf?.verify?.lastStatus === 'fail',
         radarAwaiting: Number(nf?.radar?.awaitingCount) || 0,
       };
     }

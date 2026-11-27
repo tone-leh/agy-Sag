@@ -237,12 +237,15 @@ function scanAndCompactJs(src) {
     return REGEX_PRECEDING_PUNCT.has(lastSigChar);
   };
 
+  const NO_ASI_AFTER = new Set([';', '{', ',', '(', '[']);
   const emitCodeChar = (ch) => {
     if (ch === '\n') {
       flushIdent();
       pendingSpace = false;
       if (lineHasCode) {
-        pushRaw('\n');
+        if (!NO_ASI_AFTER.has(lastOutChar)) {
+          pushRaw('\n');
+        }
         lineHasCode = false;
       }
       return;
@@ -536,6 +539,14 @@ function compactCorePart(part) {
   if (part.file === 'styles.js') {
     code = code.replace(/const CORE_CSS\s*=\s*`([\s\S]*?)`\.trim\(\)/, (_m, css) => {
       return `const CORE_CSS=\`${minifyStaticCss(css)}\`.trim()`;
+    });
+  } else if (part.file === 'prompt-queue.js') {
+    code = code.replace(/const QUEUE_CSS\s*=\s*`([\s\S]*?)`\.trim\(\)/, (_m, css) => {
+      return `const QUEUE_CSS=\`${minifyStaticCss(css)}\`.trim()`;
+    });
+  } else if (part.file === 'status-pill.js') {
+    code = code.replace(/const PRISM_SHADOW_CSS\s*=\s*`([\s\S]*?)`\.trim\(\)/, (_m, css) => {
+      return `const PRISM_SHADOW_CSS=\`${minifyStaticCss(css)}\`.trim()`;
     });
   }
   return code;
