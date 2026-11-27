@@ -12,10 +12,11 @@
 
 ```text
 cli/
- ├── sag-cli.mjs         — Unified CLI router (attach, watch, doctor, i18n, storage, presets, install, workbench)
- ├── bundle.mjs          — Deterministic UMD concatenator, SHA-256 hash idempotency & lossless REMOVE_EXPRESSION
+ ├── sag-cli.mjs         — Unified CLI router (launch, keepalive, attach, watch, doctor, i18n, storage, presets, install, workbench)
+ ├── launcher.mjs        — Cross-platform CDP launcher & keepalive (Prism yield, cold-start graceful guard, 0600 circuit breaker)
+ ├── bundle.mjs          — Deterministic UMD concatenator, SHA-256 hash idempotency, <=1.6MB ext preload & lossless REMOVE_EXPRESSION
  ├── cdp-attach.mjs      — Loopback DevToolsActivePort discovery & target allowlist filter
- ├── watch-daemon.mjs    — Adaptive-backoff (3s -> 30s) CDP watcher with lightweight reload probe
+ ├── watch-daemon.mjs    — Adaptive-backoff (3s -> 30s) CDP watcher, lightweight reload probe & sag:ext_pack bridge
  ├── doctor.mjs          — Read-only Node/CDP/Obsidian Prism/agy-NOV coexistence diagnostics
  ├── storage-doctor.mjs  — Read-only ~/.gemini/antigravity audit, WAL lock detection, backup & redacted export
  └── install-plugin.mjs  — Local plugin installer (~/.gemini/config/plugins/agy-sag)
@@ -23,8 +24,8 @@ cli/
 packages/core/ (UMD, zero runtime deps, 0 :has() CSS)
  ├── coexist.js          — Config sanitization, 4 presets, 11-module catalog, owner yield & idle hibernation
  ├── i18n.js             — Plugin UI strings (8+1 Prism-aligned locales + agy-Sag suite strings)
- ├── host-i18n-packs.js  — 10-language offline UI dictionary (465 exact entries + 25 templates per target locale)
- ├── host-i18n.js        — WeakMap DOM translator with physical skip selectors, Shadow DOM & conflict arbitration
+ ├── host-i18n-packs.js  — 10-language dictionary merger (Custom > 465 Core > ~5k Extended packs in locales/ext/)
+ ├── host-i18n.js        — WeakMap DOM translator with async ext-pack fetch, skip selectors, Shadow DOM & conflict guard
  ├── compact-guard.js    — Configurable /compact guard, auto-silent scroll shield, Lexical slash picker & recovery
  ├── precompact-export.js— Redacted Markdown export & download
  ├── recovery-handoff.js — Post-compact anchor recovery & new-session handoff prompt

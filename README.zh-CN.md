@@ -82,7 +82,7 @@ Google Antigravity 2.x 将 12.8 MB 前端界面内嵌在已签名的 Go 二进�
 - **物理级内容隔离红线**：严格跳过 `<code>`、`<pre>`、Monaco 编辑器、`.xterm` 终端、Lexical 输入框、用户/助手对话消息气泡、Git 分支与工作区名称，以及 `/compact`、`/clear` 等斜杠命令名本身（仅翻译命令右侧的说明文字）。
 - **毫秒级热切与 100% 无损还原**：通过 `WeakMap` 保存每个 TextNode 与白名单属性（`placeholder`、`title`、`aria-label`）的英文原文，配合 8,000 条有界 FIFO 缓存防内存增长；切换为 `English (原版)` 或卸载插件时瞬间还原全部节点。
 - **第三方翻译器防撞机制**：自动检测 Obsidian Prism 宿主翻译器（`html[data-ag-prism-host-i18n="active"]`），默认自动礼让避免双翻译器打架闪烁，也可在设置里一键切为「主动接管」。
-- **可扩展词典与未命中采集器**：支持热导入自定义 JSON 词典；开启未命中采集器可离线收集新增版本的英文 UI 词条（自动过滤路径/URL/密钥），并用 `npm run i18n:validate` 一键校验词库完整性。
+- **三层扩展词典（每语种约 5,000 词条）**：按 `用户自定义词典 > 内置 465 核心词条 > 扩展词库` 优先级合并。`packages/core/locales/ext/*.json` 基于 MIT 上游 [`yiheng8023/antigravity-chinese`](https://github.com/yiheng8023/antigravity-chinese) 与多语种重译构建，支持单语种 CDP 预注入（总包 `<= 1.6 MB`）、`sag:ext_pack` 零端口 Watch 桥按需拉取，以及离线 Workbench `/ext/<loc>.json` 只读路由；另可用 `collectMissing` 采集新增英文界面词条并通过 `npm run i18n:validate` 校验。详见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。
 
 ---
 
@@ -102,7 +102,7 @@ cd agy-Sag
 npm run install:plugin
 ```
 
-> **CDP 前置说明**：Zero-ASAR 附着仅连接本机已开启的 `DevToolsActivePort`（例如 macOS 使用 `open -a Antigravity --args --remote-debugging-port=0` 启动，或与 Obsidian Prism 启动器配合使用）。`agy-Sag` 绝不修改 `app.asar`，也绝不强制重启客户端。
+> **CDP 前置说明**：Zero-ASAR 附着仅连接本机已开启的 `DevToolsActivePort`。可使用跨平台启动器 `node cli/sag-cli.mjs launch --port=9222`（自动礼让 Obsidian Prism、绝不强杀已有进程，支持 `--dry-run --json`），或手动使用 `open -a Antigravity --args --remote-debugging-port=9222`。`agy-Sag` 绝不修改 `app.asar`。
 
 ### 2. 离线沙盒零侵入预览（完全不碰日常客户端）
 
@@ -117,6 +117,13 @@ npm run workbench
 ### 3. 统一命令行（CLI）速查
 
 ```bash
+# 只读预览跨平台 CDP 启动计划（默认礼让 Obsidian Prism，不启停任何进程）
+node cli/sag-cli.mjs launch --dry-run --json
+
+# 跨平台带调试端口启动与保活循环（可选 --auto-relaunch-cold-start 仅限冷启动 <=5s 且优雅退出）
+node cli/sag-cli.mjs launch --port=9222
+node cli/sag-cli.mjs keepalive --preset=power --lang=zh-CN
+
 # 一次性附着，并指定场景预设与目标语言
 node cli/sag-cli.mjs attach --preset=power --lang=zh-CN
 
@@ -151,13 +158,14 @@ node cli/sag-cli.mjs remove
 ```text
 Antigravity 2.0 宿主（Electron 44 + language_server 本地渲染界面）
  ├── Sidecar / CLI 层（Node.js >= 22，零 npm 运行依赖）
- │    ├── cli/sag-cli.mjs        — 统一命令入口（attach / watch / doctor / i18n / storage / workbench）
- │    ├── cli/watch-daemon.mjs   — 自适应退避（3s -> 30s）CDP 守护进程 + 轻量探针
- │    ├── cli/bundle.mjs         — 零构建 UMD 拼接器（SHA-256 幂等附着 + 一键全清）
+ │    ├── cli/sag-cli.mjs        — 统一命令入口（launch / keepalive / attach / watch / doctor / i18n / storage / workbench）
+ │    ├── cli/launcher.mjs       — 跨平台 CDP 启动与保活控制器（Prism 礼让、冷启动保护、0600 原子熔断状态）
+ │    ├── cli/watch-daemon.mjs   — 自适应退避（3s -> 30s）CDP 守护进程、轻量探针与 sag:ext_pack 桥
+ │    ├── cli/bundle.mjs         — 零构建 UMD 拼接器（SHA-256 幂等附着、<=1.6MB 扩展包预注入与一键全清）
  │    └── cli/storage-doctor.mjs — 只读存储诊断、WAL 活跃锁防护与密钥脱敏导出
  └── 渲染层模块化 UMD 核心（packages/core/，全部支持 100% 无损 destroy()）
       ├── coexist.js             — 配置校验、4 档预设、模块目录、宿主礼让与失焦休眠
-      ├── host-i18n*.js          — 10 国语言 WeakMap DOM 翻译引擎 + 465 词条离线库
+      ├── host-i18n*.js          — 10 国语言 WeakMap DOM 翻译引擎 + 465 核心 + ~5k 分层扩展词库（locales/ext/）
       ├── compact-guard.js       — 静默 /compact、视口滚动盾、/clear 轻重开与锚点续接
       ├── draft-guard.js         — 按会话未发送草稿自动保护
       ├── prompt-queue.js        — 流式排队预写与三重安全熔断出队

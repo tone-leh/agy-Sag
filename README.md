@@ -82,7 +82,7 @@ Antigravity 2.x bundles its 12.8 MB web UI inside the notarized Go `language_ser
 - **Strict Content Isolation**: Physically skips `<code>`, `<pre>`, Monaco editors, `.xterm` terminals, Lexical inputs, user/assistant message bubbles, git branch pills, workspace names, and `/slash` command names (translating only the description beside commands).
 - **Zero Memory Leaks & Lossless Hot-Switch**: Stores original node text and whitelisted attributes (`placeholder`, `title`, `aria-label`) in `WeakMap` snapshots with a bounded 8,000-entry FIFO cache. Switching back to `en` or calling `destroy()` restores 100% of the DOM immediately.
 - **Coexistence Arbitration**: Detects Obsidian Prism's host translator (`html[data-ag-prism-host-i18n="active"]`) and yields cleanly by default, or lets you switch to `takeover` in Settings.
-- **Extensible Community Packs & Phrase Collector**: Import custom JSON packs at runtime, toggle `collectMissing` to capture untranslated English UI strings (with automatic secret/URL/path filtering), and validate dictionaries with `npm run i18n:validate`.
+- **Layered Extended Dictionaries (~5,000 entries/locale)**: Uses a 3-tier merge hierarchy (`Custom Imported Pack > Built-in 465 Core > Extended Pack`). Built-in extended packs (`packages/core/locales/ext/*.json`, derived from MIT [`yiheng8023/antigravity-chinese`](https://github.com/yiheng8023/antigravity-chinese) plus multi-language translations) load via three paths: single-locale CDP preload (`<= 1.6 MB`), on-demand zero-port `sag:ext_pack` Watch Bridge requests, and read-only Workbench `/ext/<locale>.json` routes. Toggle `collectMissing` to capture new UI strings and validate dictionaries with `npm run i18n:validate`. See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
 
 ---
 
@@ -102,7 +102,7 @@ cd agy-Sag
 npm run install:plugin
 ```
 
-> **CDP Prerequisite**: Zero-ASAR CDP attachment connects only to an already-open localhost debugging port (`DevToolsActivePort`). Start Antigravity with `--remote-debugging-port=0` (e.g. macOS: `open -a Antigravity --args --remote-debugging-port=0`), or run alongside Obsidian Prism's launcher. `agy-Sag` never modifies `app.asar` and never restarts Antigravity.
+> **CDP Prerequisite**: Zero-ASAR CDP attachment connects only to an already-open localhost debugging port (`DevToolsActivePort`). Start Antigravity with `node cli/sag-cli.mjs launch --port=9222` (macOS/Windows/Linux, yields automatically to Obsidian Prism and never force-kills existing processes), or launch directly via `open -a Antigravity --args --remote-debugging-port=9222`. `agy-Sag` never modifies `app.asar`.
 
 ### 2. Preview All Modules Safely Offline (Zero-Touch Workbench)
 
@@ -117,6 +117,13 @@ Opens `http://127.0.0.1:4179` with an interactive offline sandbox covering 10-la
 ### 3. Unified CLI Reference
 
 ```bash
+# Preview safe cross-platform CDP launch plan (read-only; yields to Obsidian Prism)
+node cli/sag-cli.mjs launch --dry-run --json
+
+# Launch Antigravity with CDP port or keepalive watch loop (supports --auto-relaunch-cold-start within 5s)
+node cli/sag-cli.mjs launch --port=9222
+node cli/sag-cli.mjs keepalive --preset=power --lang=zh-CN
+
 # Attach once with optional preset & display language
 node cli/sag-cli.mjs attach --preset=power --lang=zh-CN
 
@@ -151,13 +158,14 @@ node cli/sag-cli.mjs remove
 ```text
 Antigravity 2.0 Host (Electron 44 + language_server localhost UI)
  ├── Sidecar / CLI Layer (Node.js >= 22, 0 npm dependencies)
- │    ├── cli/sag-cli.mjs        — Unified CLI (attach, watch, doctor, i18n, storage, workbench)
- │    ├── cli/watch-daemon.mjs   — Adaptive-backoff (3s -> 30s) CDP watcher + lightweight probe
- │    ├── cli/bundle.mjs         — Deterministic UMD bundler with SHA-256 idempotent attach & clean remove
+ │    ├── cli/sag-cli.mjs        — Unified CLI (launch, keepalive, attach, watch, doctor, i18n, storage, workbench)
+ │    ├── cli/launcher.mjs       — Cross-platform CDP launcher/keepalive with Prism yield & 0600 atomic circuit-breaker state
+ │    ├── cli/watch-daemon.mjs   — Adaptive-backoff (3s -> 30s) CDP watcher + lightweight probe & sag:ext_pack bridge
+ │    ├── cli/bundle.mjs         — Deterministic UMD bundler with SHA-256 hash idempotency, <=1.6MB ext preload & clean remove
  │    └── cli/storage-doctor.mjs — Read-only storage audit, WAL lock guard & secret-redacted export
  └── Renderer UMD Modules (packages/core/, 100% lossless destroy())
       ├── coexist.js             — Config schema, presets, module catalog, owner yield & hibernation
-      ├── host-i18n*.js          — 10-language WeakMap DOM translator + 465-entry packs + conflict guard
+      ├── host-i18n*.js          — 10-language WeakMap DOM translator + 465 core + layered ~5k/locale ext packs (locales/ext/)
       ├── compact-guard.js       — Auto-silent /compact, scroll shield, clean-slate /clear & recovery
       ├── draft-guard.js         — Per-session unsent draft vault
       ├── prompt-queue.js        — Streaming follow-up queue with triple safety circuit-breakers

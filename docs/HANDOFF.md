@@ -38,11 +38,14 @@
   - Computes 4 live synergy effects: `dual-shield` (`safeAutoAccept × NOV guard`), `context-memory` (`compactGuard × NOV mem/xray`), `radar-dedup` (`sessionRadar × NOV radar`), `dual-star-hub`.
 
 ### Unified CLI & Offline Workbench (`cli/`, `workbench/`)
-- `cli/sag-cli.mjs`: `attach`, `watch`, `status`, `remove`, `doctor`, `presets`, `i18n list|validate`, `storage audit|backup|export`, `nov status|enable|disable|preset|locale`, `install`, `workbench`.
+- `cli/sag-cli.mjs`: `launch`, `keepalive`, `attach`, `watch`, `status`, `remove`, `doctor`, `presets`, `i18n list|validate`, `storage audit|backup|export`, `nov status|enable|disable|preset|locale`, `install`, `workbench`.
+- `cli/launcher.mjs`: Cross-platform zero-ASAR CDP launcher & `SagKeepaliveController` (macOS/Windows/Linux process probing, Prism `.daemon.pid` JSON + `.relaunch-prompt-state.json` yield, guide-only default with opt-in `<= 5,000 ms` graceful cold-start relaunch, two-layer circuit breakers, `0600` atomic `launch-state.json`).
 - `cli/storage-doctor.mjs`: Read-only storage audit, multi-DB SQLite WAL/SHM guard, symlink-safe redacted session export & safe backup.
-- `workbench/server.mjs`: Zero-touch offline simulator (`http://127.0.0.1:4179`) covering all modules, 10-language live translation, and interactive `agy-NOV` bidirectional synergy.
+- `workbench/server.mjs`: Zero-touch offline simulator (`http://127.0.0.1:4179`) covering all modules, 10-language live translation (including `/ext/<locale>.json` extended packs), and interactive `agy-NOV` bidirectional synergy.
 
-### Post-1.0 Polish (Unreleased)
+### Post-1.0 Polish & Expansion (Unreleased)
+- **Layered 9-Locale Extended UI Dictionaries (`packages/core/locales/ext/*.json`, `scripts/i18n/`, `THIRD_PARTY_NOTICES.md`)**: Expanded target-locale coverage to ~5,375–5,491 entries per locale (`zh-CN`: 465 core + 4,602 ext + 424 patterns = 5,491; `zh-TW`: 5,430; `ja`: 5,421; `ko`: 5,422; `es`: 5,407; `fr`: 5,375; `de`: 5,381; `ru`: 5,424; `pt-BR`: 5,399) using strict precedence (`Custom > 465 Core > Extended`), loaded via single-locale CDP preload (`<= 1.6 MB`), zero-port `sag:ext_pack` bridge requests, or Workbench `/ext/<locale>.json`. `zh-CN` adapts MIT-licensed `yiheng8023/antigravity-chinese` (`v3.3.65`); the other 8 locales were independently translated from the deduplicated English source table.
+- **Cross-Platform CDP Launcher & Prism JSON PID Fix (`cli/launcher.mjs`, `cli/watch-daemon.mjs`)**: Fixed `isPrismDaemonActive()` to parse JSON `.daemon.pid` files and added safe cross-platform `launch` / `keepalive` automation.
 - **Visual & Accessibility Fixes (7 items, see `CHANGELOG.md`)**: Keyboard `Enter`/`Space` header toggle with focus retention across re-renders, removal of redundant `✦` prefix adjacent to status dots, `168px` minimum column width on `.ag-sag-nov-grid` eliminating English label truncation, pure-CSS dropdown indicator on `.ag-sag-select`, high-contrast light-theme active chips, unified `:focus-visible` focus rings, and workbench multi-locale sync.
 - **Settings Panel Locale Sync Fix**: Added `Внешний вид` (`ru`) and `Aparência` (`pt-BR`) headings plus mounted-section & dialog `aria-label` anchor fallbacks in `prism-bridge.js` so language badges/selectors stay synced across all 10 locales and custom title overrides.
 - **Custom Language Pack Import/Export & Hardening**: Added `sanitizeImportedPack()` in `host-i18n-packs.js` (256 KB JSON cap, 2000 exact entries, 500-char key/value/replace caps, 50 patterns, 200-char source cap, prototype-key guard, backreference `\1`..`\9` / `\k<name>` rejection, linear-time nested quantifier / alternation-backtracking rejection), local persistence (`agSag.hostI18n.customPacks.v1` with `options.customHostI18nPacks` precedence), and Settings UI controls (`Import JSON`, collapsible editor + `Apply`, `Export Custom Pack`, opt-in `Collect Missing` + `Export Missing Template`, `Clear Custom Packs`).
@@ -52,14 +55,15 @@
 
 Run inside repository root:
 ```bash
-npm test                  # 141/141 tests passing (node --test)
-npm run i18n:validate     # 10 locales, 465 exact + 25 patterns per target locale, 0 errors
-npm run workbench:smoke   # HTTP 200, 13 markers verified
+npm test                                  # 158/158 tests passing (node --test)
+npm run i18n:validate                     # 10 built-in + 9 extended packs, 0 errors
+npm run workbench:smoke                   # HTTP 200, 14 markers verified
+node cli/sag-cli.mjs launch --dry-run --json  # Read-only launch plan + Prism yield check
 ```
 
 ## 4. Recommended Next Priorities for the Dedicated `agy-Sag` Agent
 
-1. **Collect Real Antigravity 2.35+ UI Strings** *(requires user authorization to attach to live Antigravity)*: Run `npm run doctor`, attach with `hostI18nCollectMissing: true` or export missing templates via the new Settings UI to expand the 465-entry dictionary.
-2. **Cross-Platform Zero-ASAR CDP Launcher & Keepalive**: Consider macOS/Windows zero-ASAR CDP launcher helpers that respect Obsidian Prism's `.daemon.pid` / `.relaunch-prompt-state.json` without double relaunch prompts.
-3. **Hero Preview Assets**: Refresh `assets/hero-dark.svg` / `assets/hero-light.svg` to showcase the v1.0 native Settings hub, custom language pack controls, and dual-star panel.
-4. **Slash Commands & Marketplace Dictionary Expansion**: Expand real Antigravity UI coverage for Slash Commands / Marketplace panels while preserving strict safety invariants (0 `:has()`, 0 runtime deps, fail-closed CDP bridge, non-bypassable `HARD_DENY_PATTERNS`).
+1. **Real Windows/Linux Host Verification for Launcher & Keepalive** *(requires user environment)*: Verify `launch` and `keepalive` on native Windows (`powershell.exe` / `wmic` / `taskkill`) and Linux desktops alongside live Antigravity restarts (verified only via mocked tests and macOS `--dry-run` so far).
+2. **Human Spot-Check & Terminology Polish of Extended Packs**: Audit and refine the generated 8-locale extended dictionaries (`packages/core/locales/ext/*.json`) against live Antigravity 2.35+ UI contexts.
+3. **Collect Real Antigravity 2.35+ UI Strings** *(requires user authorization to attach to live Antigravity)*: Run `npm run doctor`, attach with `hostI18nCollectMissing: true` or export missing templates via the Settings UI to capture any new phrases beyond v3.3.65.
+4. **Hero Preview Assets**: Refresh `assets/hero-dark.svg` / `assets/hero-light.svg` to showcase the v1.0 native Settings hub, layered extended localization, and dual-star panel.
