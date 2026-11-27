@@ -2,6 +2,15 @@
 
 All notable changes to **agy-Sag** *(formerly Antigravity Session Guard / 领航哨)* are documented in this file.
 
+## [Unreleased]
+
+### Added
+- **Custom Language Pack Import/Export UI (`packages/core/host-i18n-packs.js`, `packages/core/index.js`, `packages/core/prism-bridge.js`, `packages/core/i18n.js`)**: Added strict `sanitizeImportedPack()` validation (256 KB JSON cap, 2000 exact entries, 500-char string cap, 50 patterns, 200-char pattern source cap, 500-char replace cap, linear-time ReDoS & backreference/prototype-key rejection), local persistence (`agSag.hostI18n.customPacks.v1`), and Settings UI actions (`Import JSON`, collapsible editor + `Apply`, `Export Custom Pack`, opt-in `Collect Missing` + `Export Missing Template`, `Clear Custom Packs`).
+
+### Fixed
+- **Visual Polish & Accessibility (`packages/core/styles.js`, `packages/core/prism-bridge.js`, `packages/core/i18n.js`, `workbench/server.mjs`)**: Added keyboard `Enter`/`Space` toggling and focus retention on collapsible Settings headers and SubTabs, removed redundant `✦` prefix adjacent to status dots, expanded `.ag-sag-nov-grid` minimum card width to `168px` to eliminate English label truncation, added pure-CSS dropdown indicators on `.ag-sag-select`, improved light-theme chip contrast, added unified `:focus-visible` focus rings across interactive controls, and synced workbench language switches.
+- **Settings Panel Locale Sync (`packages/core/prism-bridge.js`)**: Added missing `Внешний вид` (`ru`) and `Aparência` (`pt-BR`) headings plus already-mounted / `aria-label` fallback anchoring so Settings language badges and selectors stay synchronized across all 10 locales and custom title translations.
+
 ## [1.0.0] - 2026-11-27
 
 ### Added

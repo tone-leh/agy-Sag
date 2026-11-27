@@ -42,18 +42,24 @@
 - `cli/storage-doctor.mjs`: Read-only storage audit, multi-DB SQLite WAL/SHM guard, symlink-safe redacted session export & safe backup.
 - `workbench/server.mjs`: Zero-touch offline simulator (`http://127.0.0.1:4179`) covering all modules, 10-language live translation, and interactive `agy-NOV` bidirectional synergy.
 
+### Post-1.0 Polish (Unreleased)
+- **Visual & Accessibility Fixes (7 items, see `CHANGELOG.md`)**: Keyboard `Enter`/`Space` header toggle with focus retention across re-renders, removal of redundant `✦` prefix adjacent to status dots, `168px` minimum column width on `.ag-sag-nov-grid` eliminating English label truncation, pure-CSS dropdown indicator on `.ag-sag-select`, high-contrast light-theme active chips, unified `:focus-visible` focus rings, and workbench multi-locale sync.
+- **Settings Panel Locale Sync Fix**: Added `Внешний вид` (`ru`) and `Aparência` (`pt-BR`) headings plus mounted-section & dialog `aria-label` anchor fallbacks in `prism-bridge.js` so language badges/selectors stay synced across all 10 locales and custom title overrides.
+- **Custom Language Pack Import/Export & Hardening**: Added `sanitizeImportedPack()` in `host-i18n-packs.js` (256 KB JSON cap, 2000 exact entries, 500-char key/value/replace caps, 50 patterns, 200-char source cap, prototype-key guard, backreference `\1`..`\9` / `\k<name>` rejection, linear-time nested quantifier / alternation-backtracking rejection), local persistence (`agSag.hostI18n.customPacks.v1` with `options.customHostI18nPacks` precedence), and Settings UI controls (`Import JSON`, collapsible editor + `Apply`, `Export Custom Pack`, opt-in `Collect Missing` + `Export Missing Template`, `Clear Custom Packs`).
+  - *Known Conservative Trade-off*: The linear-time regex validator treats any group containing `|`, `?`, `+`, `*`, or `{m,n}` followed by an outer `+`/`*`/`{` (including some benign `(?:...)+` alternations) as unsafe backtracking risk and rejects it intentionally rather than risking main-thread ReDoS.
+
 ## 3. Verification Baseline
 
 Run inside repository root:
 ```bash
-npm test                  # 130/130 tests passing (node --test)
+npm test                  # 141/141 tests passing (node --test)
 npm run i18n:validate     # 10 locales, 465 exact + 25 patterns per target locale, 0 errors
-npm run workbench:smoke   # HTTP 200, 12 markers verified
+npm run workbench:smoke   # HTTP 200, 13 markers verified
 ```
 
 ## 4. Recommended Next Priorities for the Dedicated `agy-Sag` Agent
 
-1. **Review & Commit `v1.0.0`**: Inspect `git status` / `git diff`, organize clean commit(s), and push to `origin main` (`tone-leh/agy-Sag`) + optionally tag `v1.0.0` once approved by the user.
-2. **Real-Client Opt-In Verification** (only when user authorizes touching live Antigravity): Run `npm run doctor`, test `npm run workbench`, and optionally collect real Antigravity 2.35+ untranslated UI strings with `hostI18nCollectMissing: true` to further expand the 465-entry dictionary.
-3. **Visual Polish & Native Packaging**: Polish `assets/hero-dark.svg` / `assets/hero-light.svg` showcasing the v1.0 native Settings hub & dual-star panel, and consider macOS/Windows zero-ASAR CDP launcher helpers that respect Obsidian Prism's `.daemon.pid` / `.relaunch-prompt-state.json` without double relaunch prompts.
-4. **Community Ecosystem Expansion**: Add import/export UI for user JSON translation packs in Settings, expand real Antigravity UI coverage for Slash Commands / Marketplace panels, and maintain strict safety invariants (0 `:has()`, 0 runtime deps, fail-closed CDP bridge, non-bypassable `HARD_DENY_PATTERNS`).
+1. **Collect Real Antigravity 2.35+ UI Strings** *(requires user authorization to attach to live Antigravity)*: Run `npm run doctor`, attach with `hostI18nCollectMissing: true` or export missing templates via the new Settings UI to expand the 465-entry dictionary.
+2. **Cross-Platform Zero-ASAR CDP Launcher & Keepalive**: Consider macOS/Windows zero-ASAR CDP launcher helpers that respect Obsidian Prism's `.daemon.pid` / `.relaunch-prompt-state.json` without double relaunch prompts.
+3. **Hero Preview Assets**: Refresh `assets/hero-dark.svg` / `assets/hero-light.svg` to showcase the v1.0 native Settings hub, custom language pack controls, and dual-star panel.
+4. **Slash Commands & Marketplace Dictionary Expansion**: Expand real Antigravity UI coverage for Slash Commands / Marketplace panels while preserving strict safety invariants (0 `:has()`, 0 runtime deps, fail-closed CDP bridge, non-bypassable `HARD_DENY_PATTERNS`).
