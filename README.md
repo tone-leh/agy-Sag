@@ -8,6 +8,8 @@ Live **10-language native UI translation** (~5,400 entries per locale), unified 
 
 > **Version:** `v1.3.0` · **License:** [MIT](./LICENSE) · **Runtime:** Node.js >= 22 · **Dependencies:** Zero runtime npm deps · **Architecture:** Zero-ASAR CDP (Lossless) · **Companion:** [`agy-NOV`](https://github.com/tone-leh/agy-NOV)
 
+> **Non-Affiliation Disclaimer:** `agy-Sag` is an independent open-source community project and is not affiliated with, sponsored by, or endorsed by Google LLC. References to "Antigravity" and "Google" are used solely to describe software compatibility.
+
 ---
 
 ## Best Together: `agy-NOV` + `agy-Sag` (Dual-Star Synergy)
@@ -207,6 +209,34 @@ npm run doctor           # Read-only local environment diagnostics
 ```
 
 See [docs/ROADMAP.md](./docs/ROADMAP.md) and [docs/PRODUCT-IA.md](./docs/PRODUCT-IA.md) for the multi-phase architecture and upcoming modules.
+
+---
+
+## Acknowledgments, Upstream Credits & Inspiration
+
+Open-source ecosystems move forward by standing on the shoulders of generous builders. We sincerely thank the authors and communities behind the projects below.
+
+### 1. Upstream Open-Source Resources Adapted
+
+Full upstream copyright headers and license texts are preserved verbatim in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md):
+
+- **[`yiheng8023/antigravity-chinese`](https://github.com/yiheng8023/antigravity-chinese)** (`v3.3.65`, `MIT License`) — `packages/core/locales/ext/zh-CN.json` adapts its Simplified Chinese UI dictionary and dynamic pattern templates (converted to `{N}` capture syntax and deduplicated against `agy-Sag`'s 465-entry core pack), and the remaining 8 extended language packs were independently translated from the deduplicated English source table. In `agy-Sag`, UI localization runs through a Zero-ASAR DOM engine with `WeakMap` lossless restore.
+
+### 2. Design Inspiration & Ecosystem References
+
+The following projects inspired our UX workflows, theme aesthetics, status HUD ergonomics, and coexistence architecture. All corresponding features in `agy-Sag` are clean-room independent implementations under the MIT License:
+
+- **[Obsidian Prism (`RMvdesi/obsidian-prism`)](https://github.com/RMvdesi/obsidian-prism)** (`GPL-3.0`) — A trailblazing native optical UI suite for Google Antigravity. Inspired our **Settings → Appearance** embedded control hub, zero-`:has()` optical theme philosophy, `CSS.highlights` velvet stream feathering, FastDOM smooth typing caret, `0fps` semantic horizon glow, long code-block folding & outline navigation, `plugin://` extension iframe theme synchronization, `/btw` context-menu ergonomics, and peaceful CDP/daemon coexistence protocol.
+- **[AGY Beautify (`AreSet01/antigravity-theme`)](https://github.com/AreSet01/antigravity-theme)** — Antigravity Client Themes & Beautification Pack. Its creative stylized themes (Matcha, Persona 5 Phantom, Doodle, Pixel) and rapid CDP skin switching directly inspired `themeStudio`'s stylized skin gallery and 8 one-click visual looks.
+- **[`0DNANCY/agy-claude-style`](https://github.com/0DNANCY/agy-claude-style)** (`MIT`) — Early pioneer in Antigravity dark-mode styling, visual polish, and lightweight injection patterns.
+- **[`sirmalloc/ccstatusline`](https://github.com/sirmalloc/ccstatusline)** (`MIT`) & **[`Owloops/claude-powerline`](https://github.com/Owloops/claude-powerline)** (`MIT`) — Inspired the compact, modular, toggle-driven layout of our composer segmented status capsule HUD.
+- **[`SuperClaude-Org/SuperClaude_Framework`](https://github.com/SuperClaude-Org/SuperClaude_Framework)** (`MIT`) — Inspired structured slash-command and engineering prompt template workflows in `promptLibrary`.
+- **[`cline/cline`](https://github.com/cline/cline)** (`Apache-2.0`) & **[`winfunc/opcode`](https://github.com/winfunc/opcode)** (`AGPL-3.0`, formerly *Claudia*) — Inspired per-turn checkpoint recovery (`⤺` 3-way rewind menu paired with `agy-NOV guard`), context visibility, and cross-session archive management.
+- **[`tone-leh/agy-NOV`](https://github.com/tone-leh/agy-NOV)** (`MIT`) — Our companion zero-CDP native MCP Apps & Lifecycle Hooks workbench sharing the `--nov-*` / `--sag-*` visual token system and zero-overlap dual-star design.
+
+> If you notice any missing attribution or inaccurate credit, please open an Issue or Pull Request and we will update it promptly.
+
+---
 
 ## License
 

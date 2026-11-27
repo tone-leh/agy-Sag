@@ -8,6 +8,8 @@
 
 > **当前版本：** `v1.3.0` · **开源协议：** [MIT](./LICENSE) · **运行环境：** Node.js >= 22 · **外部依赖：** 零 npm 运行依赖 · **架构路线：** Zero-ASAR 无损 CDP · **双星搭档：** [`agy-NOV`](https://github.com/tone-leh/agy-NOV)
 
+> **非官方社区项目与商标免责声明：** `agy-Sag` 为独立的开源社区项目，与 Google LLC 无任何隶属、赞助或官方背书关系；文中提及的 “Antigravity” 与 “Google” 仅作软件兼容性说明用途。
+
 ---
 
 ## 双星组合：推荐同时安装 `agy-NOV` + `agy-Sag`（零重叠深度协同）
@@ -207,6 +209,34 @@ npm run doctor           # 只读本机环境与双星共存诊断
 ```
 
 完整演进路线与产品信息架构见 [docs/ROADMAP.md](./docs/ROADMAP.md) 与 [docs/PRODUCT-IA.md](./docs/PRODUCT-IA.md)。
+
+---
+
+## 致谢、上游引用与灵感来源
+
+开源生态的持续进化离不开众多创作者的无私分享。以下列出本项目在研发过程中直接引用的上游开源资源，以及给予我们关键产品设计灵感与交互参考的优秀社区项目，谨此致谢。
+
+### 1. 引用的上游开源资源
+
+完整原始版权声明与许可证全文忠实保留于 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)：
+
+- **[`yiheng8023/antigravity-chinese`](https://github.com/yiheng8023/antigravity-chinese)**（`v3.3.65`，`MIT License`）—— `packages/core/locales/ext/zh-CN.json` 引用并适配了其简体中文 UI 词典与动态正则模板（转换捕获语法为 `{N}` 并与 `agy-Sag` 内置 465 核心词库去重），其余 8 语种扩展词库基于其去重后的英文界面词条表独立重译；在 `agy-Sag` 中以 Zero-ASAR 零改动宿主安装包与 `WeakMap` 无损还原引擎运行。
+
+### 2. 设计灵感与生态参考致谢
+
+下列开源项目为 `agy-Sag` 的交互设计、主题美学、状态栏信息密度与共存机制提供了重要启发；本项目中的对应功能均基于 MIT 协议进行净室独立实现：
+
+- **[Obsidian Prism（`RMvdesi/obsidian-prism`）](https://github.com/RMvdesi/obsidian-prism)**（`GPL-3.0`）—— Google Antigravity 原生光学界面套件的标杆先驱。启发了我们在 **设置 → 外观（Settings → Appearance）** 嵌入统一控制中心、零 `:has()` 光学主题体系、`CSS.highlights` 五级水墨流式淡入、FastDOM 丝滑输入光标、`0fps` 底缘语义微光、长代码块折叠与侧边大纲、`plugin://` 扩展面板变量同步、`/btw` 右键工作流，以及双插件 CDP 与守护进程和平共存礼让机制。
+- **[AGY Beautify（`AreSet01/antigravity-theme`）](https://github.com/AreSet01/antigravity-theme)** —— Antigravity 客户端多风格主题与美化包。其极具辨识度的风格化皮肤创意（抹茶手帐 Matcha、怪盗猩红 Phantom、线稿素描 Doodle、像素终端 Pixel）与免重启即时换肤理念，直接启发了 `themeStudio` 的风格皮肤画廊与 8 套一键外观方案设计。
+- **[`0DNANCY/agy-claude-style`](https://github.com/0DNANCY/agy-claude-style)**（`MIT`）—— Antigravity 早期界面美化、暗色配色架构与轻量化 CDP 注入思路的重要先行参考。
+- **[`sirmalloc/ccstatusline`](https://github.com/sirmalloc/ccstatusline)**（`MIT`）与 **[`Owloops/claude-powerline`](https://github.com/Owloops/claude-powerline)**（`MIT`）—— 启发了输入框底栏紧凑型多段式状态胶囊 HUD（按模块开关动态增删分段）的视觉层级与信息密度。
+- **[`SuperClaude-Org/SuperClaude_Framework`](https://github.com/SuperClaude-Org/SuperClaude_Framework)**（`MIT`）—— 启发了 `promptLibrary` 面向工程研发的斜杠指令与结构化提示词模板体系。
+- **[`cline/cline`](https://github.com/cline/cline)**（`Apache-2.0`）与 **[`winfunc/opcode`](https://github.com/winfunc/opcode)**（`AGPL-3.0`，原 *Claudia*）—— 启发了对话流每轮 `⤺` 三选一恢复微菜单（衔接 `agy-NOV guard` 检查点回滚）、上下文构成透视与跨会话档案管理体验。
+- **[`tone-leh/agy-NOV`](https://github.com/tone-leh/agy-NOV)**（`MIT`）—— 本项目的纯原生双星搭档，提供零 CDP MCP Apps 与 Lifecycle Hooks 工程工作台、统一 `--nov-*` / `--sag-*` 视觉设计语言及零重叠协同架构。
+
+> 若您在致谢名单中发现任何遗漏、署名偏差或链接错误，欢迎随时提交 Issue 或 Pull Request，我们将第一时间核实补充。
+
+---
 
 ## 开源协议
 

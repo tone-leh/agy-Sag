@@ -37,3 +37,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+---
+
+> For a full list of community projects that inspired `agy-Sag`'s design, UX workflows, and ecosystem coexistence (clean-room independent implementations under `agy-Sag`'s MIT License), see the **Acknowledgments, Upstream Credits & Inspiration** section in [README.md](./README.md) / [README.zh-CN.md](./README.zh-CN.md).
