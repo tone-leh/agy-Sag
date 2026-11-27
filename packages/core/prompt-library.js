@@ -472,9 +472,9 @@
     }
 
     function insertIntoComposer(text, opts = {}) {
-      const payload = String(text || '');
-      if (!payload) return { ok: false, reason: 'empty' };
-      const mode = opts.mode || insertMode || 'append';
+      const payload = String(text ?? '');
+      const mode = (typeof opts === 'string' ? opts : opts?.mode) || insertMode || 'append';
+      if (!payload && mode !== 'replace') return { ok: false, reason: 'empty' };
       const scope = getScope();
       const ed = ctxSrc?.findComposerEditor ? ctxSrc.findComposerEditor(doc, scope) : null;
       if (!ed) return { ok: false, reason: 'no-editor' };
@@ -798,7 +798,13 @@
         inp.className = 'ag-sag-search-input';
         inp.setAttribute('data-ag-sag-pl-var', v.name);
         inp.placeholder = v.defaultValue || `{{${v.name}}}`;
-        inp.value = varValues[v.name] ?? v.defaultValue ?? '';
+        const prefillSel =
+          selectionContext && /^(?:selection|code|target|error|topic|snippet|subject|issue)$/i.test(v.name)
+            ? selectionContext
+            : '';
+        const initVal = varValues[v.name] ?? (prefillSel || v.defaultValue || '');
+        varValues[v.name] = initVal;
+        inp.value = initVal;
         inp.addEventListener('input', () => {
           varValues[v.name] = inp.value;
           syncPreview();
@@ -1146,14 +1152,187 @@
       });
     }
 
-    function open() {
+    let selectionContext = '';
+    let selPillEl = null;
+    let ctxMenuEl = null;
+    let extraListenersOff = [];
+
+    function removeSelectionPill() {
+      try { selPillEl?.remove?.(); } catch {}
+      selPillEl = null;
+    }
+
+    function removeContextMenu() {
+      try { ctxMenuEl?.remove?.(); } catch {}
+      ctxMenuEl = null;
+    }
+
+    function hasPrismContextMenu() {
+      if (win?.__agPrismBtwMenu || win?.__agPrismContextMenu) return true;
+      if (doc?.documentElement?.hasAttribute?.('data-ag-cs-style')) return true;
+      if (doc?.getElementById?.('ag-cs-settings-sec')) return true;
+      if (doc?.querySelector?.('.ag-cs-ctx-menu, [data-ag-prism-ctx-menu="1"]')) return true;
+      return false;
+    }
+
+    function extractPathFromTarget(target) {
+      if (!target || target.nodeType !== 1) return '';
+      const attrPath =
+        target.getAttribute?.('data-file-path') ||
+        target.getAttribute?.('data-path') ||
+        target.closest?.('[data-file-path]')?.getAttribute?.('data-file-path') ||
+        '';
+      if (attrPath && attrPath.length <= 260) return attrPath.trim();
+      const tag = String(target.tagName || '').toUpperCase();
+      if (tag === 'CODE' || tag === 'A' || tag === 'SPAN') {
+        const txt = String(target.textContent || '').trim();
+        if (txt.length >= 3 && txt.length <= 200 && /^(?:\.{0,2}\/|~\/|\/)?[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+\.[A-Za-z0-9]{1,8}(?::\d+)?$/.test(txt)) {
+          return txt;
+        }
+      }
+      return '';
+    }
+
+    function getConversationSelectionText() {
+      try {
+        const sel = win?.getSelection?.();
+        const text = String(sel?.toString?.() || '').trim();
+        if (text.length < 4 || text.length > 4000) return '';
+        const anchor = sel?.anchorNode;
+        const el = anchor?.nodeType === 1 ? anchor : anchor?.parentElement;
+        if (!el || isOwnedMutationNode(el) || isEditableTarget(el)) return '';
+        if (typeof el.closest === 'function' && !el.closest('[data-testid="conversation-view"]')) return '';
+        return text;
+      } catch {
+        return '';
+      }
+    }
+
+    function showSelectionPill(selectedText, clientX = 0, clientY = 0) {
+      if (destroyed || !enabled || !doc?.body || !selectedText) {
+        removeSelectionPill();
+        return;
+      }
+      ensureStyle();
+      removeSelectionPill();
+      const pill = coexist?.markOwnedNoTranslate
+        ? coexist.markOwnedNoTranslate(doc.createElement('div'))
+        : doc.createElement('div');
+      pill.className = 'ag-sag-sel-pill';
+      pill.setAttribute('data-testid', 'ag-sag-sel-pill');
+      if (pill.style) {
+        if (clientX > 0) pill.style.left = `${Math.max(12, clientX)}px`;
+        if (clientY > 0) pill.style.top = `${Math.max(12, clientY - 36)}px`;
+      }
+
+      const quoteBtn = doc.createElement('button');
+      quoteBtn.type = 'button';
+      quoteBtn.className = 'ag-sag-code-btn';
+      quoteBtn.setAttribute('data-ag-sag-sel-act', 'quote');
+      quoteBtn.textContent = t('plSelQuoteBtn', 'Quote');
+      quoteBtn.addEventListener('click', (ev) => {
+        ev?.preventDefault?.();
+        ev?.stopPropagation?.();
+        const quoted = `> ${selectedText.replace(/\r?\n/g, '\n> ')}\n\n`;
+        insertIntoComposer(quoted, 'append');
+        removeSelectionPill();
+      });
+
+      const tplBtn = doc.createElement('button');
+      tplBtn.type = 'button';
+      tplBtn.className = 'ag-sag-code-btn';
+      tplBtn.setAttribute('data-ag-sag-sel-act', 'template');
+      tplBtn.textContent = t('plSelTplBtn', 'Use Template');
+      tplBtn.addEventListener('click', (ev) => {
+        ev?.preventDefault?.();
+        ev?.stopPropagation?.();
+        removeSelectionPill();
+        open({ selection: selectedText });
+      });
+
+      pill.appendChild(quoteBtn);
+      pill.appendChild(tplBtn);
+      doc.body.appendChild(pill);
+      selPillEl = pill;
+    }
+
+    function openContextMenu({ selection = '', filePath = '', x = 0, y = 0 } = {}) {
+      if (destroyed || !enabled || !doc?.body) return false;
+      if (hasPrismContextMenu()) return false;
+      if (!selection && !filePath) return false;
+      ensureStyle();
+      removeContextMenu();
+
+      const menu = coexist?.markOwnedNoTranslate
+        ? coexist.markOwnedNoTranslate(doc.createElement('div'))
+        : doc.createElement('div');
+      menu.className = 'ag-sag-ctx-menu';
+      menu.setAttribute('data-testid', 'ag-sag-ctx-menu');
+      menu.setAttribute('role', 'menu');
+      if (menu.style) {
+        menu.style.left = `${Math.max(8, x)}px`;
+        menu.style.top = `${Math.max(8, y)}px`;
+      }
+
+      const addItem = (label, act, fn) => {
+        const b = doc.createElement('button');
+        b.type = 'button';
+        b.className = 'ag-sag-ctx-item';
+        b.setAttribute('role', 'menuitem');
+        b.setAttribute('data-ag-sag-ctx-act', act);
+        b.textContent = label;
+        b.addEventListener('click', (ev) => {
+          ev?.preventDefault?.();
+          ev?.stopPropagation?.();
+          removeContextMenu();
+          fn();
+        });
+        menu.appendChild(b);
+      };
+
+      const copyText = (txt) => {
+        try {
+          if (typeof options.onCopyText === 'function') options.onCopyText(txt);
+          else win?.navigator?.clipboard?.writeText?.(txt);
+        } catch {}
+      };
+
+      if (selection) {
+        addItem(t('plCtxCopySel', 'Copy selection'), 'copy-sel', () => copyText(selection));
+        addItem(t('plCtxQuoteSel', 'Quote into composer'), 'quote-sel', () => {
+          insertIntoComposer(`> ${selection.replace(/\r?\n/g, '\n> ')}\n\n`, 'append');
+        });
+        addItem(t('plCtxUseTpl', 'Fill into Prompt Template…'), 'tpl-sel', () => {
+          open({ selection });
+        });
+        addItem(t('plCtxCompactFocus', 'Fill /compact focusing on this'), 'compact-sel', () => {
+          const brief = selection.replace(/\s+/g, ' ').trim().slice(0, 140);
+          insertIntoComposer(`/compact Focus on: ${brief}`, 'replace');
+        });
+      }
+      if (filePath) {
+        addItem(t('plCtxCopyPath', 'Copy file path'), 'copy-path', () => copyText(filePath));
+        addItem(t('plCtxInsertAt', 'Insert @file reference'), 'insert-at', () => {
+          insertIntoComposer(`@${filePath} `, 'append');
+        });
+      }
+
+      doc.body.appendChild(menu);
+      ctxMenuEl = menu;
+      return true;
+    }
+
+    function open(openOpts = {}) {
       if (destroyed || !enabled) return false;
+      selectionContext = typeof openOpts?.selection === 'string' ? openOpts.selection.trim().slice(0, 1200) : '';
       modalOpen = true;
       activeVarItem = null;
       editorMode = false;
       editingSnippetId = null;
       insertMode = 'append';
       selectedIndex = 0;
+      removeSelectionPill();
+      removeContextMenu();
       renderModal();
       void refreshNovTemplates();
       return true;
@@ -1164,6 +1343,7 @@
       activeVarItem = null;
       editorMode = false;
       editingSnippetId = null;
+      selectionContext = '';
       if (backdropEl) backdropEl.hidden = true;
     }
 
@@ -1247,6 +1427,66 @@
       doc.addEventListener?.('keydown', onKeyDown, true);
       keydownOff = () => doc.removeEventListener?.('keydown', onKeyDown, true);
 
+      const onInputTrigger = (ev) => {
+        if (destroyed || !enabled || modalOpen) return;
+        const target = ev?.target;
+        if (!target || !isEditableTarget(target) || isOwnedMutationNode(target)) return;
+        const ed = ctxSrc?.findComposerEditor ? ctxSrc.findComposerEditor(doc, getScope()) : null;
+        if (ed && target !== ed && !ed.contains?.(target)) return;
+        const val = String(ctxSrc?.readComposerDraft ? ctxSrc.readComposerDraft(doc, getScope()) : target.value || '').trim();
+        if (val === '//') {
+          if (ed && (String(ed.tagName || '').toUpperCase() === 'TEXTAREA' || String(ed.tagName || '').toUpperCase() === 'INPUT')) {
+            ed.value = '';
+          } else {
+            insertIntoComposer('', { mode: 'replace' });
+          }
+          open();
+        }
+      };
+
+      const onMouseUp = (ev) => {
+        if (destroyed || !enabled || modalOpen) return;
+        if (isOwnedMutationNode(ev?.target)) return;
+        removeContextMenu();
+        const selText = getConversationSelectionText();
+        if (selText) {
+          showSelectionPill(selText, Number(ev?.clientX) || 0, Number(ev?.clientY) || 0);
+        } else {
+          removeSelectionPill();
+        }
+      };
+
+      const onDocClick = (ev) => {
+        if (ctxMenuEl && !isOwnedMutationNode(ev?.target)) removeContextMenu();
+        if (selPillEl && !isOwnedMutationNode(ev?.target)) {
+          if (!getConversationSelectionText()) removeSelectionPill();
+        }
+      };
+
+      const onContextMenu = (ev) => {
+        if (destroyed || !enabled || !ev) return;
+        if (hasPrismContextMenu()) return;
+        const target = ev.target;
+        if (!target || isOwnedMutationNode(target) || isEditableTarget(target)) return;
+        if (typeof target.closest === 'function' && !target.closest('[data-testid="conversation-view"]')) return;
+        const selText = getConversationSelectionText();
+        const filePath = extractPathFromTarget(target);
+        if (!selText && !filePath) return;
+        if (openContextMenu({ selection: selText, filePath, x: Number(ev.clientX) || 0, y: Number(ev.clientY) || 0 })) {
+          ev.preventDefault?.();
+          ev.stopPropagation?.();
+        }
+      };
+
+      const addDocL = (evName, fn, cap = false) => {
+        doc.addEventListener?.(evName, fn, cap);
+        extraListenersOff.push(() => doc.removeEventListener?.(evName, fn, cap));
+      };
+      addDocL('input', onInputTrigger, true);
+      addDocL('mouseup', onMouseUp, false);
+      addDocL('click', onDocClick, true);
+      addDocL('contextmenu', onContextMenu, false);
+
       if (options.autoObserve !== false && typeof win?.MutationObserver === 'function' && doc.body) {
         domObserver = new win.MutationObserver((records) => {
           if (!enabled || destroyed) return;
@@ -1283,6 +1523,11 @@
         try { keydownOff(); } catch {}
         keydownOff = null;
       }
+      while (extraListenersOff.length) {
+        try { extraListenersOff.pop()(); } catch {}
+      }
+      removeSelectionPill();
+      removeContextMenu();
       if (domObserver) {
         try { domObserver.disconnect(); } catch {}
         domObserver = null;
@@ -1366,6 +1611,7 @@
       setNovTemplates,
       refreshNovTemplates,
       insertIntoComposer,
+      openContextMenu,
       getDebugState,
       destroy,
     };

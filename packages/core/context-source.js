@@ -233,6 +233,122 @@
     };
   }
 
+  /**
+   * Pure DOM local context breakdown (zero external calls, zero credentials).
+   * Splits visible conversation text into user prompts, assistant prose, and code/tool output,
+   * plus Top-3 heaviest turns for instant jump navigation.
+   */
+  function analyzeContextBreakdown(doc, scopeEl = null) {
+    const vw = resolveActiveConversationView(doc, scopeEl);
+    if (!vw || typeof vw.querySelectorAll !== 'function') return null;
+
+    const userBubbles = Array.from(vw.querySelectorAll('[data-testid="user-message-bubble"]') || []);
+    const assistantNodes = Array.from(
+      vw.querySelectorAll('[data-testid="planner-response-text"], [data-testid="agent-response"]') || []
+    );
+    if (userBubbles.length === 0 && assistantNodes.length === 0) return null;
+
+    const measureOwnedExcludedLen = (node) => {
+      if (!node) return 0;
+      const raw = String(node.textContent || '');
+      let ownedLen = 0;
+      const owned = node.querySelectorAll?.('[data-ag-sg-owned="1"], [data-ag-sag-owned="1"]') || [];
+      for (let i = 0; i < owned.length; i++) {
+        ownedLen += String(owned[i].textContent || '').length;
+      }
+      return Math.max(0, raw.length - ownedLen);
+    };
+
+    const measureCodeAndToolChars = (root) => {
+      if (!root || typeof root.querySelectorAll !== 'function') return 0;
+      const blocks = Array.from(
+        root.querySelectorAll('pre, [data-testid*="tool"], [data-testid*="step"], details') || []
+      );
+      let total = 0;
+      for (let i = 0; i < blocks.length; i++) {
+        const b = blocks[i];
+        if (b.getAttribute?.('data-ag-sg-owned') === '1' || b.getAttribute?.('data-ag-sag-owned') === '1') continue;
+        // Skip nested match to avoid double counting (e.g., pre inside details)
+        let nested = false;
+        let p = b.parentElement;
+        while (p && p !== root) {
+          if (blocks.includes(p)) {
+            nested = true;
+            break;
+          }
+          p = p.parentElement;
+        }
+        if (nested) continue;
+        total += measureOwnedExcludedLen(b);
+      }
+      return total;
+    };
+
+    let userChars = 0;
+    let assistantChars = 0;
+    let codeToolsChars = 0;
+
+    // Also include standalone tool/step blocks inside conversation view not already inside assistantNodes
+    for (let i = 0; i < userBubbles.length; i++) {
+      userChars += measureOwnedExcludedLen(userBubbles[i]);
+    }
+    for (let i = 0; i < assistantNodes.length; i++) {
+      const a = assistantNodes[i];
+      const totalA = measureOwnedExcludedLen(a);
+      const ct = Math.min(totalA, measureCodeAndToolChars(a));
+      codeToolsChars += ct;
+      assistantChars += Math.max(0, totalA - ct);
+    }
+
+    // Build per-turn weight list (pairing user turn i with assistant turn i when aligned)
+    const turnWeights = [];
+    for (let i = 0; i < userBubbles.length; i++) {
+      const uNode = userBubbles[i];
+      const aNode = assistantNodes[i] || null;
+      const uLen = measureOwnedExcludedLen(uNode);
+      const aLen = aNode ? measureOwnedExcludedLen(aNode) : 0;
+      const tChars = uLen + aLen;
+      const rawPreview = String(uNode.textContent || '').replace(/\s+/g, ' ').trim();
+      turnWeights.push({
+        turnNum: i + 1,
+        chars: tChars,
+        estTokens: Math.max(1, Math.round(tChars / 3.2)),
+        preview: rawPreview.slice(0, 36),
+        node: uNode,
+      });
+    }
+
+    const totalChars = Math.max(1, userChars + assistantChars + codeToolsChars);
+    const totalEstTokens = Math.max(1, Math.round(totalChars / 3.2));
+    const userPct = Math.round((userChars / totalChars) * 100);
+    const codeToolsPct = Math.round((codeToolsChars / totalChars) * 100);
+    const assistantPct = Math.max(0, 100 - userPct - codeToolsPct);
+
+    const topTurns = [...turnWeights]
+      .filter((t) => t.chars > 0)
+      .sort((a, b) => b.chars - a.chars || a.turnNum - b.turnNum)
+      .slice(0, 3)
+      .map((t) => ({
+        ...t,
+        pctOfChat: Math.max(1, Math.round((t.chars / totalChars) * 100)),
+      }));
+
+    return {
+      totalChars,
+      totalEstTokens,
+      userChars,
+      assistantChars,
+      codeToolsChars,
+      shares: {
+        userPct,
+        assistantPct,
+        codeToolsPct,
+      },
+      turnCount: userBubbles.length,
+      topTurns,
+    };
+  }
+
   function withTimeout(promise, ms) {
     return new Promise((resolve) => {
       let done = false;
@@ -390,6 +506,7 @@
     findComposerEditor,
     readComposerDraft,
     readFromPulseShadowDom,
+    analyzeContextBreakdown,
     sampleContextState,
   };
 });

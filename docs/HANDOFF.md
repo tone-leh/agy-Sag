@@ -68,6 +68,13 @@
   - Wired `spec.writeLockActive` into `promptQueue` dispatch circuit-breaker (`spec-write-lock`), surfaced `NOV 🔒` / `NOV · ΔN` on the HUD `nov` segment and Live NOV Feed in Settings `nov`, and added a per-turn `↺` rollback prompt filler (only when `agy-NOV guard` is connected; appends safely, never overwrites drafts or auto-submits).
   - *Phase 7 Evaluation*: Kept cross-session bookmark search in `BookmarkVault` (`Ctrl/Cmd+Shift+B`) and full offline session archival in `storage-doctor` CLI without adding extra renderer bloat, keeping `ru` injection comfortably under the 1.6 MiB hard cap.
   - *IA Simplification Check (PASS)*: Still 13 modules in `Overview`, zero duplicate controls, zero `:has()` / `.ag-cs-` rules, zero `"Prism"` leaks, `186/186` tests passing, and `ru` bundle size `1,604,340 B` (`<= 1,677,721 B`).
+- **v1.2 Phases 8–12 — Zero-Bloat Cockpit Upgrades (`cli/bundle.mjs`, `cli/watch-daemon.mjs`, `packages/core/*.js`, `workbench/server.mjs`, `test/phase8–12*.test.mjs`)**:
+  - **Phase 8**: Added zero-dependency lexer-aware `compactCoreSource()` & Watch `deferExtPack` (`ru` sync `1,513,738 B`, Watch deferred `900,292 B`) plus zero-port read-only `sag:storage_audit` card inside Settings `advanced`.
+  - **Phase 9**: Added pure-DOM `analyzeContextBreakdown()` 3-segment bar + Top-3 heavy turns jump, `lastTurnElapsedSec` timing badge, 5h quota bar, and `Export MD` in HUD quick card.
+  - **Phase 10**: Upgraded `readingNav` with streaming tail guard, `scrollTop` fold compensation, `artifact-view` coverage, Word Wrap, uncapped `Alt+F` searchable outline, 1-click fold-all code/steps, zero-`innerHTML` Mermaid zoom + SVG export; added allowlisted `plugin://` iframe theme variable bridge in `themeStudio` and `denoise: true` condensed Markdown export in `precompactExport`.
+  - **Phase 11**: Added queue inline editing & jump-to-top (`⏫`), 30-item secret-redacted per-session sent prompt history (`Ctrl+↑/↓`), `//` Prompt Library trigger, selection quote/template pill, and Prism-yielding standalone conversation/path context menu.
+  - **Phase 12**: Added per-turn `⤺` 3-way recovery menu (NOV rollback / `/compact` focus / up-to-turn handoff copy), native Settings sidebar `agy-Sag` nav anchor, and `Ctrl/Cmd+Alt+/` dynamic shortcut sheet.
+  - *IA Simplification Check (PASS)*: Strictly **0 new top-level module switches** (stays at 13 modules in `Overview`, 6-Tab Hub), zero `:has()` / `.ag-cs-` CSS rules, zero `"Prism"` leaks in `SAG_UI_PACKS`, `199/199` tests passing (incl. `agy-NOV v0.7` `feed-snapshot.json` + `modules/` path & `startupView` passthrough), `ru` sync bundle `1,513,738 B` (`<= 1,677,721 B`) & Watch deferred `900,292 B`.
 - **Layered 9-Locale Extended UI Dictionaries (`packages/core/locales/ext/*.json`, `scripts/i18n/`, `THIRD_PARTY_NOTICES.md`)**: Expanded target-locale coverage to ~5,375–5,491 entries per locale (`zh-CN`: 465 core + 4,602 ext + 424 patterns = 5,491; `zh-TW`: 5,430; `ja`: 5,421; `ko`: 5,422; `es`: 5,407; `fr`: 5,375; `de`: 5,381; `ru`: 5,424; `pt-BR`: 5,399) using strict precedence (`Custom > 465 Core > Extended`), loaded via single-locale CDP preload (`<= 1.6 MB`), zero-port `sag:ext_pack` bridge requests, or Workbench `/ext/<locale>.json`. `zh-CN` adapts MIT-licensed `yiheng8023/antigravity-chinese` (`v3.3.65`); the other 8 locales were independently translated from the deduplicated English source table.
 - **Cross-Platform CDP Launcher & Prism JSON PID Fix (`cli/launcher.mjs`, `cli/watch-daemon.mjs`)**: Fixed `isPrismDaemonActive()` to parse JSON `.daemon.pid` files and added safe cross-platform `launch` / `keepalive` automation.
 - **Visual & Accessibility Fixes (7 items, see `CHANGELOG.md`)**: Keyboard `Enter`/`Space` header toggle with focus retention across re-renders, removal of redundant `✦` prefix adjacent to status dots, `168px` minimum column width on `.ag-sag-nov-grid` eliminating English label truncation, pure-CSS dropdown indicator on `.ag-sag-select`, high-contrast light-theme active chips, unified `:focus-visible` focus rings, and workbench multi-locale sync.
@@ -79,9 +86,9 @@
 
 Run inside repository root:
 ```bash
-npm test                                  # 186/186 tests passing (node --test)
+npm test                                  # 199/199 tests passing (node --test)
 npm run i18n:validate                     # 10 built-in + 9 extended packs, 0 errors
-npm run workbench:smoke                   # HTTP 200, 1046940 B, 18 markers verified
+npm run workbench:smoke                   # HTTP 200, 1133039 B, 19 markers verified
 node cli/sag-cli.mjs launch --dry-run --json  # Read-only launch plan + Prism yield check
 ```
 

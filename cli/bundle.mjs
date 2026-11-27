@@ -78,7 +78,7 @@ export const REMOVE_EXPRESSION = `(() => {
   try { document.getElementById('ag-sag-theme-css')?.remove(); } catch {}
   try { document.getElementById('ag-sag-queue-css')?.remove(); } catch {}
   try { document.querySelectorAll('[data-ag-sg-owned="1"], [data-ag-sag-owned="1"]').forEach((n) => n.remove()); } catch {}
-  try { document.querySelectorAll('[data-ag-sag-code-folded], [data-ag-sag-code-enhanced]').forEach((n) => { n.removeAttribute('data-ag-sag-code-folded'); n.removeAttribute('data-ag-sag-code-enhanced'); }); } catch {}
+  try { document.querySelectorAll('[data-ag-sag-code-folded], [data-ag-sag-code-enhanced], [data-ag-sag-code-wrap]').forEach((n) => { n.removeAttribute('data-ag-sag-code-folded'); n.removeAttribute('data-ag-sag-code-enhanced'); n.removeAttribute('data-ag-sag-code-wrap'); }); } catch {}
   try { document.querySelectorAll('#ag-prism-pulse-bar, [data-ag-prism-pulse-bar="true"], #ag-pulse-status-bar, [data-ag-pulse-bar="true"]').forEach((h) => { h?.shadowRoot?.querySelectorAll?.('[data-ag-sg-owned="1"], [data-ag-sag-owned="1"]')?.forEach?.((n) => n.remove()); }); } catch {}
   try {
     const html = document.documentElement;
@@ -121,6 +121,298 @@ export function readCoreSources() {
     file,
     code: fs.readFileSync(path.join(CORE_DIR, file), 'utf8'),
   }));
+}
+
+const REGEX_PRECEDING_KEYWORDS = new Set([
+  'return',
+  'case',
+  'throw',
+  'typeof',
+  'in',
+  'of',
+  'void',
+  'delete',
+  'new',
+  'else',
+  'do',
+  'yield',
+  'await',
+]);
+const REGEX_PRECEDING_PUNCT = new Set([
+  '',
+  '(',
+  ',',
+  '=',
+  ':',
+  '[',
+  '!',
+  '&',
+  '|',
+  '?',
+  '{',
+  '}',
+  ';',
+  '~',
+  '^',
+  '+',
+  '-',
+  '*',
+  '%',
+  '<',
+  '>',
+]);
+
+function scanAndCompactJs(src) {
+  const s = String(src ?? '').replace(/\r\n/g, '\n');
+  if (!s) return { code: '', mode: 'code', tplDepth: 0 };
+
+  let mode = 'code'; // 'code' | 'sq' | 'dq' | 'lineComment' | 'blockComment' | 'regex' | 'tpl'
+  let inRegexClass = false;
+  const tplStack = []; // stack of open '{' counts inside each nested ${...}
+  let lastSigChar = '';
+  let lastIdent = '';
+  let curIdent = '';
+  let prevWasNewline = true;
+  let lineHasCode = false;
+  let pendingSpace = false;
+  const chunks = [];
+
+  const flushIdent = () => {
+    if (curIdent) {
+      lastIdent = curIdent;
+      lastSigChar = '';
+      curIdent = '';
+    }
+  };
+
+  const canStartRegex = () => {
+    if (lastIdent) return REGEX_PRECEDING_KEYWORDS.has(lastIdent);
+    return REGEX_PRECEDING_PUNCT.has(lastSigChar);
+  };
+
+  const emitCodeChar = (ch) => {
+    if (ch === '\n') {
+      flushIdent();
+      pendingSpace = false;
+      if (lineHasCode) {
+        chunks.push('\n');
+        lineHasCode = false;
+        prevWasNewline = true;
+      }
+      return;
+    }
+    if (ch === ' ' || ch === '\t') {
+      flushIdent();
+      if (lineHasCode) pendingSpace = true;
+      return;
+    }
+    if (pendingSpace) {
+      chunks.push(' ');
+      pendingSpace = false;
+    }
+    chunks.push(ch);
+    lineHasCode = true;
+    prevWasNewline = false;
+  };
+
+  const len = s.length;
+  for (let i = 0; i < len; i += 1) {
+    const ch = s[i];
+    const next = i + 1 < len ? s[i + 1] : '';
+
+    if (mode === 'lineComment') {
+      if (ch === '\n') {
+        mode = 'code';
+        emitCodeChar('\n');
+      }
+      continue;
+    }
+
+    if (mode === 'blockComment') {
+      if (ch === '*' && next === '/') {
+        mode = 'code';
+        i += 1;
+        if (lineHasCode) pendingSpace = true;
+      }
+      continue;
+    }
+
+    if (mode === 'sq' || mode === 'dq') {
+      chunks.push(ch);
+      if (ch === '\\' && i + 1 < len) {
+        chunks.push(s[i + 1]);
+        i += 1;
+        continue;
+      }
+      if ((mode === 'sq' && ch === "'") || (mode === 'dq' && ch === '"')) {
+        mode = 'code';
+        lastSigChar = ch;
+        lastIdent = '';
+      }
+      continue;
+    }
+
+    if (mode === 'regex') {
+      chunks.push(ch);
+      if (ch === '\\' && i + 1 < len) {
+        chunks.push(s[i + 1]);
+        i += 1;
+        continue;
+      }
+      if (ch === '[' && !inRegexClass) {
+        inRegexClass = true;
+      } else if (ch === ']' && inRegexClass) {
+        inRegexClass = false;
+      } else if (ch === '/' && !inRegexClass) {
+        mode = 'code';
+        lastSigChar = ')';
+        lastIdent = '';
+      }
+      continue;
+    }
+
+    if (mode === 'tpl') {
+      chunks.push(ch);
+      if (ch === '\\' && i + 1 < len) {
+        chunks.push(s[i + 1]);
+        i += 1;
+        continue;
+      }
+      if (ch === '$' && next === '{') {
+        chunks.push('{');
+        i += 1;
+        tplStack.push(1);
+        mode = 'code';
+        lineHasCode = true;
+        prevWasNewline = false;
+        lastSigChar = '{';
+        lastIdent = '';
+        curIdent = '';
+        continue;
+      }
+      if (ch === '`') {
+        mode = 'code';
+        lineHasCode = true;
+        prevWasNewline = false;
+        lastSigChar = ')';
+        lastIdent = '';
+      }
+      continue;
+    }
+
+    // mode === 'code'
+    if (ch === '/' && next === '/') {
+      flushIdent();
+      mode = 'lineComment';
+      i += 1;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      flushIdent();
+      mode = 'blockComment';
+      i += 1;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      flushIdent();
+      if (pendingSpace) {
+        chunks.push(' ');
+        pendingSpace = false;
+      }
+      chunks.push(ch);
+      lineHasCode = true;
+      prevWasNewline = false;
+      mode = ch === "'" ? 'sq' : 'dq';
+      continue;
+    }
+    if (ch === '`') {
+      flushIdent();
+      if (pendingSpace) {
+        chunks.push(' ');
+        pendingSpace = false;
+      }
+      chunks.push(ch);
+      lineHasCode = true;
+      prevWasNewline = false;
+      mode = 'tpl';
+      continue;
+    }
+    if (ch === '/') {
+      flushIdent();
+      if (canStartRegex()) {
+        if (pendingSpace) {
+          chunks.push(' ');
+          pendingSpace = false;
+        }
+        chunks.push(ch);
+        lineHasCode = true;
+        prevWasNewline = false;
+        mode = 'regex';
+        inRegexClass = false;
+        continue;
+      }
+      emitCodeChar(ch);
+      lastSigChar = '/';
+      lastIdent = '';
+      continue;
+    }
+
+    if (ch === '{' && tplStack.length > 0) {
+      tplStack[tplStack.length - 1] += 1;
+    } else if (ch === '}' && tplStack.length > 0) {
+      tplStack[tplStack.length - 1] -= 1;
+      if (tplStack[tplStack.length - 1] === 0) {
+        tplStack.pop();
+        flushIdent();
+        if (pendingSpace) {
+          chunks.push(' ');
+          pendingSpace = false;
+        }
+        chunks.push('}');
+        lineHasCode = true;
+        prevWasNewline = false;
+        mode = 'tpl';
+        continue;
+      }
+    }
+
+    if (/[A-Za-z0-9_$]/.test(ch)) {
+      emitCodeChar(ch);
+      curIdent += ch;
+      continue;
+    }
+
+    if (ch === ' ' || ch === '\t' || ch === '\n') {
+      emitCodeChar(ch);
+      continue;
+    }
+
+    flushIdent();
+    emitCodeChar(ch);
+    lastSigChar = ch;
+    lastIdent = '';
+  }
+
+  return {
+    code: chunks.join('').replace(/\n+$/, ''),
+    mode,
+    tplDepth: tplStack.length,
+  };
+}
+
+/**
+ * Zero-dependency, lexer-aware JS compactor for CDP inject bundles.
+ * Safely strips comments, blank lines, and redundant code whitespace while
+ * preserving strings, regex literals (including character classes), and
+ * arbitrarily nested multiline template literals verbatim.
+ */
+export function compactCoreSource(src) {
+  return scanAndCompactJs(src).code;
+}
+
+export function inspectCoreLexState(src) {
+  const { mode, tplDepth } = scanAndCompactJs(src);
+  return { mode, tplDepth };
 }
 
 export const EXT_PACK_LOCALES = Object.freeze([
@@ -166,22 +458,30 @@ export function readExtendedPackFile(locale, repoRoot = path.resolve(__dirname, 
   }
 }
 
-export function computeCoreHash(parts = readCoreSources()) {
-  const combined = parts.map((p) => `/* ${p.file} */\n${p.code}`).join('\n;\n');
+export function computeCoreHash(parts = readCoreSources(), opts = {}) {
+  const useCompact = opts.compact !== false;
+  const combined = parts
+    .map((p) => `/* ${p.file} */\n${useCompact ? compactCoreSource(p.code) : p.code}`)
+    .join('\n;\n');
   return crypto.createHash('sha256').update(combined).digest('hex').slice(0, 16);
 }
 
 export function buildInjectExpression(config = null, opts = {}) {
   const parts = readCoreSources();
-  const combined = parts.map((p) => `/* ${p.file} */\n${p.code}`).join('\n;\n');
+  const useCompact = opts.compact !== false;
+  const combined = parts
+    .map((p) => `/* ${p.file} */\n${useCompact ? compactCoreSource(p.code) : p.code}`)
+    .join('\n;\n');
   const codeHash = crypto.createHash('sha256').update(combined).digest('hex').slice(0, 16);
   const cfgJson = JSON.stringify(config && typeof config === 'object' ? config : null);
   const sourceJson = JSON.stringify(typeof opts.source === 'string' && opts.source ? opts.source : 'standalone');
 
-  const resolvedExtLoc = resolveInjectExtLocale(
-    opts.extLocale ?? (config && typeof config === 'object' ? config.hostI18nLocale : null),
-    opts.navigatorLang || ''
-  );
+  const resolvedExtLoc = opts.deferExtPack
+    ? null
+    : resolveInjectExtLocale(
+        opts.extLocale ?? (config && typeof config === 'object' ? config.hostI18nLocale : null),
+        opts.navigatorLang || ''
+      );
   const extPack = resolvedExtLoc ? readExtendedPackFile(resolvedExtLoc) : null;
   const extPrelude = extPack
     ? `window.__agSagExtPacks = window.__agSagExtPacks || {}; window.__agSagExtPacks[${JSON.stringify(resolvedExtLoc)}] = ${JSON.stringify(extPack)};`

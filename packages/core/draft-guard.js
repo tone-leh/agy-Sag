@@ -9,9 +9,12 @@
   'use strict';
 
   const DRAFT_STORAGE_PREFIX = 'agSag.draft.v1:';
+  const HISTORY_STORAGE_PREFIX = 'agSag.sentHistory.v1:';
   const DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
   const MAX_DRAFT_CHARS = 16000;
   const MIN_DRAFT_CHARS = 2;
+  const MAX_HISTORY_ITEMS = 30;
+  const MAX_HISTORY_ITEM_CHARS = 4000;
 
   function resolveDep(globalKey, relPath) {
     if (globalRoot && globalRoot[globalKey]) return globalRoot[globalKey];
@@ -98,6 +101,45 @@
     }
   }
 
+  function loadSentHistory(storage, cascadeId, nowTs = Date.now()) {
+    if (!storage || !cascadeId) return [];
+    try {
+      const raw = storage.getItem(HISTORY_STORAGE_PREFIX + cascadeId);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.items)) return [];
+      const savedAtMs = Number(parsed.savedAtMs) || 0;
+      if (savedAtMs > 0 && nowTs - savedAtMs > DRAFT_TTL_MS) {
+        try { storage.removeItem(HISTORY_STORAGE_PREFIX + cascadeId); } catch {}
+        return [];
+      }
+      return parsed.items
+        .filter((s) => typeof s === 'string' && s.trim().length > 0)
+        .slice(0, MAX_HISTORY_ITEMS);
+    } catch {
+      return [];
+    }
+  }
+
+  function pushSentHistory(storage, cascadeId, rawText, nowTs = Date.now(), redactor = null) {
+    if (!storage || !cascadeId) return [];
+    const cleaned = String(rawText || '').replace(/\u200B/g, '').trim();
+    if (cleaned.length < MIN_DRAFT_CHARS) return loadSentHistory(storage, cascadeId, nowTs);
+    if (/^\/(?:compact|clear)(?:\s|$)/i.test(cleaned)) return loadSentHistory(storage, cascadeId, nowTs);
+    const safeText = typeof redactor === 'function' ? redactor(cleaned) : cleaned;
+    const clipped = safeText.length > MAX_HISTORY_ITEM_CHARS ? safeText.slice(0, MAX_HISTORY_ITEM_CHARS) : safeText;
+    const prev = loadSentHistory(storage, cascadeId, nowTs);
+    // Avoid consecutive duplicate entries; newest at index 0
+    const next = [clipped, ...prev.filter((x) => x !== clipped)].slice(0, MAX_HISTORY_ITEMS);
+    try {
+      storage.setItem(
+        HISTORY_STORAGE_PREFIX + cascadeId,
+        JSON.stringify({ cascadeId, savedAtMs: nowTs, items: next })
+      );
+    } catch {}
+    return next;
+  }
+
   function listSavedDrafts(storage, nowTs = Date.now()) {
     if (!storage) return [];
     const drafts = [];
@@ -177,10 +219,10 @@
       return conv.querySelectorAll('[data-testid="user-message-bubble"]').length;
     }
 
-    function writeIntoComposer(text) {
+    function writeIntoComposer(text, { allowOverwrite = false } = {}) {
       const scope = getScope();
       const existing = ctxSrc.readComposerDraft(doc, scope);
-      if (existing && existing !== text) {
+      if (!allowOverwrite && existing && existing !== text) {
         return { ok: false, reason: 'draft-present' };
       }
       const ed = ctxSrc.findComposerEditor(doc, scope);
@@ -191,11 +233,42 @@
         if (tag === 'TEXTAREA' || tag === 'INPUT') {
           ed.value = text;
           ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
-        } else if (typeof doc.execCommand === 'function' && doc.execCommand('insertText', false, text)) {
-          // inserted via execCommand
         } else {
-          ed.textContent = text;
-          ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
+          // Lexical / contenteditable: select editor contents before overwriting to avoid concatenation
+          if (allowOverwrite && existing) {
+            let scopedSelect = false;
+            if (typeof win?.getSelection === 'function' && typeof doc.createRange === 'function') {
+              try {
+                const range = doc.createRange();
+                range.selectNodeContents(ed);
+                const sel = win.getSelection();
+                sel?.removeAllRanges?.();
+                sel?.addRange?.(range);
+                scopedSelect = true;
+              } catch {}
+            }
+            if (!scopedSelect && typeof doc.execCommand === 'function') {
+              try { doc.execCommand('selectAll', false); } catch {}
+            }
+          }
+          if (text === '') {
+            let cleared = false;
+            if (typeof doc.execCommand === 'function') {
+              try {
+                doc.execCommand('delete', false);
+                cleared = !ctxSrc.readComposerDraft(doc, scope);
+              } catch {}
+            }
+            if (!cleared) {
+              ed.textContent = '';
+              ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
+            }
+          } else if (typeof doc.execCommand === 'function' && doc.execCommand('insertText', false, text)) {
+            // inserted/replaced via execCommand
+          } else {
+            ed.textContent = text;
+            ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
+          }
         }
         return { ok: true };
       } catch {
@@ -335,12 +408,83 @@
       saveTimer?.unref?.();
     }
 
-    function markCurrentSent(cid = null) {
+    let historyCursor = -1; // -1 means live composer, 0..N-1 browsing sent history
+    let suppressHistoryReset = false;
+
+    function resolveHistoryCid(cidOverride = null, scope = getScope()) {
+      return cidOverride || currentCid || ctxSrc.detectCascadeId(doc, win, scope) || 'default-session';
+    }
+
+    function recordSentPrompt(cid, text) {
+      if (!text) return;
+      pushSentHistory(storage, resolveHistoryCid(cid), text, nowFn(), exporter?.redactSecrets);
+      historyCursor = -1;
+    }
+
+    function getSentHistory(cid = null) {
+      return loadSentHistory(storage, resolveHistoryCid(cid), nowFn());
+    }
+
+    function cycleSentHistory(delta) {
+      if (destroyed || !enabled) return { ok: false, reason: 'disabled' };
+      const scope = getScope();
+      const cid = resolveHistoryCid(null, scope);
+      const list = loadSentHistory(storage, cid, nowFn());
+      if (!list.length) return { ok: false, reason: 'empty-history' };
+
+      const liveText = ctxSrc.readComposerDraft(doc, scope);
+      // Only enter history browsing from empty composer or while already browsing history
+      if (historyCursor === -1 && liveText.length > 0) {
+        return { ok: false, reason: 'composer-occupied' };
+      }
+
+      if (delta < 0) {
+        // Older prompt (Ctrl+ArrowUp)
+        const nextIdx = historyCursor < 0 ? 0 : Math.min(list.length - 1, historyCursor + 1);
+        historyCursor = nextIdx;
+        suppressHistoryReset = true;
+        try {
+          const res = writeIntoComposer(list[nextIdx], { allowOverwrite: true });
+          return { ok: res.ok, index: nextIdx, text: list[nextIdx] };
+        } finally {
+          suppressHistoryReset = false;
+        }
+      }
+      // Newer prompt (Ctrl+ArrowDown)
+      if (historyCursor <= 0) {
+        historyCursor = -1;
+        suppressHistoryReset = true;
+        try {
+          writeIntoComposer('', { allowOverwrite: true });
+        } finally {
+          suppressHistoryReset = false;
+        }
+        return { ok: true, index: -1, text: '' };
+      }
+      historyCursor -= 1;
+      suppressHistoryReset = true;
+      try {
+        const res = writeIntoComposer(list[historyCursor], { allowOverwrite: true });
+        return { ok: res.ok, index: historyCursor, text: list[historyCursor] };
+      } finally {
+        suppressHistoryReset = false;
+      }
+    }
+
+    function markCurrentSent(cid = null, sentTextOverride = null) {
       const targetCid = cid || currentCid || ctxSrc.detectCascadeId(doc, win, getScope());
       if (saveTimer) {
         clearTimeout(saveTimer);
         saveTimer = null;
       }
+      const sentText =
+        typeof sentTextOverride === 'string' && sentTextOverride.trim()
+          ? sentTextOverride
+          : (targetCid ? lastLiveDraftByCid.get(targetCid) : '') ||
+            ctxSrc.readComposerDraft(doc, getScope()) ||
+            (targetCid ? loadDraft(storage, targetCid, nowFn())?.text : '') ||
+            '';
+      if (sentText) recordSentPrompt(targetCid, sentText);
       if (targetCid) {
         clearDraft(storage, targetCid);
         lastLiveDraftByCid.delete(targetCid);
@@ -361,6 +505,7 @@
       if (!ed || typeof ed.addEventListener !== 'function') return;
       const onInput = () => {
         if (destroyed || !enabled) return;
+        if (!suppressHistoryReset) historyCursor = -1;
         const cid = ctxSrc.detectCascadeId(doc, win, getScope());
         currentCid = cid;
         const txt = ctxSrc.readComposerDraft(doc, getScope());
@@ -369,10 +514,19 @@
       };
       const onKeyDown = (ev) => {
         if (destroyed || !enabled || !ev) return;
+        if (ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.shiftKey && (ev.key === 'ArrowUp' || ev.key === 'ArrowDown')) {
+          const res = cycleSentHistory(ev.key === 'ArrowUp' ? -1 : 1);
+          if (res.ok) {
+            ev.preventDefault?.();
+            ev.stopPropagation?.();
+          }
+          return;
+        }
         if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
-          // User submitted prompt via Enter -> clear cached draft after microtask
+          // User submitted prompt via Enter -> record into sent history & clear cached draft
           const cid = ctxSrc.detectCascadeId(doc, win, getScope());
-          markCurrentSent(cid);
+          const liveText = ctxSrc.readComposerDraft(doc, getScope());
+          markCurrentSent(cid, liveText);
         }
       };
       ed.addEventListener('input', onInput);
@@ -549,6 +703,8 @@
       markCurrentSent,
       restoreCurrentDraft,
       discardCurrentDraft,
+      getSentHistory,
+      cycleSentHistory,
       setEnabled,
       listSavedDrafts: () => listSavedDrafts(storage, nowFn()),
       getDebugState: () => ({
@@ -557,6 +713,8 @@
         cascadeId: currentCid,
         barVisible: Boolean(barEl && !barEl.hidden),
         savedDraftCount: listSavedDrafts(storage, nowFn()).length,
+        sentHistoryCount: loadSentHistory(storage, currentCid, nowFn()).length,
+        historyCursor,
       }),
       destroy,
     };
@@ -564,12 +722,16 @@
 
   return {
     DRAFT_STORAGE_PREFIX,
+    HISTORY_STORAGE_PREFIX,
     DRAFT_TTL_MS,
     MAX_DRAFT_CHARS,
+    MAX_HISTORY_ITEMS,
     isSaveableDraft,
     loadDraft,
     saveDraft,
     clearDraft,
+    loadSentHistory,
+    pushSentHistory,
     listSavedDrafts,
     pruneExpiredDrafts,
     createDraftGuardController,

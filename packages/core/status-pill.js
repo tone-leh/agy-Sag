@@ -596,10 +596,74 @@
       titleEl.textContent = strings.brand;
       const metaEl = doc.createElement('span');
       metaEl.className = 'ag-sg-card-meta';
-      metaEl.textContent = pct;
+      const lastElapsed = Number(lastState.watchdog?.lastTurnElapsedSec);
+      metaEl.textContent =
+        mods.sessionWatchdog && Number.isFinite(lastElapsed) && lastElapsed > 0
+          ? `${pct} · ⏱ ${lastElapsed >= 60 ? formatElapsed(lastElapsed) : `${lastElapsed}s`}`
+          : pct;
       head.appendChild(titleEl);
       head.appendChild(metaEl);
       cardEl.appendChild(head);
+
+      const sagStr = typeof i18n.getSagStrings === 'function' ? i18n.getSagStrings(getLang()) : {};
+
+      // Context Breakdown Lens (pure local DOM breakdown + Top-3 heaviest turns)
+      if (mods.compactGuard && typeof ctxSrc?.analyzeContextBreakdown === 'function') {
+        const bd = ctxSrc.analyzeContextBreakdown(doc, activePaneEl);
+        if (bd && bd.totalChars > 0) {
+          const lens = doc.createElement('div');
+          lens.className = 'ag-sag-ctx-lens';
+          lens.setAttribute('data-testid', 'ag-sag-ctx-lens');
+
+          const bar = doc.createElement('div');
+          bar.className = 'ag-sag-ctx-bar';
+          const segDefs = [
+            { kind: 'user', pct: bd.shares.userPct, label: sagStr.ctxLensUser || 'User' },
+            { kind: 'assistant', pct: bd.shares.assistantPct, label: sagStr.ctxLensAssistant || 'Assistant' },
+            { kind: 'code', pct: bd.shares.codeToolsPct, label: sagStr.ctxLensCodeTools || 'Code/Tools' },
+          ];
+          for (const sd of segDefs) {
+            if (sd.pct <= 0) continue;
+            const part = doc.createElement('span');
+            part.className = 'ag-sag-ctx-bar-seg';
+            part.setAttribute('data-kind', sd.kind);
+            if (part.style) part.style.width = `${sd.pct}%`;
+            part.title = `${sd.label} ${sd.pct}%`;
+            bar.appendChild(part);
+          }
+          lens.appendChild(bar);
+
+          const legend = doc.createElement('div');
+          legend.className = 'ag-sag-ctx-legend';
+          legend.textContent = `${sagStr.ctxLensUser || 'User'} ${bd.shares.userPct}% · ${sagStr.ctxLensAssistant || 'AI'} ${bd.shares.assistantPct}% · ${sagStr.ctxLensCodeTools || 'Code/Tools'} ${bd.shares.codeToolsPct}%`;
+          lens.appendChild(legend);
+
+          if (bd.topTurns && bd.topTurns.length > 0) {
+            const topRow = doc.createElement('div');
+            topRow.className = 'ag-sag-ctx-top-turns';
+            topRow.setAttribute('data-testid', 'ag-sag-ctx-top-turns');
+            for (const tt of bd.topTurns) {
+              const jb = doc.createElement('button');
+              jb.type = 'button';
+              jb.className = 'ag-sag-ctx-turn-chip';
+              jb.setAttribute('data-ag-sag-jump-turn', String(tt.turnNum));
+              jb.textContent = `#${tt.turnNum} · ${tt.pctOfChat}%`;
+              jb.title = `#${tt.turnNum} (~${ctxSrc.formatTokens(tt.estTokens)}) ${tt.preview || ''}`.trim();
+              jb.addEventListener('click', (ev) => {
+                ev?.preventDefault?.();
+                ev?.stopPropagation?.();
+                close();
+                try {
+                  tt.node?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+                } catch {}
+              });
+              topRow.appendChild(jb);
+            }
+            lens.appendChild(topRow);
+          }
+          cardEl.appendChild(lens);
+        }
+      }
 
       const grid = doc.createElement('div');
       grid.className = 'ag-sg-card-grid';
@@ -662,7 +726,26 @@
         const qPct = computeQuotaPct(lastState.quota);
         const turns5h = Number(lastState.quota.localEstimate?.turns5h) || 0;
         const soft5h = Number(lastState.quota.limits?.softTurns5h) || 60;
-        appendMetric(grid, strings.cardQuotaLabel || '5h quota', `${qPct}% · ${turns5h}/${soft5h}`, 'quota');
+        const qCell = doc.createElement('div');
+        qCell.className = 'ag-sg-card-metric';
+        qCell.setAttribute('data-ag-sag-card-metric', 'quota');
+        const qk = doc.createElement('span');
+        qk.className = 'ag-sg-card-mk';
+        qk.textContent = strings.cardQuotaLabel || '5h quota';
+        const qv = doc.createElement('span');
+        qv.className = 'ag-sg-card-mv';
+        qv.textContent = `${qPct}% · ${turns5h}/${soft5h}`;
+        const qTrack = doc.createElement('div');
+        qTrack.className = 'ag-sag-quota-bar';
+        const qFill = doc.createElement('span');
+        qFill.className = 'ag-sag-quota-bar-fill';
+        qFill.setAttribute('data-tone', QUOTA_TONE_MAP[lastState.quota.health] || 'ok');
+        if (qFill.style) qFill.style.width = `${Math.max(0, Math.min(100, qPct))}%`;
+        qTrack.appendChild(qFill);
+        qCell.appendChild(qk);
+        qCell.appendChild(qv);
+        qCell.appendChild(qTrack);
+        grid.appendChild(qCell);
       }
 
       if (mods.promptQueue && lastState.queue) {
@@ -712,6 +795,22 @@
         });
         cleanBtn.title = strings.clearKeepTip;
         foot.appendChild(cleanBtn);
+      }
+      if (mods.precompactExport !== false && typeof options.onExportSession === 'function') {
+        foot.appendChild(
+          mkAct('ag-sg-btn', sagStr.cardExportMdBtn || 'Export MD', 'export-md', () => {
+            close();
+            options.onExportSession();
+          })
+        );
+      }
+      if (typeof options.onOpenShortcuts === 'function') {
+        foot.appendChild(
+          mkAct('ag-sg-btn', '⌨', 'open-shortcuts', () => {
+            close();
+            options.onOpenShortcuts();
+          })
+        );
       }
       if (typeof options.onOpenSettings === 'function' && strings.cardOpenSettingsBtn) {
         foot.appendChild(

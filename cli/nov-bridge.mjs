@@ -478,6 +478,7 @@ export function normalizeNovConfig(raw) {
 
   const locale = ALLOWED_NOV_LOCALES.includes(raw.locale) ? raw.locale : 'auto';
   const updatedAt = typeof raw.updatedAt === 'string' && raw.updatedAt.trim() ? raw.updatedAt : base.updatedAt;
+  const startupView = raw.startupView === 'hub' || raw.startupView === 'last' ? raw.startupView : undefined;
 
   return {
     schemaVersion: 1,
@@ -485,6 +486,7 @@ export function normalizeNovConfig(raw) {
     modules,
     defaultTab,
     locale,
+    ...(startupView ? { startupView } : {}),
     updatedAt,
   };
 }
@@ -637,7 +639,12 @@ const NOV_FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 export function readNovOpsTemplates(opts = {}) {
   const homeDir = opts.homeDir || os.homedir();
   const paths = resolveNovPaths(opts);
-  const opsDir = path.join(paths.dataDir, 'ops');
+  // Prefer agy-NOV v0.7+ layout (dataDir/modules/ops/prompts.json), fallback to legacy (dataDir/ops/prompts.json)
+  const modOpsDir = path.join(paths.dataDir, 'modules', 'ops');
+  const modPromptsPath = path.join(modOpsDir, 'prompts.json');
+  const legacyOpsDir = path.join(paths.dataDir, 'ops');
+  const useModulesLayout = Boolean(safeLstat(modPromptsPath) || safeLstat(modOpsDir));
+  const opsDir = useModulesLayout ? modOpsDir : legacyOpsDir;
   const promptsPath = path.join(opsDir, 'prompts.json');
 
   const dirViolation = findSymlinkViolation(opsDir, homeDir);
@@ -772,6 +779,46 @@ export function redactNovFeedText(raw, maxLen = 120) {
   return s.replace(/\s+/g, ' ').trim().slice(0, maxLen);
 }
 
+function readSafeNovRootJson(dataDir, homeDir, fileName, maxBytes = 64 * 1024) {
+  const dirViolation = findSymlinkViolation(dataDir, homeDir);
+  if (dirViolation) return { ok: false, exists: false, data: null, error: dirViolation };
+  const dirStat = safeLstat(dataDir);
+  if (!dirStat) return { ok: true, exists: false, data: null };
+  if (dirStat.isSymbolicLink() || !dirStat.isDirectory()) {
+    return { ok: false, exists: false, data: null, error: `Refusing to read symlink/non-directory dataDir` };
+  }
+  const filePath = path.join(dataDir, fileName);
+  const fileStat = safeLstat(filePath);
+  if (!fileStat) return { ok: true, exists: false, data: null };
+  if (fileStat.isSymbolicLink() || !fileStat.isFile()) {
+    return { ok: false, exists: false, data: null, error: `Refusing to read symlink/non-regular ${fileName}` };
+  }
+  if (fileStat.size > maxBytes) {
+    return { ok: false, exists: false, data: null, error: `${fileName} exceeds ${maxBytes} bytes limit` };
+  }
+  const realDir = safeRealpath(dataDir);
+  const realFile = safeRealpath(filePath);
+  if (!realDir || !realFile || !isPathWithinBase(realFile, realDir)) {
+    return { ok: false, exists: false, data: null, error: `Refusing to read ${fileName} outside real dataDir` };
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(realFile, 'utf8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Object.keys(parsed).some((k) => NOV_FORBIDDEN_KEYS.has(k))) {
+      return { ok: false, exists: false, data: null, error: `Prototype key rejected in ${fileName}` };
+    }
+    return { ok: true, exists: true, data: parsed };
+  } catch {
+    return { ok: false, exists: false, data: null, error: `Failed to parse ${fileName}` };
+  }
+}
+
+function readSafeNovModuleJson(dataDir, homeDir, subDir, fileName, maxBytes = NOV_TEMPLATES_MAX_BYTES) {
+  // Prefer agy-NOV real layout dataDir/modules/<subDir>/<fileName>, fallback to legacy dataDir/<subDir>/<fileName>
+  const modRes = readSafeNovSubJson(dataDir, homeDir, path.join('modules', subDir), fileName, maxBytes);
+  if (!modRes.ok || modRes.exists) return modRes;
+  return readSafeNovSubJson(dataDir, homeDir, subDir, fileName, maxBytes);
+}
+
 const NOV_FEED_FILES = Object.freeze([
   ['guard', 'audit.json'],
   ['guard', 'snapshots.json'],
@@ -780,8 +827,23 @@ const NOV_FEED_FILES = Object.freeze([
   ['spec', 'state.json'],
 ]);
 
+function statOneFeedPath(baseDir, relParts) {
+  let cur = baseDir;
+  for (let i = 0; i < relParts.length - 1; i += 1) {
+    cur = path.join(cur, relParts[i]);
+    const st = safeLstat(cur);
+    if (!st) return 'missing';
+    if (st.isSymbolicLink() || !st.isDirectory()) return 'unsafe';
+  }
+  const fPath = path.join(cur, relParts[relParts.length - 1]);
+  const fStat = safeLstat(fPath);
+  if (!fStat) return 'missing';
+  if (fStat.isSymbolicLink() || !fStat.isFile()) return 'unsafe';
+  return `${fStat.ino || 0}:${Math.trunc(fStat.mtimeMs || 0)}:${fStat.size || 0}`;
+}
+
 /**
- * Strictly read-only stat signature across the 5 agy-NOV feed files.
+ * Strictly read-only stat signature across feed-snapshot.json and the 5 agy-NOV module feed files.
  * Never creates directories or follows symlinks.
  */
 export function computeNovFeedSignature(opts = {}) {
@@ -790,50 +852,91 @@ export function computeNovFeedSignature(opts = {}) {
   const dataDir = paths.dataDir;
   if (!dataDir || findSymlinkViolation(dataDir, homeDir)) return 'invalid-dir';
   const dirStat = safeLstat(dataDir);
-  if (!dirStat) return NOV_FEED_FILES.map(() => 'missing').join('|');
+  if (!dirStat) return ['missing', ...NOV_FEED_FILES.map(() => 'missing')].join('|');
   if (dirStat.isSymbolicLink() || !dirStat.isDirectory()) return 'invalid-dir';
 
-  const parts = [];
+  const snapSig = statOneFeedPath(dataDir, ['feed-snapshot.json']);
+  const parts = [snapSig];
   for (const [subDir, fileName] of NOV_FEED_FILES) {
-    const subPath = path.join(dataDir, subDir);
-    const subStat = safeLstat(subPath);
-    if (!subStat) {
-      parts.push('missing');
-      continue;
-    }
-    if (subStat.isSymbolicLink() || !subStat.isDirectory()) {
-      parts.push('unsafe');
-      continue;
-    }
-    const filePath = path.join(subPath, fileName);
-    const fStat = safeLstat(filePath);
-    if (!fStat) {
-      parts.push('missing');
-      continue;
-    }
-    if (fStat.isSymbolicLink() || !fStat.isFile()) {
-      parts.push('unsafe');
-      continue;
-    }
-    parts.push(`${fStat.ino || 0}:${Math.trunc(fStat.mtimeMs || 0)}:${fStat.size || 0}`);
+    const modSig = statOneFeedPath(dataDir, ['modules', subDir, fileName]);
+    parts.push(modSig !== 'missing' ? modSig : statOneFeedPath(dataDir, [subDir, fileName]));
   }
   return parts.join('|');
 }
 
 /**
  * Strictly read-only aggregator for agy-NOV live module feeds (guard, radar, mem, spec).
- * Enforces symlink guards, 256 KB per-file cap, realpath containment, and redacted summary output.
+ * Prefers agy-NOV v0.7+ atomic feed-snapshot.json (<=64 KiB), falling back to modules/<id>/ and legacy paths.
+ * Enforces symlink guards, size caps, realpath containment, and redacted summary output.
  */
 export function readNovFeed(opts = {}) {
   const homeDir = opts.homeDir || os.homedir();
   const paths = resolveNovPaths(opts);
-  const errors = [];
 
-  const auditRes = readSafeNovSubJson(paths.dataDir, homeDir, 'guard', 'audit.json');
-  const snapRes = readSafeNovSubJson(paths.dataDir, homeDir, 'guard', 'snapshots.json');
-  const radarRes = readSafeNovSubJson(paths.dataDir, homeDir, 'radar', 'status-capsule.json');
-  const memRes = readSafeNovSubJson(paths.dataDir, homeDir, 'mem', 'memories.json');
-  const specRes = readSafeNovSubJson(paths.dataDir, homeDir, 'spec', 'state.json');
+  // Fast path: unified agy-NOV v0.7+ dataDir/feed-snapshot.json (<= 64 KiB, already redacted)
+  const snapFeedRes = readSafeNovRootJson(paths.dataDir, homeDir, 'feed-snapshot.json', 64 * 1024);
+  if (!snapFeedRes.ok) {
+    return {
+      ok: false,
+      available: false,
+      errors: [snapFeedRes.error || 'Failed to read feed-snapshot.json'],
+      feed: {
+        guard: { blockedCount: 0, snapshotCount: 0, latestSnapshotId: null, latestBlocked: null },
+        radar: { awaitingCount: 0, runningCount: 0, headline: '' },
+        mem: { totalCount: 0, driftedCount: 0 },
+        spec: { writeLockActive: false, activeSpecId: null, activeSpecTitle: '' },
+      },
+    };
+  }
+  if (snapFeedRes.exists && snapFeedRes.data && typeof snapFeedRes.data === 'object') {
+    const snap = snapFeedRes.data;
+    const g = snap.guard && typeof snap.guard === 'object' ? snap.guard : {};
+    const r = snap.radar && typeof snap.radar === 'object' ? snap.radar : {};
+    const m = snap.mem && typeof snap.mem === 'object' ? snap.mem : {};
+    const sp = snap.spec && typeof snap.spec === 'object' ? snap.spec : {};
+    const lastEv = g.lastEvent && typeof g.lastEvent === 'object' ? g.lastEvent : null;
+    return {
+      ok: true,
+      available: true,
+      errors: [],
+      source: 'feed-snapshot',
+      feed: {
+        guard: {
+          blockedCount: toSafeNonNegInt(g.blockedCount),
+          snapshotCount: toSafeNonNegInt(g.snapshotCount),
+          latestSnapshotId: typeof g.latestSnapshotId === 'string' ? redactNovFeedText(g.latestSnapshotId, 64) : null,
+          latestBlocked: lastEv
+            ? {
+                ts: typeof lastEv.ts === 'string' ? lastEv.ts.slice(0, 40) : '',
+                tool: redactNovFeedText(lastEv.tool, 48),
+                reason: redactNovFeedText(lastEv.reason || lastEv.summary, 120),
+              }
+            : null,
+        },
+        radar: {
+          awaitingCount: toSafeNonNegInt(r.awaitingCount),
+          runningCount: toSafeNonNegInt(r.runningCount),
+          headline: redactNovFeedText(r.headline || (r.awaitingCount > 0 ? `${r.awaitingCount} awaiting` : ''), 80),
+        },
+        mem: {
+          totalCount: toSafeNonNegInt(m.totalMemories ?? m.totalCount),
+          driftedCount: toSafeNonNegInt(m.staleCount ?? m.driftedCount),
+        },
+        spec: {
+          writeLockActive: Boolean(sp.writeLockActive),
+          activeSpecId: typeof sp.activeSpecId === 'string' ? redactNovFeedText(sp.activeSpecId, 64) : null,
+          activeSpecTitle: redactNovFeedText(sp.title || sp.activeSpecTitle, 80),
+        },
+      },
+    };
+  }
+
+  const errors = [];
+  const auditRes = readSafeNovModuleJson(paths.dataDir, homeDir, 'guard', 'audit.json');
+  const snapRes = readSafeNovModuleJson(paths.dataDir, homeDir, 'guard', 'snapshots.json');
+  const radarRes = readSafeNovModuleJson(paths.dataDir, homeDir, 'radar', 'status-capsule.json');
+  const memRes = readSafeNovModuleJson(paths.dataDir, homeDir, 'mem', 'memories.json');
+  const specRes = readSafeNovModuleJson(paths.dataDir, homeDir, 'spec', 'state.json');
 
   for (const r of [auditRes, snapRes, radarRes, memRes, specRes]) {
     if (!r.ok && r.error) errors.push(r.error);

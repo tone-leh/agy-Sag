@@ -565,6 +565,48 @@
     let lastCss = '';
     let lastPrismDetected = false;
     let lastColorsYielded = false;
+    let lastSyncedFrames = 0;
+
+    function isAllowedExtensionFrame(iframe) {
+      if (!iframe) return false;
+      const src = String(iframe.getAttribute?.('src') || iframe.src || '').trim();
+      if (!src || src === 'about:blank') {
+        return Boolean(
+          iframe.hasAttribute?.('data-ag-nov-frame') ||
+            iframe.hasAttribute?.('data-plugin-frame') ||
+            String(iframe.getAttribute?.('name') || '').toLowerCase().includes('plugin')
+        );
+      }
+      return /^(?:plugin|vscode-webview|antigravity-plugin|app):\/\//i.test(src) || /^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?\//i.test(src);
+    }
+
+    function syncExtensionFrames(presetSpec, colorsState) {
+      if (!doc || typeof doc.querySelectorAll !== 'function') {
+        lastSyncedFrames = 0;
+        return 0;
+      }
+      const frames = Array.from(doc.querySelectorAll('iframe') || []);
+      let count = 0;
+      const payload = {
+        type: 'ag-sag:theme-sync',
+        enabled: Boolean(enabled && !destroyed),
+        preset: settings.preset,
+        mode: presetSpec?.mode || 'inherit',
+        colorsState,
+        vars: colorsState === 'active' && presetSpec?.vars ? { ...presetSpec.vars } : null,
+      };
+      for (const f of frames) {
+        if (!isAllowedExtensionFrame(f)) continue;
+        try {
+          if (typeof f.contentWindow?.postMessage === 'function') {
+            f.contentWindow.postMessage(payload, '*');
+            count += 1;
+          }
+        } catch {}
+      }
+      lastSyncedFrames = count;
+      return count;
+    }
 
     function clearHtmlAttributes() {
       const html = doc?.documentElement;
@@ -631,6 +673,7 @@
         clearHtmlAttributes();
         lastPrismDetected = detectPrismTheme(doc);
         lastColorsYielded = false;
+        syncExtensionFrames(THEME_PRESETS.native, 'disabled');
         return {
           applied: false,
           enabled,
@@ -638,6 +681,7 @@
           prismDetected: lastPrismDetected,
           colorsYielded: false,
           cssLength: 0,
+          syncedFrames: lastSyncedFrames,
         };
       }
 
@@ -668,6 +712,8 @@
         lastCss = css;
       }
 
+      const syncedFrames = syncExtensionFrames(presetSpec, colorsState);
+
       return {
         applied: Boolean(el || !doc),
         enabled,
@@ -676,6 +722,7 @@
         colorsYielded,
         colorsState,
         cssLength: css.length,
+        syncedFrames,
       };
     }
 
@@ -708,6 +755,7 @@
         settings: { ...settings },
         sanitizedCustomCssLength: sanitizedLen,
         cssLength: lastCss.length,
+        syncedFrames: lastSyncedFrames,
       };
     }
 
@@ -717,6 +765,7 @@
       enabled = false;
       removeStyleElement();
       clearHtmlAttributes();
+      syncExtensionFrames(THEME_PRESETS.native, 'disabled');
       lastColorsYielded = false;
     }
 

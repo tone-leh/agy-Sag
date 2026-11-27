@@ -294,6 +294,10 @@
         placeholder: '输入后续指令，按 Enter 入队…',
         moveUp: '上移',
         moveDown: '下移',
+        moveTop: '置顶',
+        edit: '编辑',
+        save: '保存',
+        cancel: '取消',
         remove: '删除',
         statusPaused: '已暂停',
         statusStreaming: '等待当前回复完成',
@@ -314,6 +318,10 @@
       placeholder: 'Queue next prompt, press Enter…',
       moveUp: 'Up',
       moveDown: 'Down',
+      moveTop: 'Top',
+      edit: 'Edit',
+      save: 'Save',
+      cancel: 'Cancel',
       remove: 'Remove',
       statusPaused: 'Paused',
       statusStreaming: 'Waiting for stream',
@@ -344,6 +352,7 @@
     let seq = 0;
     let lastSkipReason = null;
     let dispatchedCount = 0;
+    let editingItemId = null;
     let lastDispatchedItem = null;
     let dispatchTimer = null;
     let observeTimer = null;
@@ -830,57 +839,149 @@
         idxEl.className = 'ag-sag-queue-idx';
         idxEl.textContent = `${i + 1}.`;
 
-        const previewEl = doc.createElement('span');
-        previewEl.className = 'ag-sag-queue-preview';
-        previewEl.textContent = formatPreview(it.text);
-
+        const isEditing = editingItemId === it.id;
+        let middleEl;
         const itemActs = doc.createElement('div');
         itemActs.className = 'ag-sag-queue-item-acts';
 
-        const upBtn = doc.createElement('button');
-        upBtn.type = 'button';
-        upBtn.className = 'ag-sag-queue-btn';
-        upBtn.textContent = s.moveUp;
-        upBtn.disabled = i === 0;
-        upBtn.setAttribute('data-ag-sag-act', 'queue-move-up');
-        upBtn.setAttribute('data-queue-id', it.id);
-        upBtn.addEventListener('click', (ev) => {
-          ev?.preventDefault?.();
-          ev?.stopPropagation?.();
-          move(it.id, -1);
-        });
+        if (isEditing) {
+          const editInp = doc.createElement('input');
+          editInp.type = 'text';
+          editInp.className = 'ag-sag-queue-input';
+          editInp.setAttribute('data-testid', 'ag-sag-queue-edit-input');
+          editInp.setAttribute('data-queue-id', it.id);
+          editInp.value = it.text;
+          const commitEdit = () => {
+            const ok = editItem(it.id, editInp.value);
+            editingItemId = null;
+            if (!ok) renderBar();
+          };
+          editInp.addEventListener('keydown', (ev) => {
+            if (!ev || ev.isComposing) return;
+            if (ev.key === 'Enter') {
+              ev.preventDefault?.();
+              ev.stopPropagation?.();
+              commitEdit();
+            } else if (ev.key === 'Escape') {
+              ev.preventDefault?.();
+              ev.stopPropagation?.();
+              editingItemId = null;
+              renderBar();
+            }
+          });
+          middleEl = editInp;
 
-        const downBtn = doc.createElement('button');
-        downBtn.type = 'button';
-        downBtn.className = 'ag-sag-queue-btn';
-        downBtn.textContent = s.moveDown;
-        downBtn.disabled = i === items.length - 1;
-        downBtn.setAttribute('data-ag-sag-act', 'queue-move-down');
-        downBtn.setAttribute('data-queue-id', it.id);
-        downBtn.addEventListener('click', (ev) => {
-          ev?.preventDefault?.();
-          ev?.stopPropagation?.();
-          move(it.id, 1);
-        });
+          const saveBtn = doc.createElement('button');
+          saveBtn.type = 'button';
+          saveBtn.className = 'ag-sag-queue-btn';
+          saveBtn.textContent = s.save || 'Save';
+          saveBtn.setAttribute('data-ag-sag-act', 'queue-edit-save');
+          saveBtn.addEventListener('click', (ev) => {
+            ev?.preventDefault?.();
+            ev?.stopPropagation?.();
+            commitEdit();
+          });
 
-        const delBtn = doc.createElement('button');
-        delBtn.type = 'button';
-        delBtn.className = 'ag-sag-queue-btn';
-        delBtn.textContent = s.remove;
-        delBtn.setAttribute('data-ag-sag-act', 'queue-remove');
-        delBtn.setAttribute('data-queue-id', it.id);
-        delBtn.addEventListener('click', (ev) => {
-          ev?.preventDefault?.();
-          ev?.stopPropagation?.();
-          remove(it.id);
-        });
+          const cancelBtn = doc.createElement('button');
+          cancelBtn.type = 'button';
+          cancelBtn.className = 'ag-sag-queue-btn';
+          cancelBtn.textContent = s.cancel || 'Cancel';
+          cancelBtn.setAttribute('data-ag-sag-act', 'queue-edit-cancel');
+          cancelBtn.addEventListener('click', (ev) => {
+            ev?.preventDefault?.();
+            ev?.stopPropagation?.();
+            editingItemId = null;
+            renderBar();
+          });
+          itemActs.appendChild(saveBtn);
+          itemActs.appendChild(cancelBtn);
+        } else {
+          const previewEl = doc.createElement('span');
+          previewEl.className = 'ag-sag-queue-preview';
+          previewEl.textContent = formatPreview(it.text);
+          previewEl.addEventListener('dblclick', (ev) => {
+            ev?.preventDefault?.();
+            ev?.stopPropagation?.();
+            editingItemId = it.id;
+            renderBar();
+          });
+          middleEl = previewEl;
 
-        itemActs.appendChild(upBtn);
-        itemActs.appendChild(downBtn);
-        itemActs.appendChild(delBtn);
+          const topBtn = doc.createElement('button');
+          topBtn.type = 'button';
+          topBtn.className = 'ag-sag-queue-btn';
+          topBtn.textContent = '⏫';
+          topBtn.title = s.moveTop || 'Top';
+          topBtn.disabled = i === 0;
+          topBtn.setAttribute('data-ag-sag-act', 'queue-move-top');
+          topBtn.setAttribute('data-queue-id', it.id);
+          topBtn.addEventListener('click', (ev) => {
+            ev?.preventDefault?.();
+            ev?.stopPropagation?.();
+            moveToTop(it.id);
+          });
+
+          const editBtn = doc.createElement('button');
+          editBtn.type = 'button';
+          editBtn.className = 'ag-sag-queue-btn';
+          editBtn.textContent = '✎';
+          editBtn.title = s.edit || 'Edit';
+          editBtn.setAttribute('data-ag-sag-act', 'queue-edit');
+          editBtn.setAttribute('data-queue-id', it.id);
+          editBtn.addEventListener('click', (ev) => {
+            ev?.preventDefault?.();
+            ev?.stopPropagation?.();
+            editingItemId = it.id;
+            renderBar();
+          });
+
+          const upBtn = doc.createElement('button');
+          upBtn.type = 'button';
+          upBtn.className = 'ag-sag-queue-btn';
+          upBtn.textContent = s.moveUp;
+          upBtn.disabled = i === 0;
+          upBtn.setAttribute('data-ag-sag-act', 'queue-move-up');
+          upBtn.setAttribute('data-queue-id', it.id);
+          upBtn.addEventListener('click', (ev) => {
+            ev?.preventDefault?.();
+            ev?.stopPropagation?.();
+            move(it.id, -1);
+          });
+
+          const downBtn = doc.createElement('button');
+          downBtn.type = 'button';
+          downBtn.className = 'ag-sag-queue-btn';
+          downBtn.textContent = s.moveDown;
+          downBtn.disabled = i === items.length - 1;
+          downBtn.setAttribute('data-ag-sag-act', 'queue-move-down');
+          downBtn.setAttribute('data-queue-id', it.id);
+          downBtn.addEventListener('click', (ev) => {
+            ev?.preventDefault?.();
+            ev?.stopPropagation?.();
+            move(it.id, 1);
+          });
+
+          const delBtn = doc.createElement('button');
+          delBtn.type = 'button';
+          delBtn.className = 'ag-sag-queue-btn';
+          delBtn.textContent = s.remove;
+          delBtn.setAttribute('data-ag-sag-act', 'queue-remove');
+          delBtn.setAttribute('data-queue-id', it.id);
+          delBtn.addEventListener('click', (ev) => {
+            ev?.preventDefault?.();
+            ev?.stopPropagation?.();
+            remove(it.id);
+          });
+
+          itemActs.appendChild(topBtn);
+          itemActs.appendChild(editBtn);
+          itemActs.appendChild(upBtn);
+          itemActs.appendChild(downBtn);
+          itemActs.appendChild(delBtn);
+        }
 
         li.appendChild(idxEl);
-        li.appendChild(previewEl);
+        li.appendChild(middleEl);
         li.appendChild(itemActs);
         listEl.appendChild(li);
       }
@@ -1035,6 +1136,34 @@
       if (nextIdx === idx) return false;
       const [moved] = items.splice(idx, 1);
       items.splice(nextIdx, 0, moved);
+      saveQueue(storage, currentCid, items);
+      renderBar();
+      emitQueueChange();
+      return true;
+    }
+
+    function editItem(id, nextText) {
+      if (destroyed || !id) return false;
+      refreshCascade(false);
+      const normalized = normalizeQueueText(nextText);
+      if (!normalized) return false;
+      const idx = items.findIndex((it) => it.id === id);
+      if (idx < 0) return false;
+      items[idx] = { ...items[idx], text: normalized };
+      if (editingItemId === id) editingItemId = null;
+      saveQueue(storage, currentCid, items);
+      renderBar();
+      emitQueueChange();
+      return true;
+    }
+
+    function moveToTop(id) {
+      if (destroyed || !id) return false;
+      refreshCascade(false);
+      const idx = items.findIndex((it) => it.id === id);
+      if (idx <= 0) return false;
+      const [moved] = items.splice(idx, 1);
+      items.unshift(moved);
       saveQueue(storage, currentCid, items);
       renderBar();
       emitQueueChange();
@@ -1236,8 +1365,10 @@
 
     return {
       enqueue,
+      editItem,
       remove,
       move,
+      moveToTop,
       clear,
       setPaused,
       setEnabled,

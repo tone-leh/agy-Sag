@@ -34,7 +34,7 @@ L4 双星联动「1+1>2」（Tab: 双星 NOV | nov）
  └── agy-NOV 零端口桥 — 13 模块 / 5 预设即时热控 + 只读数据流呈现（guard/radar/mem/spec）
 ```
 
-> **向后兼容约束**：`config.modules` 保留全部现有键名（`precompactExport` 作为 `compactGuard` 卡片下属子开关保留原配置键名），新增能力仅追加 `readingNav` 与 `promptLibrary` 两个布尔键（均默认 `false`，在 `power` 与 `full-auto` 预设中设为 `true`）。
+> **向后兼容与反膨胀约束**：`config.modules` 稳定维持 13 个模块键名（v1.2 阶段 8–12 坚持 **0 新增顶级模块开关**，全部新能力自然内聚于既有模块与 `高级` 页，避免开关泛滥）。
 
 ---
 

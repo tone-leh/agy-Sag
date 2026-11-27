@@ -65,6 +65,8 @@
           stallDismissedForEpisode: false,
           snoozedUntilTs: null,
           snoozeCount: 0,
+          lastTurnElapsedSec: null,
+          lastTurnCompletedAt: null,
         };
         stateByCid.set(key, s);
       }
@@ -105,6 +107,7 @@
           snoozed: false,
           snoozeRemainingSec: 0,
           snoozeCount: 0,
+          lastTurnElapsedSec: null,
         };
       }
 
@@ -152,6 +155,10 @@
       let snoozeRemainingSec = 0;
 
       if (!snap.streaming || stallThresholdSeconds === 'off') {
+        if (!snap.streaming && s.streamingSince !== null) {
+          s.lastTurnElapsedSec = Math.max(1, Math.round((ts - s.streamingSince) / 1000));
+          s.lastTurnCompletedAt = ts;
+        }
         resetStall(s);
       } else {
         const fp = computeConversationFingerprint(doc, snap, scopeEl);
@@ -211,6 +218,7 @@
         snoozed,
         snoozeRemainingSec,
         snoozeCount: s.snoozeCount,
+        lastTurnElapsedSec: s.lastTurnElapsedSec,
       };
     }
 
@@ -263,6 +271,7 @@
               stalledForSec: s.stalledForSec,
               snoozedUntilTs: s.snoozedUntilTs,
               snoozeCount: s.snoozeCount,
+              lastTurnElapsedSec: s.lastTurnElapsedSec,
             }
           : null,
       };

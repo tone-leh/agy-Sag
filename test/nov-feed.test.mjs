@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { computeNovFeedSignature, readNovFeed } from '../cli/nov-bridge.mjs';
+import { computeNovFeedSignature, normalizeNovConfig, readNovFeed, readNovOpsTemplates } from '../cli/nov-bridge.mjs';
 import { SagWatchDaemon } from '../cli/watch-daemon.mjs';
 
 const require = createRequire(import.meta.url);
@@ -542,6 +542,66 @@ test('Phase 6 audit regressions: secret redaction, live nov:feed push, non-finit
     } finally {
       bm.destroy();
     }
+  } finally {
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  }
+});
+
+test('agy-NOV v0.7.0 compatibility: modules/ layout, feed-snapshot.json fast path & startupView passthrough', () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-sag-nov-v07-'));
+  try {
+    const dataDir = path.join(tmpHome, '.agy-nov-data');
+    // 1) startupView passthrough in normalizeNovConfig
+    const normHub = normalizeNovConfig({ preset: 'core', startupView: 'last' });
+    assert.equal(normHub.startupView, 'last');
+    const normBad = normalizeNovConfig({ preset: 'core', startupView: 'evil' });
+    assert.equal('startupView' in normBad, false);
+
+    // 2) Real agy-NOV modules/<id>/ layout for ops/prompts.json & module feeds
+    fs.mkdirSync(path.join(dataDir, 'modules', 'ops'), { recursive: true });
+    fs.mkdirSync(path.join(dataDir, 'modules', 'spec'), { recursive: true });
+    fs.writeFileSync(
+      path.join(dataDir, 'modules', 'ops', 'prompts.json'),
+      JSON.stringify([{ id: 'ops-1', title: 'Release Audit', body: 'Check {{target}}' }]),
+      'utf8'
+    );
+    fs.writeFileSync(
+      path.join(dataDir, 'modules', 'spec', 'state.json'),
+      JSON.stringify({ writeLockActive: true, activeSpecId: 'sp-7', specs: [{ id: 'sp-7', title: 'v0.7 Sync', status: 'draft' }] }),
+      'utf8'
+    );
+
+    const tplRes = readNovOpsTemplates({ homeDir: tmpHome, explicitDataDir: dataDir });
+    assert.equal(tplRes.ok, true);
+    assert.equal(tplRes.templates.length, 1);
+    assert.equal(tplRes.templates[0].id, 'ops-1');
+
+    const modFeedRes = readNovFeed({ homeDir: tmpHome, explicitDataDir: dataDir });
+    assert.equal(modFeedRes.ok, true);
+    assert.equal(modFeedRes.feed.spec.writeLockActive, true);
+    assert.equal(modFeedRes.feed.spec.activeSpecTitle, 'v0.7 Sync');
+
+    // 3) Unified feed-snapshot.json fast path takes precedence when present
+    fs.writeFileSync(
+      path.join(dataDir, 'feed-snapshot.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        guard: { blockedCount: 4, snapshotCount: 9, lastEvent: { ts: '2026-11-27', tool: 'bash', reason: 'Blocked sk-proj-SECRET1234567890' } },
+        radar: { awaitingCount: 3, runningCount: 2 },
+        mem: { totalMemories: 12, staleCount: 5 },
+        spec: { writeLockActive: false, activeSpecId: 'sp-7', title: 'Approved v0.7' },
+      }),
+      'utf8'
+    );
+    const snapRes = readNovFeed({ homeDir: tmpHome, explicitDataDir: dataDir });
+    assert.equal(snapRes.ok, true);
+    assert.equal(snapRes.source, 'feed-snapshot');
+    assert.equal(snapRes.feed.guard.blockedCount, 4);
+    assert.ok(!snapRes.feed.guard.latestBlocked.reason.includes('sk-proj-SECRET1234567890'));
+    assert.equal(snapRes.feed.radar.awaitingCount, 3);
+    assert.equal(snapRes.feed.mem.totalCount, 12);
+    assert.equal(snapRes.feed.mem.driftedCount, 5);
+    assert.equal(snapRes.feed.spec.writeLockActive, false);
   } finally {
     fs.rmSync(tmpHome, { recursive: true, force: true });
   }

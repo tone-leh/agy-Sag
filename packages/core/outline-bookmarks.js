@@ -35,11 +35,83 @@
     let dockEl = null;
     let chipBtn = null;
     let drawerEl = null;
+    let rewindMenuEl = null;
     let pulseTimer = null;
     let pulsedEl = null;
     let activePaneEl = null;
     const ownedNodes = new Set();
     const listeners = [];
+
+    function closeRewindMenu() {
+      try { rewindMenuEl?.remove?.(); } catch {}
+      rewindMenuEl = null;
+    }
+
+    function openTurnRewindMenu(turnNum, snippet, anchorEl = null) {
+      if (destroyed || !doc?.body) return false;
+      closeRewindMenu();
+      const sagStr = typeof i18n?.getSagStrings === 'function' ? i18n.getSagStrings(getLang()) : {};
+      const menu = coexist.markOwnedNoTranslate(doc.createElement('div'));
+      menu.className = 'ag-sag-ctx-menu';
+      menu.setAttribute('data-testid', 'ag-sag-rewind-menu');
+      menu.setAttribute('role', 'menu');
+      menu.setAttribute('data-ag-sag-rewind-for', String(turnNum));
+      const rect = typeof anchorEl?.getBoundingClientRect === 'function' ? anchorEl.getBoundingClientRect() : null;
+      if (menu.style && rect) {
+        menu.style.left = `${Math.max(12, Math.round(rect.left || 24))}px`;
+        menu.style.top = `${Math.max(12, Math.round((rect.bottom || 40) + 4))}px`;
+      }
+
+      const addAct = (label, act, fn) => {
+        const b = doc.createElement('button');
+        b.type = 'button';
+        b.className = 'ag-sag-ctx-item';
+        b.setAttribute('role', 'menuitem');
+        b.setAttribute('data-ag-sag-rewind-act', act);
+        b.textContent = label;
+        b.addEventListener('click', (ev) => {
+          ev?.preventDefault?.();
+          ev?.stopPropagation?.();
+          closeRewindMenu();
+          fn();
+        });
+        menu.appendChild(b);
+      };
+
+      const canNovRollback =
+        typeof options.onRollbackTurn === 'function' &&
+        (typeof options.isRollbackAvailable !== 'function' || Boolean(options.isRollbackAvailable()));
+      if (canNovRollback) {
+        addAct(sagStr.rewindNovFiles || 'Rollback files before this turn (agy-NOV)', 'nov-rollback', () => {
+          options.onRollbackTurn({ turnNum, snippet });
+        });
+      }
+      if (typeof options.onCompactFromTurn === 'function') {
+        addAct(sagStr.rewindCompactFocus || 'Fill /compact focusing on this turn', 'compact-focus', () => {
+          options.onCompactFromTurn({ turnNum, snippet });
+        });
+      }
+      addAct(sagStr.rewindCopyHandoff || 'Copy handoff brief up to this turn', 'copy-handoff', () => {
+        const turns = exporter.extractConversationTurns(doc, getScope()).filter((t) => t.turnNum <= turnNum);
+        const brief =
+          handoff?.buildNewSessionHandoff
+            ? handoff.buildNewSessionHandoff({
+                turns,
+                bookmarks: new Set([...bookmarks].filter((n) => n <= turnNum)),
+                cascadeId: currentCid,
+                lang: getLang(),
+              })?.prompt || ''
+            : `Continue from turn #${turnNum}: ${snippet}`;
+        if (brief) {
+          if (typeof options.onCopyHandoff === 'function') options.onCopyHandoff(brief);
+          else void exporter.copyRecapToClipboard(brief, win);
+        }
+      });
+
+      doc.body.appendChild(menu);
+      rewindMenuEl = menu;
+      return true;
+    }
 
     const getLang = () => (typeof options.getLang === 'function' ? i18n.normalizeLang(options.getLang()) : i18n.detectLang(doc, win));
     const S = () => i18n.getStrings(getLang());
@@ -176,6 +248,7 @@
 
     function clearOwned() {
       clearPulse();
+      closeRewindMenu();
       for (const n of ownedNodes) {
         try { n.remove?.(); } catch {}
       }
@@ -421,7 +494,8 @@
         if (actionSlot) {
           const legacyStars = bubble.querySelectorAll?.('.ag-sg-bm-star') || [];
           const legacyRollbacks = bubble.querySelectorAll?.('.ag-sag-turn-rollback') || [];
-          for (const legacyBtn of new Set([...legacyStars, ...legacyRollbacks])) {
+          const legacyRewinds = bubble.querySelectorAll?.('.ag-sag-turn-rewind') || [];
+          for (const legacyBtn of new Set([...legacyStars, ...legacyRollbacks, ...legacyRewinds])) {
             if (legacyBtn.parentElement === actionSlot) continue;
             try { legacyBtn.remove?.(); } catch {}
             ownedNodes.delete(legacyBtn);
@@ -430,7 +504,7 @@
         const hostStars = host.querySelectorAll?.('.ag-sg-bm-star') || [];
         let btn = null;
         for (const el of hostStars) {
-          if (!el.classList?.contains?.('ag-sag-turn-rollback')) {
+          if (!el.classList?.contains?.('ag-sag-turn-rollback') && !el.classList?.contains?.('ag-sag-turn-rewind')) {
             btn = el;
             break;
           }
@@ -493,6 +567,37 @@
           try { rbBtn.remove?.(); } catch {}
           ownedNodes.delete(rbBtn);
         }
+
+        // Per-turn 3-way Rewind / Compact / Handoff micro-menu button (works with or without agy-NOV)
+        let rwBtn = host.querySelector?.('.ag-sag-turn-rewind');
+        if (!rwBtn) {
+          rwBtn = coexist.markOwnedNoTranslate(doc.createElement('button'));
+          rwBtn.type = 'button';
+          rwBtn.className = 'ag-sag-turn-rewind';
+          rwBtn.setAttribute('data-ag-sag-rewind-turn', String(turnNum));
+          rwBtn.textContent = '⤺';
+          const sagStr = typeof i18n?.getSagStrings === 'function' ? i18n.getSagStrings(getLang()) : {};
+          rwBtn.title = sagStr.rewindBtnTitle || 'Turn recovery options (Compact / Handoff / Rollback)';
+          rwBtn.setAttribute('aria-label', rwBtn.title);
+          rwBtn.addEventListener('click', (ev) => {
+            ev?.preventDefault?.();
+            ev?.stopPropagation?.();
+            const liveTurn = Number(rwBtn.getAttribute('data-ag-sag-rewind-turn')) || turnNum;
+            const rawSnippet = exporter.extractNodeTextWithoutOwned(bubble);
+            const snippet = exporter.redactSecrets(rawSnippet).replace(/\s+/g, ' ').trim().slice(0, 64);
+            if (rewindMenuEl && rewindMenuEl.getAttribute('data-ag-sag-rewind-for') === String(liveTurn)) {
+              closeRewindMenu();
+            } else {
+              openTurnRewindMenu(liveTurn, snippet, rwBtn);
+            }
+          });
+          host.appendChild(rwBtn);
+          ownedNodes.add(rwBtn);
+        } else {
+          rwBtn.setAttribute('data-ag-sag-rewind-turn', String(turnNum));
+        }
+        if (actionSlot) rwBtn.setAttribute('data-inline-action', '1');
+        else rwBtn.removeAttribute?.('data-inline-action');
       });
       renderNativeJumpDock(bubbles);
     }
@@ -583,10 +688,28 @@
       }
     };
     if (doc && typeof doc.addEventListener === 'function') {
+      const onOutsideRewindDismiss = (ev) => {
+        if (!rewindMenuEl) return;
+        const target = ev?.target;
+        if (target && (rewindMenuEl.contains?.(target) || target === rewindMenuEl)) return;
+        if (target?.classList?.contains?.('ag-sag-turn-rewind') || target?.closest?.('.ag-sag-turn-rewind')) return;
+        closeRewindMenu();
+      };
+      const onRewindEscape = (ev) => {
+        if (!rewindMenuEl) return;
+        if (ev?.key === 'Escape') {
+          ev.preventDefault?.();
+          closeRewindMenu();
+        }
+      };
       doc.addEventListener('pointerdown', onPaneFocus, true);
       doc.addEventListener('focusin', onPaneFocus, true);
+      doc.addEventListener('click', onOutsideRewindDismiss, true);
+      doc.addEventListener('keydown', onRewindEscape, true);
       listeners.push(() => doc.removeEventListener?.('pointerdown', onPaneFocus, true));
       listeners.push(() => doc.removeEventListener?.('focusin', onPaneFocus, true));
+      listeners.push(() => doc.removeEventListener?.('click', onOutsideRewindDismiss, true));
+      listeners.push(() => doc.removeEventListener?.('keydown', onRewindEscape, true));
     }
 
     function startObserver() {
@@ -634,6 +757,7 @@
       if (destroyed) return;
       destroyed = true;
       enabled = false;
+      closeRewindMenu();
       while (listeners.length) {
         try { listeners.pop()(); } catch {}
       }

@@ -33,6 +33,7 @@ import {
   readNovOpsTemplates,
   readNovState,
 } from './nov-bridge.mjs';
+import { auditAntigravityStorage } from './storage-doctor.mjs';
 
 export const HOST_BRIDGE_BINDING_NAME = '__agSagHostBridge';
 
@@ -619,6 +620,13 @@ export class SagWatchDaemon {
     this.listTargets = options.listTargets || ((port) => httpGetJson(`http://127.0.0.1:${port}/json/list`));
     const hasCustomEval = typeof options.evalTarget === 'function';
     this.evalTarget = options.evalTarget || ((wsUrl, expr) => evalViaCdp(wsUrl, expr));
+    this.WebSocketImpl = options.WebSocketImpl || globalThis.WebSocket;
+    this.enableHostBridge =
+      typeof options.enableHostBridge === 'boolean'
+        ? options.enableHostBridge
+        : !hasCustomEval && typeof this.WebSocketImpl === 'function';
+    this.deferExtPack = typeof options.deferExtPack === 'boolean' ? options.deferExtPack : this.enableHostBridge;
+    this.storageDataDir = options.storageDataDir || undefined;
     this.buildInject =
       options.buildInject ||
       (({ extLocale = null } = {}) => ({
@@ -626,6 +634,7 @@ export class SagWatchDaemon {
         expression: buildInjectExpression(this.config, {
           source: 'standalone',
           extLocale: extLocale || this.config?.hostI18nLocale || null,
+          deferExtPack: this.deferExtPack,
         }),
       }));
     this.extPacksRepoRoot = options.extPacksRepoRoot || undefined;
@@ -633,12 +642,6 @@ export class SagWatchDaemon {
     this.now = options.now || (() => Date.now());
     this.setTimer = options.setTimer || ((fn, ms) => setTimeout(fn, ms));
     this.clearTimer = options.clearTimer || ((t) => clearTimeout(t));
-
-    this.WebSocketImpl = options.WebSocketImpl || globalThis.WebSocket;
-    this.enableHostBridge =
-      typeof options.enableHostBridge === 'boolean'
-        ? options.enableHostBridge
-        : !hasCustomEval && typeof this.WebSocketImpl === 'function';
     this.novBridgeOpts = options.novBridgeOpts || {};
     this.createBridgeSession = typeof options.createBridgeSession === 'function' ? options.createBridgeSession : null;
 
@@ -739,6 +742,34 @@ export class SagWatchDaemon {
             return { reqId, ok: false, error: (feedRes.errors || ['Failed to read agy-NOV feed']).join('; ') };
           }
           return { reqId, ok: true, data: { available: feedRes.available, feed: feedRes.feed } };
+        }
+        if (parsed && typeof parsed === 'object' && parsed.type === 'sag:storage_audit') {
+          const reqId = typeof parsed.reqId === 'string' && parsed.reqId.length <= 128 ? parsed.reqId : null;
+          try {
+            const rep = auditAntigravityStorage({
+              ...(this.storageDataDir ? { dataDir: this.storageDataDir } : {}),
+              topN: 5,
+            });
+            return {
+              reqId,
+              ok: true,
+              data: {
+                exists: Boolean(rep?.exists),
+                totalBytes: Number(rep?.totalBytes) || 0,
+                totalFiles: Number(rep?.totalFiles) || 0,
+                brainSessionCount: Number(rep?.brain?.sessionCount) || 0,
+                brainBytes: Number(rep?.brain?.totalBytes) || 0,
+                conversationCount: Number(rep?.conversations?.fileCount) || 0,
+                conversationBytes: Number(rep?.conversations?.totalBytes) || 0,
+                walActive: Boolean(rep?.sqlite?.walActive),
+                orphanCount: Array.isArray(rep?.orphans) ? rep.orphans.length : 0,
+                corruptCount: Array.isArray(rep?.corruptFiles) ? rep.corruptFiles.length : 0,
+                warningCount: Array.isArray(rep?.warnings) ? rep.warnings.length : 0,
+              },
+            };
+          } catch {
+            return { reqId, ok: false, error: 'Storage audit failed' };
+          }
         }
       } catch {}
     }

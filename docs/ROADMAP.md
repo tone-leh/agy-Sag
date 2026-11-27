@@ -107,3 +107,25 @@
 - [x] **阶段 5**：WebAudio 提示音与本地 TTS 提醒中心
 - [x] **阶段 6**：`sag:nov_feed` 双星只读数据流深度联动与快照回滚入口
 - [x] **阶段 7**：跨会话全文检索与 Todo 视图评估（已完成预算与架构评估，维持轻量化边界归档）
+
+---
+
+## 六、v1.2 演进路线图（阶段 8–12：全面超越 Prism & 对标一线 Agent 生态）
+
+> 经过对 **Obsidian Prism `v1.0.8-beta.3`** 全量挂载点与 **Claude Code / DeepSeek Harness (DSH) / Cline / Roo Code / Cursor / Windsurf / opcode** 的第二轮实证复盘，v1.2 坚持 **「0 新增顶级模块开关」** 反膨胀原则——维持 13 模块、6-Tab 单一真源，全部高价值能力归入既有模块的自然增强。
+
+| 阶段 | 对标标杆与痛点 | 核心交付与归属（0 新增顶级开关） |
+| :---: | :--- | :--- |
+| **阶段 8** | Obsidian Prism 按需分包与设置内存储面板；解除 `ru` 仅剩 `73 KB` 的包体紧箍咒 | **CDP 包体瘦身与按需异步首载 + 高级页只读存储体检**：`cli/bundle.mjs` 无损空白/纯注释行裁剪（全量语法与单测校验）+ `WatchDaemon` 支持 `deferExtPack`（借助已有零端口 `sag:ext_pack` 首帧异步送达 600KB+ 扩展词典）；`watch-daemon.mjs` 新增零端口只读 `sag:storage_audit` 并在 `高级` Tab 展示目录空间、WAL 锁状态与脱敏备份 CLI 一键复制 |
+| **阶段 9** | Claude Code `/context`、DSH `dsh-context`、Prism 试管信息密度 | **上下文构成透镜 & 单轮耗时脉搏**（增强 `contextSource` + `sessionWatchdog` + `statusPill`）：纯 DOM 三段上下文构成估算（用户 / 助手 / 代码与工具输出）、Top-3 最重轮次一键跳定位、上一轮流式耗时记录、HUD 浮卡升级为带 6px 三色构成条 + 5h/7d 进度条 + 导出 MD 的双栏驾驶舱卡片 |
+| **阶段 10** | 超越 Obsidian Prism 代码折叠/大纲 + Claude Code 工具折叠 + Cursor 会话内查找 | **阅读导航 2.0 & 跨源主题桥 & 去噪导出**（增强 `readingNav` + `themeStudio` + `precompactExport`）：① 代码折叠增加流式完成防打断、收起 `scrollTop` 锚点补偿、覆盖 `artifact-view`、自动换行切换；② 解除导轨 30 轮截断，升级为可搜索大纲浮窗（`Alt+F` 实时过滤、回车跳轮、只看星标、一键全折/全展长代码块与工具卡片）；③ 纯前端 Mermaid 悬停放大与 SVG 导出模态；④ `themeStudio` 向 `plugin://*` 扩展面板（含 `agy-NOV`）同步核心明暗主题变量；⑤ `precompactExport` 新增去噪结论版导出 |
+| **阶段 11** | Windsurf Cascade 流式插队 + Claude Code 历史召回/`/btw` + Prism 右键工作流 | **输入区与对话流微交互闭环**（增强 `promptQueue` + `draftGuard` + `promptLibrary`）：① 队列条目行内编辑与一键置顶插队（`⏫`）；② `draftGuard` 维护按会话最近 30 条脱敏已发提示词历史，空框 `Ctrl+↑/↓` 快速召回；③ `promptLibrary` 支持空框 `//` 唤起与对话选区浮动「引用到模板」胶囊（预填 `{{selection}}`）；④ 独立用户（无 Prism 时）轻量对话/选区/路径右键菜单（复制、引用模板、`/compact`、收藏、复制路径或插 `@引用`，遇 Prism 自动礼让） |
+| **阶段 12** | Claude Code `/rewind` 多选菜单 + `/status` 键盘流 + Prism 原生 Settings 导航直达 | **轮次恢复 3 选 1 微菜单、原生 Settings 侧栏锚点 & 动态快捷键速查**（增强 `outlineBookmarks` + `prismBridge` + `statusPill`）：① 轮次 `↺` 升级为 3 选 1 微菜单（NOV Guard 回滚 / 从此轮聚焦 `/compact` / 复制截至本轮的新会话交接稿）；② 原生 Settings 弹窗左侧栏自动注入 `agy-Sag` 快捷锚点；③ `Ctrl/Cmd+Alt+/` 动态快捷键速查浮层（仅列出当前已启用模块的有效快捷键） |
+
+### v1.2 进度总览
+
+- [x] **阶段 8**：CDP 包体瘦身与 `sag:ext_pack` 异步首载 + `高级` 页只读存储体检（`sag:storage_audit`）
+- [x] **阶段 9**：上下文构成透镜、Top-3 重轮跳转、单轮耗时脉搏与双栏 HUD 驾驶舱浮卡
+- [x] **阶段 10**：阅读导航 2.0（防跳屏/流式保护/可搜索大纲/一键折叠步骤/Mermaid 缩放）+ 跨源主题桥 + 去噪导出
+- [x] **阶段 11**：队列行内编辑插队 + 30 条脱敏已发历史 `Ctrl+↑/↓` + `//` 与选区快引 + 独立轻量右键菜单
+- [x] **阶段 12**：轮次 3 选 1 恢复微菜单 + 原生 Settings 侧栏锚点 + `Ctrl/Cmd+Alt+/` 动态快捷键速查浮层

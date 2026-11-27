@@ -41,6 +41,7 @@ export const SMOKE_REQUIRED_MARKERS = Object.freeze([
   '__agSagPromptLibrary',
   '__agSagReadingNav',
   'sag:nov_feed',
+  'sag:storage_audit',
 ]);
 
 export function buildHtmlPage() {
@@ -780,6 +781,25 @@ ${coreScript}
     function simNovTransport(req) {
       const { reqId, type, payload = {} } = req || {};
       const modApi = window.__agSagNovSynergy;
+      if (type === 'sag:storage_audit') {
+        return {
+          ok: true,
+          reqId,
+          data: {
+            exists: true,
+            totalBytes: 48 * 1024 * 1024,
+            totalFiles: 312,
+            brainSessionCount: 18,
+            brainBytes: 34 * 1024 * 1024,
+            conversationCount: 24,
+            conversationBytes: 12 * 1024 * 1024,
+            walActive: false,
+            orphanCount: 1,
+            corruptCount: 0,
+            warningCount: 1,
+          },
+        };
+      }
       if (type === 'sag:nov_feed') {
         return {
           ok: true,

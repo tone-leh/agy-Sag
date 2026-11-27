@@ -159,6 +159,9 @@
     let drawerEl = null;
     let drawerBodyEl = null;
     let drawerOpen = false;
+    let shortcutSheetEl = null;
+    let shortcutSheetOpen = false;
+    let settingsNavEl = null;
     let createdStyleEl = null;
     let domObserver = null;
     let htmlObserver = null;
@@ -198,6 +201,21 @@
     let plStatusTone = 'info';
     let resetConfirmPending = false;
     let diagCopiedFeedback = false;
+    let storageAuditState = null; // { status: 'idle'|'loading'|'ok'|'offline'|'error', data, message }
+    let storageCmdCopied = false;
+
+    function formatStorageBytes(bytes) {
+      const n = Number(bytes);
+      if (!Number.isFinite(n) || n <= 0) return '0 B';
+      const units = ['B', 'KiB', 'MiB', 'GiB'];
+      let idx = 0;
+      let val = n;
+      while (val >= 1024 && idx < units.length - 1) {
+        val /= 1024;
+        idx += 1;
+      }
+      return idx === 0 ? `${Math.round(val)} B` : `${val.toFixed(val >= 100 ? 0 : 1)} ${units[idx]}`;
+    }
 
     function downloadJsonPayload(filename, dataObj) {
       const jsonText = JSON.stringify(dataObj, null, 2);
@@ -2232,6 +2250,93 @@
       diagWrap.appendChild(diagPre);
       diagWrap.appendChild(diagBtns);
       pane.appendChild(mkSuiteRow(t('advDiagLabel', 'Diagnostics'), t('advDiagDesc', ''), diagWrap, { stacked: true, searchExtra: 'diagnostics debug' }));
+
+      // 5. Read-Only Local Storage Audit (zero-port Watch Bridge -> storage-doctor)
+      const stWrap = doc.createElement('div');
+      stWrap.className = 'ag-sag-pack-ctrl';
+      stWrap.setAttribute('data-testid', 'ag-sag-storage-box');
+      const stBtns = doc.createElement('div');
+      stBtns.className = 'ag-sag-ext-grid';
+      stBtns.appendChild(
+        mkChip({
+          label: storageAuditState?.status === 'loading' ? t('advStorageScanning', 'Scanning…') : t('advStorageAuditBtn', 'Audit Storage'),
+          active: storageAuditState?.status === 'ok',
+          disabled: storageAuditState?.status === 'loading',
+          testId: 'ag-sag-storage-audit-btn',
+          onClick: () => {
+            if (typeof options.onRequestStorageAudit !== 'function') {
+              storageAuditState = { status: 'offline', data: null, message: t('advStorageOffline', '') };
+              refreshAllViews();
+              return;
+            }
+            storageAuditState = { status: 'loading', data: storageAuditState?.data || null, message: '' };
+            refreshAllViews();
+            Promise.resolve(options.onRequestStorageAudit())
+              .then((res) => {
+                if (destroyed) return;
+                if (res?.ok && res.data) {
+                  storageAuditState = { status: 'ok', data: res.data, message: '' };
+                } else if (res?.reason === 'bridge-offline') {
+                  storageAuditState = { status: 'offline', data: null, message: t('advStorageOffline', '') };
+                } else {
+                  storageAuditState = { status: 'error', data: null, message: res?.error || t('advStorageOffline', '') };
+                }
+                refreshAllViews();
+              })
+              .catch(() => {
+                if (destroyed) return;
+                storageAuditState = { status: 'error', data: null, message: t('advStorageOffline', '') };
+                refreshAllViews();
+              });
+          },
+        })
+      );
+      const backupCliCmd = 'node cli/sag-cli.mjs storage backup --out=~/agy-backup --dry-run';
+      stBtns.appendChild(
+        mkChip({
+          label: storageCmdCopied ? t('advStorageCopiedCmd', 'CLI Copied') : t('advStorageCopyCmdBtn', 'Copy Backup CLI'),
+          active: false,
+          testId: 'ag-sag-storage-copy-cmd',
+          onClick: () => {
+            try {
+              if (typeof options.onCopyText === 'function') options.onCopyText(backupCliCmd);
+              else if (win?.navigator?.clipboard?.writeText) void win.navigator.clipboard.writeText(backupCliCmd).catch(() => {});
+            } catch {}
+            storageCmdCopied = true;
+            refreshAllViews();
+          },
+        })
+      );
+      stWrap.appendChild(stBtns);
+
+      const stNote = doc.createElement('div');
+      stNote.className = 'ag-sag-badge-note';
+      stNote.setAttribute('data-testid', 'ag-sag-storage-summary');
+      if (storageAuditState?.status === 'ok' && storageAuditState.data) {
+        const d = storageAuditState.data;
+        stNote.textContent = i18n.formatTemplate(
+          t('advStorageSummary', 'Total {total} ({files} files) · {sessions} brain · {convs} chats · WAL {wal} · {orphans} orphans'),
+          {
+            total: formatStorageBytes(d.totalBytes),
+            files: d.totalFiles ?? 0,
+            sessions: d.brainSessionCount ?? 0,
+            convs: d.conversationCount ?? 0,
+            wal: d.walActive ? t('advStorageWalActive', 'Active Lock') : t('advStorageWalSafe', 'Idle'),
+            orphans: d.orphanCount ?? 0,
+          }
+        );
+      } else if (storageAuditState?.message) {
+        stNote.textContent = storageAuditState.message;
+      } else {
+        stNote.textContent = t('advStorageOffline', 'node cli/sag-cli.mjs storage audit');
+      }
+      stWrap.appendChild(stNote);
+      pane.appendChild(
+        mkSuiteRow(t('advStorageLabel', 'Local Storage Audit (Read-Only)'), t('advStorageDesc', ''), stWrap, {
+          stacked: true,
+          searchExtra: 'storage doctor audit backup wal sqlite brain disk',
+        })
+      );
     }
 
     function renderHub(section, { inPrism = false, inDrawer = false } = {}) {
@@ -2386,6 +2491,21 @@
         dTxt.textContent = typeof i18n.getSagStrings === 'function' ? i18n.getSagStrings(getLang())?.drawerTitle || 'agy-Sag' : 'agy-Sag';
         dTitle.appendChild(dTxt);
 
+        const dActs = doc.createElement('div');
+        dActs.className = 'ag-sag-code-acts';
+
+        const dKey = doc.createElement('button');
+        dKey.type = 'button';
+        dKey.className = 'ag-sag-chip';
+        dKey.setAttribute('data-testid', 'ag-sag-drawer-shortcuts');
+        dKey.textContent = '⌨';
+        dKey.title = 'Shortcuts (Ctrl/Cmd+Alt+/)';
+        dKey.addEventListener('click', (ev) => {
+          ev?.preventDefault?.();
+          ev?.stopPropagation?.();
+          openShortcutSheet();
+        });
+
         const dClose = doc.createElement('button');
         dClose.type = 'button';
         dClose.className = 'ag-sag-chip';
@@ -2396,8 +2516,10 @@
           ev?.stopPropagation?.();
           closeDrawer();
         });
+        dActs.appendChild(dKey);
+        dActs.appendChild(dClose);
         dHead.appendChild(dTitle);
-        dHead.appendChild(dClose);
+        dHead.appendChild(dActs);
 
         drawerBodyEl = doc.createElement('div');
         drawerBodyEl.className = 'ag-sag-drawer-body';
@@ -2435,6 +2557,114 @@
       return true;
     }
 
+    function closeShortcutSheet() {
+      shortcutSheetOpen = false;
+      try { shortcutSheetEl?.remove?.(); } catch {}
+      shortcutSheetEl = null;
+      return true;
+    }
+
+    function openShortcutSheet() {
+      if (destroyed || !doc?.body) return false;
+      closeShortcutSheet();
+      ensureStyle();
+      const cfg = getConfig();
+      const mods = cfg.modules || {};
+      const sag = typeof i18n.getSagStrings === 'function' ? i18n.getSagStrings(getLang()) : {};
+      const rows = [
+        { keys: 'Ctrl/Cmd + Alt + ,', desc: sag.scSettingsDrawer || 'Toggle agy-Sag Settings Drawer' },
+        { keys: 'Ctrl/Cmd + Alt + /', desc: sag.scShortcutSheet || 'Show Active Keyboard Shortcuts' },
+      ];
+      if (mods.promptLibrary) {
+        rows.push({ keys: 'Ctrl/Cmd + Alt + P', desc: sag.scPromptPalette || 'Open Prompt Library & Command Palette' });
+        rows.push({ keys: '// (empty composer)', desc: sag.scSlashSlash || 'Quick-open Prompt Library from composer' });
+      }
+      if (mods.readingNav) {
+        rows.push({ keys: 'Alt + ↑ / ↓', desc: sag.scTurnJump || 'Jump to previous / next user turn' });
+        rows.push({ keys: 'Alt + F', desc: sag.scOutlineSearch || 'Search turns in current conversation outline' });
+      }
+      if (mods.outlineBookmarks) {
+        rows.push({ keys: 'Ctrl/Cmd + Shift + B', desc: sag.scBookmarkVault || 'Open Cross-Session Bookmark Vault' });
+      }
+      if (mods.draftGuard !== false) {
+        rows.push({ keys: 'Ctrl + ↑ / ↓', desc: sag.scSentHistory || 'Cycle recent sent prompts in empty composer' });
+      }
+
+      const bd = coexist.markOwnedNoTranslate(doc.createElement('div'));
+      bd.className = 'ag-sag-mermaid-modal';
+      bd.setAttribute('data-testid', 'ag-sag-shortcuts-modal');
+      bd.setAttribute('role', 'dialog');
+      bd.addEventListener('click', (ev) => {
+        if (ev?.target === bd) closeShortcutSheet();
+      });
+
+      const card = doc.createElement('div');
+      card.className = 'ag-sag-shortcuts-card';
+
+      const head = doc.createElement('div');
+      head.className = 'ag-sag-mermaid-head';
+      const title = doc.createElement('strong');
+      title.textContent = sag.scSheetTitle || 'agy-Sag Active Shortcuts';
+      const closeBtn = doc.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'ag-sag-chip';
+      closeBtn.setAttribute('data-testid', 'ag-sag-shortcuts-close');
+      closeBtn.textContent = sag.drawerClose || 'Close';
+      closeBtn.addEventListener('click', () => closeShortcutSheet());
+      head.appendChild(title);
+      head.appendChild(closeBtn);
+      card.appendChild(head);
+
+      const list = doc.createElement('div');
+      list.className = 'ag-sag-shortcuts-list';
+      for (const r of rows) {
+        const row = doc.createElement('div');
+        row.className = 'ag-sag-shortcuts-row';
+        const kbd = doc.createElement('kbd');
+        kbd.className = 'ag-sag-kbd';
+        kbd.textContent = r.keys;
+        const d = doc.createElement('span');
+        d.textContent = r.desc;
+        row.appendChild(kbd);
+        row.appendChild(d);
+        list.appendChild(row);
+      }
+      card.appendChild(list);
+      bd.appendChild(card);
+      doc.body.appendChild(bd);
+      shortcutSheetEl = bd;
+      shortcutSheetOpen = true;
+      return true;
+    }
+
+    function ensureNativeSettingsNavAnchor(sectionEl) {
+      if (!doc || !sectionEl || destroyed) return;
+      const dialog = sectionEl.closest?.('[role="dialog"]') || doc.querySelector?.('[role="dialog"]') || null;
+      if (!dialog) return;
+      const navHost = dialog.querySelector?.('nav, [role="tablist"], aside') || null;
+      if (!navHost) return;
+      let navBtn = navHost.querySelector?.('[data-testid="ag-sag-settings-nav-item"]') || null;
+      if (!navBtn) {
+        navBtn = coexist.markOwnedNoTranslate(doc.createElement('button'));
+        navBtn.type = 'button';
+        navBtn.className = 'ag-sag-settings-nav-item';
+        navBtn.setAttribute('data-testid', 'ag-sag-settings-nav-item');
+        navBtn.textContent = 'agy-Sag';
+        navBtn.addEventListener('click', (ev) => {
+          ev?.preventDefault?.();
+          ev?.stopPropagation?.();
+          panelExpanded = true;
+          writeUiState(EXPANDED_STORAGE_KEY, '1');
+          refreshAllViews();
+          try {
+            mountedEl?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+          } catch {}
+        });
+        navHost.appendChild(navBtn);
+      }
+      settingsNavEl = navBtn;
+    }
+
     function renderIntoSettings() {
       if (destroyed || !doc) return false;
       ensureStyle();
@@ -2444,6 +2674,8 @@
       const modulesGroup = settingsEl?.querySelector?.(PRISM_MODULES_GROUP_SEL) || null;
       if (settingsEl && modulesGroup) {
         doc.querySelectorAll?.(`[data-testid="${NATIVE_SECTION_TESTID}"]`)?.forEach?.((n) => n.remove?.());
+        try { settingsNavEl?.remove?.(); } catch {}
+        settingsNavEl = null;
         let section = modulesGroup.querySelector?.(`[data-testid="${EMBED_SECTION_TESTID}"]`) || null;
         if (!section) {
           section = coexist.markOwnedNoTranslate(doc.createElement('div'));
@@ -2470,6 +2702,7 @@
         mountedEl = section;
         mountedMode = 'native';
         renderHub(section, { inPrism: false, inDrawer: false });
+        ensureNativeSettingsNavAnchor(section);
         return true;
       }
 
@@ -2534,10 +2767,23 @@
       if (options.bindDrawerShortcut === false) return;
       const handler = (ev) => {
         if (destroyed || !ev) return;
+        if (ev.key === 'Escape' && shortcutSheetOpen) {
+          ev.preventDefault?.();
+          ev.stopPropagation?.();
+          closeShortcutSheet();
+          return;
+        }
         if (ev.key === 'Escape' && drawerOpen) {
           ev.preventDefault?.();
           ev.stopPropagation?.();
           closeDrawer();
+          return;
+        }
+        if ((ev.ctrlKey || ev.metaKey) && ev.altKey && !ev.shiftKey && (ev.key === '/' || ev.code === 'Slash')) {
+          ev.preventDefault?.();
+          ev.stopPropagation?.();
+          if (shortcutSheetOpen) closeShortcutSheet();
+          else openShortcutSheet();
           return;
         }
         if ((ev.ctrlKey || ev.metaKey) && ev.altKey && !ev.shiftKey && (ev.key === ',' || ev.code === 'Comma')) {
@@ -2604,10 +2850,13 @@
       domObserver = htmlObserver = null;
       try { mountedEl?.remove?.(); } catch {}
       try { drawerBackdropEl?.remove?.(); } catch {}
+      closeShortcutSheet();
+      try { settingsNavEl?.remove?.(); } catch {}
+      settingsNavEl = null;
       try { createdStyleEl?.remove?.(); } catch {}
       try {
         doc?.querySelectorAll?.(
-          `[data-testid="${EMBED_SECTION_TESTID}"], [data-testid="${NATIVE_SECTION_TESTID}"], [data-testid="${DRAWER_BACKDROP_TESTID}"]`
+          `[data-testid="${EMBED_SECTION_TESTID}"], [data-testid="${NATIVE_SECTION_TESTID}"], [data-testid="${DRAWER_BACKDROP_TESTID}"], [data-testid="ag-sag-shortcuts-modal"], [data-testid="ag-sag-settings-nav-item"]`
         )?.forEach?.((n) => n.remove?.());
       } catch {}
       mountedEl = drawerBackdropEl = drawerEl = drawerBodyEl = createdStyleEl = null;
@@ -2629,6 +2878,9 @@
       openDrawer,
       closeDrawer,
       isDrawerOpen: () => drawerOpen,
+      openShortcutSheet,
+      closeShortcutSheet,
+      isShortcutSheetOpen: () => shortcutSheetOpen,
       getActiveSubTab: () => activeSubTab,
       setActiveSubTab: (tabId) => {
         const next = normalizeSubTab(tabId);

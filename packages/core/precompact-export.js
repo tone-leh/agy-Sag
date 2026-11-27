@@ -116,10 +116,83 @@
     return turns;
   }
 
+  function denoiseBlockText(text, maxCodeLines = 18) {
+    const src = String(text || '');
+    if (!src) return '';
+    // 1) Collapse verbose fenced code/tool blocks exceeding maxCodeLines while preserving conclusions
+    let out = src.replace(/```[^\n]*\n([\s\S]*?)```/g, (full, body) => {
+      const lineCount = String(body || '').replace(/\n+$/, '').split('\n').length;
+      if (lineCount <= maxCodeLines) return full;
+      return `> [code/tool output condensed: ${lineCount} lines]`;
+    });
+    // 2) Linear-time stack trace condensation (horizontal whitespace only, zero newline ambiguity)
+    out = out.replace(/(?:^[ \t]+at[ \t]+[^\n]+(?:\n|$)){8,}/gm, (m) => {
+      const lc = m.trim().split('\n').length;
+      return `> [tool log condensed: ${lc} lines]\n`;
+    });
+    // 3) Strictly linear O(N) line scanner for large raw JSON/object dumps (>=8 lines & >=800 chars)
+    const lines = out.split('\n');
+    const result = [];
+    let i = 0;
+    let unclosedUntil = -1;
+    while (i < lines.length) {
+      const trimmed = lines[i].trim();
+      if (i > unclosedUntil && (trimmed.startsWith('{') || trimmed.startsWith('['))) {
+        const openCh = trimmed[0];
+        const closeCh = openCh === '{' ? '}' : ']';
+        let depth = 0;
+        let chars = 0;
+        let j = i;
+        let closedAt = -1;
+        let inStr = false;
+        let esc = false;
+        while (j < lines.length && j - i < 2000) {
+          const ln = lines[j];
+          chars += ln.length + 1;
+          for (let k = 0; k < ln.length; k += 1) {
+            const c = ln[k];
+            if (inStr) {
+              if (esc) { esc = false; continue; }
+              if (c === '\\') { esc = true; continue; }
+              if (c === '"') inStr = false;
+              continue;
+            }
+            if (c === '"') { inStr = true; continue; }
+            if (c === openCh) depth += 1;
+            else if (c === closeCh) {
+              depth -= 1;
+              if (depth === 0) {
+                closedAt = j;
+                break;
+              }
+            }
+          }
+          if (closedAt >= 0) break;
+          j += 1;
+        }
+        if (closedAt < 0) {
+          // Never re-scan unclosed opening braces in O(N^2)
+          unclosedUntil = j;
+        } else {
+          const spanLines = closedAt - i + 1;
+          if (spanLines >= 8 && chars >= 800) {
+            result.push(`> [tool log condensed: ${spanLines} lines]`);
+            i = closedAt + 1;
+            continue;
+          }
+        }
+      }
+      result.push(lines[i]);
+      i += 1;
+    }
+    return result.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+
   function buildRecapMarkdown({
     turns = [],
     bookmarks = null,
     onlyBookmarked = false,
+    denoise = false,
     cascadeId = '',
     usedPct = null,
     usedLabel = '',
@@ -150,6 +223,7 @@
       `- **${S.mdExportedAt}**: ${(now instanceof Date ? now : new Date(now)).toISOString()}`,
     ];
     if (cascadeId) lines.push(`- **${S.mdConversation}**: \`${cascadeId}\``);
+    if (denoise) lines.push('- **Mode**: Denoised Summary');
     if (typeof usedPct === 'number' && Number.isFinite(usedPct)) {
       const cap = usedLabel && maxLabel ? ` (${usedLabel} / ${maxLabel})` : '';
       lines.push(`- **${S.mdContext}**: ${usedPct}%${cap}`);
@@ -169,7 +243,7 @@
       if (t.assistant) {
         lines.push(`### ${S.mdAssistant}`);
         lines.push('');
-        lines.push(t.assistant);
+        lines.push(denoise ? denoiseBlockText(t.assistant) : t.assistant);
         lines.push('');
       }
     }
@@ -238,6 +312,7 @@
   return {
     BOOKMARK_STORAGE_PREFIX,
     redactSecrets,
+    denoiseBlockText,
     extractNodeTextWithoutOwned,
     loadBookmarks,
     saveBookmarks,

@@ -14,9 +14,13 @@
   'use strict';
 
   const RAIL_TESTID = 'ag-sag-rnav-rail';
+  const OUTLINE_TESTID = 'ag-sag-rnav-outline';
+  const MERMAID_MODAL_TESTID = 'ag-sag-mermaid-modal';
   const CODE_BAR_ATTR = 'data-ag-sag-code-bar';
   const CODE_FOLDED_ATTR = 'data-ag-sag-code-folded';
   const CODE_ENHANCED_ATTR = 'data-ag-sag-code-enhanced';
+  const CODE_WRAP_ATTR = 'data-ag-sag-code-wrap';
+  const MERMAID_BTN_ATTR = 'data-ag-sag-mermaid-zoom';
   const DEFAULT_COLLAPSE_LINES = 40;
   const MIN_COLLAPSE_LINES = 20;
   const MAX_COLLAPSE_LINES = 200;
@@ -80,6 +84,13 @@
     let enhancedCount = 0;
 
     let railEl = null;
+    let outlineEl = null;
+    let outlineOpen = false;
+    let outlineQuery = '';
+    let outlineStarOnly = false;
+    let mermaidModalEl = null;
+    let mermaidZoomScale = 1;
+    let allFoldedToggleState = true;
     let createdStyleEl = null;
     let keydownOff = null;
     let domObserver = null;
@@ -91,6 +102,16 @@
     const userToggleState = new WeakMap(); // preEl -> boolean (true = expanded by user, false = folded by user)
     const enhancedPres = new Set(); // track pre elements for lossless teardown
     const codeBars = new WeakMap(); // preEl -> barEl
+    const mermaidBtns = new Map(); // svgEl -> btnEl
+
+    const isStreamingNow = () => {
+      if (typeof options.isStreaming === 'function') {
+        try {
+          return Boolean(options.isStreaming());
+        } catch {}
+      }
+      return Boolean(ctxSrc?.isTurnStreaming?.(doc, getScope()));
+    };
 
     const getLang = () =>
       typeof options.getLang === 'function' ? i18n.normalizeLang(options.getLang()) : i18n.detectLang(doc, win);
@@ -237,6 +258,7 @@
         codeBars.delete(pre);
         try { pre.removeAttribute?.(CODE_FOLDED_ATTR); } catch {}
         try { pre.removeAttribute?.(CODE_ENHANCED_ATTR); } catch {}
+        try { pre.removeAttribute?.(CODE_WRAP_ATTR); } catch {}
         enhancedPres.delete(pre);
       }
       if (doc && typeof doc.querySelectorAll === 'function') {
@@ -244,16 +266,56 @@
           doc.querySelectorAll(`[${CODE_BAR_ATTR}="1"]`).forEach((n) => n.remove?.());
           doc.querySelectorAll(`[${CODE_FOLDED_ATTR}]`).forEach((n) => n.removeAttribute?.(CODE_FOLDED_ATTR));
           doc.querySelectorAll(`[${CODE_ENHANCED_ATTR}]`).forEach((n) => n.removeAttribute?.(CODE_ENHANCED_ATTR));
+          doc.querySelectorAll(`[${CODE_WRAP_ATTR}]`).forEach((n) => n.removeAttribute?.(CODE_WRAP_ATTR));
         } catch {}
       }
       foldedCount = 0;
       enhancedCount = 0;
     }
 
+    function collectTargetContainers() {
+      const out = [];
+      const conv = getConversationContainer();
+      if (conv) out.push({ el: conv, isConv: true });
+      const scope = getScope();
+      const artNodes =
+        scope?.querySelectorAll?.('[data-testid="artifact-view"]') ||
+        doc?.querySelectorAll?.('[data-testid="artifact-view"]') ||
+        [];
+      for (const art of artNodes) {
+        if (art && !out.some((x) => x.el === art)) out.push({ el: art, isConv: false });
+      }
+      return out;
+    }
+
+    function togglePreWithScrollCompensation(pre, bar) {
+      const currentlyFolded = pre.getAttribute?.(CODE_FOLDED_ATTR) === '1';
+      const nextFolded = !currentlyFolded;
+      const vp = nextFolded ? ctxSrc?.findConversationScrollViewport?.(doc, getScope()) : null;
+      const prevH = Number(pre.offsetHeight) || 0;
+      const prevTop = typeof pre.getBoundingClientRect === 'function' ? pre.getBoundingClientRect()?.top ?? 0 : 0;
+
+      userToggleState.set(pre, currentlyFolded); // true means user expanded
+      applyPreFoldVisual(pre, bar, nextFolded, countCodeLines(pre.textContent || ''));
+      recountFolded();
+
+      // Anchor scrollTop compensation when folding a tall block whose top scrolled above viewport
+      if (nextFolded && prevTop < 0 && vp && typeof vp.scrollTop === 'number' && prevH > 0) {
+        const measuredAfter = Number(pre.offsetHeight) || 0;
+        const afterH = measuredAfter > 0 && measuredAfter < prevH ? measuredAfter : Math.min(prevH, 220);
+        const delta = Math.max(0, prevH - afterH);
+        if (delta > 0) {
+          try {
+            vp.scrollTop = Math.max(0, vp.scrollTop - delta);
+          } catch {}
+        }
+      }
+    }
+
     function scanCodeBlocks() {
       if (destroyed || !enabled) return { enhanced: 0, folded: 0 };
-      const conv = getConversationContainer();
-      if (!conv || typeof conv.querySelectorAll !== 'function') return { enhanced: 0, folded: 0 };
+      const containers = collectTargetContainers();
+      if (!containers.length) return { enhanced: 0, folded: 0 };
       ensureStyle();
 
       // Prune detached pre elements
@@ -265,87 +327,291 @@
         }
       }
 
-      const pres = Array.from(conv.querySelectorAll('pre') || []);
+      const streaming = isStreamingNow();
       let curEnhanced = 0;
       let curFolded = 0;
 
-      for (const pre of pres) {
-        if (!pre || isOwnedNode(pre)) continue;
-        const lines = countCodeLines(pre.textContent || '');
-        if (lines < collapseLines) {
-          // If threshold increased and pre was previously enhanced, restore cleanly
-          if (enhancedPres.has(pre)) {
-            try { codeBars.get(pre)?.remove?.(); } catch {}
-            codeBars.delete(pre);
-            pre.removeAttribute?.(CODE_FOLDED_ATTR);
-            pre.removeAttribute?.(CODE_ENHANCED_ATTR);
-            enhancedPres.delete(pre);
+      for (const { el: rootEl, isConv } of containers) {
+        const pres = Array.from(rootEl.querySelectorAll?.('pre') || []);
+        const lastIdx = pres.length - 1;
+        for (let idx = 0; idx < pres.length; idx += 1) {
+          const pre = pres[idx];
+          if (!pre || isOwnedNode(pre)) continue;
+          // Streaming guard: never interrupt the active tail code block while assistant is still generating
+          if (streaming && isConv && idx === lastIdx && !enhancedPres.has(pre)) continue;
+
+          const lines = countCodeLines(pre.textContent || '');
+          if (lines < collapseLines) {
+            if (enhancedPres.has(pre)) {
+              try { codeBars.get(pre)?.remove?.(); } catch {}
+              codeBars.delete(pre);
+              pre.removeAttribute?.(CODE_FOLDED_ATTR);
+              pre.removeAttribute?.(CODE_ENHANCED_ATTR);
+              pre.removeAttribute?.(CODE_WRAP_ATTR);
+              enhancedPres.delete(pre);
+            }
+            continue;
           }
-          continue;
-        }
 
-        curEnhanced += 1;
-        let bar = codeBars.get(pre) || null;
-        if (!bar || bar.isConnected === false) {
-          bar = coexist?.markOwnedNoTranslate
-            ? coexist.markOwnedNoTranslate(doc.createElement('div'))
-            : doc.createElement('div');
-          bar.className = 'ag-sag-code-bar';
-          bar.setAttribute(CODE_BAR_ATTR, '1');
+          curEnhanced += 1;
+          let bar = codeBars.get(pre) || null;
+          if (!bar || bar.isConnected === false) {
+            bar = coexist?.markOwnedNoTranslate
+              ? coexist.markOwnedNoTranslate(doc.createElement('div'))
+              : doc.createElement('div');
+            bar.className = 'ag-sag-code-bar';
+            bar.setAttribute(CODE_BAR_ATTR, '1');
 
-          const meta = doc.createElement('span');
-          meta.className = 'ag-sag-code-meta';
-          meta.setAttribute('data-ag-sag-code-meta', '1');
+            const meta = doc.createElement('span');
+            meta.className = 'ag-sag-code-meta';
+            meta.setAttribute('data-ag-sag-code-meta', '1');
 
-          const acts = doc.createElement('div');
-          acts.className = 'ag-sag-code-acts';
+            const acts = doc.createElement('div');
+            acts.className = 'ag-sag-code-acts';
 
-          const toggleBtn = doc.createElement('button');
-          toggleBtn.type = 'button';
-          toggleBtn.className = 'ag-sag-code-btn';
-          toggleBtn.setAttribute('data-ag-sag-code-toggle', '1');
-          toggleBtn.addEventListener('click', (ev) => {
-            ev?.preventDefault?.();
-            ev?.stopPropagation?.();
-            const currentlyFolded = pre.getAttribute?.(CODE_FOLDED_ATTR) === '1';
-            userToggleState.set(pre, currentlyFolded); // true means user expanded
-            applyPreFoldVisual(pre, bar, !currentlyFolded, countCodeLines(pre.textContent || ''));
-            recountFolded();
-          });
+            const toggleBtn = doc.createElement('button');
+            toggleBtn.type = 'button';
+            toggleBtn.className = 'ag-sag-code-btn';
+            toggleBtn.setAttribute('data-ag-sag-code-toggle', '1');
+            toggleBtn.addEventListener('click', (ev) => {
+              ev?.preventDefault?.();
+              ev?.stopPropagation?.();
+              togglePreWithScrollCompensation(pre, bar);
+            });
 
-          const copyBtn = doc.createElement('button');
-          copyBtn.type = 'button';
-          copyBtn.className = 'ag-sag-code-btn';
-          copyBtn.setAttribute('data-ag-sag-code-copy', '1');
-          copyBtn.textContent = t('rnavCopyBtn', 'Copy');
-          copyBtn.addEventListener('click', (ev) => {
-            ev?.preventDefault?.();
-            ev?.stopPropagation?.();
-            copyCodeText(pre.textContent || '', copyBtn);
-          });
+            const wrapBtn = doc.createElement('button');
+            wrapBtn.type = 'button';
+            wrapBtn.className = 'ag-sag-code-btn';
+            wrapBtn.setAttribute('data-ag-sag-code-wrap-btn', '1');
+            wrapBtn.setAttribute('aria-pressed', 'false');
+            wrapBtn.textContent = t('rnavWrapBtn', 'Wrap');
+            wrapBtn.addEventListener('click', (ev) => {
+              ev?.preventDefault?.();
+              ev?.stopPropagation?.();
+              const wrapped = pre.getAttribute?.(CODE_WRAP_ATTR) === '1';
+              if (wrapped) {
+                pre.removeAttribute?.(CODE_WRAP_ATTR);
+                wrapBtn.setAttribute('aria-pressed', 'false');
+              } else {
+                pre.setAttribute?.(CODE_WRAP_ATTR, '1');
+                wrapBtn.setAttribute('aria-pressed', 'true');
+              }
+            });
 
-          acts.appendChild(toggleBtn);
-          acts.appendChild(copyBtn);
-          bar.appendChild(meta);
-          bar.appendChild(acts);
+            const copyBtn = doc.createElement('button');
+            copyBtn.type = 'button';
+            copyBtn.className = 'ag-sag-code-btn';
+            copyBtn.setAttribute('data-ag-sag-code-copy', '1');
+            copyBtn.textContent = t('rnavCopyBtn', 'Copy');
+            copyBtn.addEventListener('click', (ev) => {
+              ev?.preventDefault?.();
+              ev?.stopPropagation?.();
+              copyCodeText(pre.textContent || '', copyBtn);
+            });
 
-          if (pre.parentElement && typeof pre.parentElement.insertBefore === 'function') {
-            pre.parentElement.insertBefore(bar, pre);
+            acts.appendChild(toggleBtn);
+            acts.appendChild(wrapBtn);
+            acts.appendChild(copyBtn);
+            bar.appendChild(meta);
+            bar.appendChild(acts);
+
+            if (pre.parentElement && typeof pre.parentElement.insertBefore === 'function') {
+              pre.parentElement.insertBefore(bar, pre);
+            }
+            codeBars.set(pre, bar);
+            enhancedPres.add(pre);
+            pre.setAttribute?.(CODE_ENHANCED_ATTR, '1');
           }
-          codeBars.set(pre, bar);
-          enhancedPres.add(pre);
-          pre.setAttribute?.(CODE_ENHANCED_ATTR, '1');
-        }
 
-        const userExpanded = userToggleState.has(pre) ? Boolean(userToggleState.get(pre)) : false;
-        const shouldFold = !userExpanded;
-        if (shouldFold) curFolded += 1;
-        applyPreFoldVisual(pre, bar, shouldFold, lines);
+          const userExpanded = userToggleState.has(pre) ? Boolean(userToggleState.get(pre)) : false;
+          const shouldFold = !userExpanded;
+          if (shouldFold) curFolded += 1;
+          applyPreFoldVisual(pre, bar, shouldFold, lines);
+        }
       }
 
       enhancedCount = curEnhanced;
       foldedCount = curFolded;
       return { enhanced: enhancedCount, folded: foldedCount };
+    }
+
+    function toggleFoldAllStepsAndCode(forceFold = null) {
+      const targetFold = typeof forceFold === 'boolean' ? forceFold : !allFoldedToggleState;
+      allFoldedToggleState = targetFold;
+      for (const pre of enhancedPres) {
+        if (pre.isConnected === false) continue;
+        const bar = codeBars.get(pre);
+        userToggleState.set(pre, !targetFold);
+        applyPreFoldVisual(pre, bar, targetFold, countCodeLines(pre.textContent || ''));
+      }
+      recountFolded();
+      const conv = getConversationContainer();
+      if (conv && typeof conv.querySelectorAll === 'function') {
+        const detailsList = conv.querySelectorAll('details') || [];
+        for (const det of detailsList) {
+          if (isOwnedNode(det)) continue;
+          try {
+            det.open = !targetFold;
+          } catch {}
+        }
+      }
+      return { folded: targetFold, foldedCodeBlocks: foldedCount };
+    }
+
+    function closeMermaidModal() {
+      try { mermaidModalEl?.remove?.(); } catch {}
+      mermaidModalEl = null;
+      mermaidZoomScale = 1;
+    }
+
+    function openMermaidZoom(svgEl) {
+      if (!svgEl || !doc?.body || destroyed) return false;
+      closeMermaidModal();
+      ensureStyle();
+      mermaidZoomScale = 1;
+
+      const overlay = coexist?.markOwnedNoTranslate
+        ? coexist.markOwnedNoTranslate(doc.createElement('div'))
+        : doc.createElement('div');
+      overlay.className = 'ag-sag-mermaid-modal';
+      overlay.setAttribute('data-testid', MERMAID_MODAL_TESTID);
+      overlay.setAttribute('role', 'dialog');
+      overlay.addEventListener('click', (ev) => {
+        if (ev?.target === overlay) closeMermaidModal();
+      });
+
+      const box = doc.createElement('div');
+      box.className = 'ag-sag-mermaid-box';
+
+      const head = doc.createElement('div');
+      head.className = 'ag-sag-mermaid-head';
+      const ttl = doc.createElement('strong');
+      ttl.textContent = t('rnavMermaidZoom', 'Mermaid Diagram');
+
+      const ctrls = doc.createElement('div');
+      ctrls.className = 'ag-sag-code-acts';
+
+      const stage = doc.createElement('div');
+      stage.className = 'ag-sag-mermaid-stage';
+      const canvas = doc.createElement('div');
+      canvas.className = 'ag-sag-mermaid-canvas';
+      const cloned = typeof svgEl.cloneNode === 'function' ? svgEl.cloneNode(true) : null;
+      if (cloned) canvas.appendChild(cloned);
+      stage.appendChild(canvas);
+
+      const applyScale = (next) => {
+        mermaidZoomScale = Math.max(0.5, Math.min(3, Math.round(next * 100) / 100));
+        if (canvas.style) canvas.style.transform = `scale(${mermaidZoomScale})`;
+        scaleLbl.textContent = `${Math.round(mermaidZoomScale * 100)}%`;
+      };
+
+      const mkBtn = (txt, act, fn) => {
+        const b = doc.createElement('button');
+        b.type = 'button';
+        b.className = 'ag-sag-code-btn';
+        b.setAttribute('data-ag-sag-mermaid-act', act);
+        b.textContent = txt;
+        b.addEventListener('click', (ev) => {
+          ev?.preventDefault?.();
+          ev?.stopPropagation?.();
+          fn();
+        });
+        return b;
+      };
+      const scaleLbl = doc.createElement('span');
+      scaleLbl.className = 'ag-sag-code-meta';
+      scaleLbl.textContent = '100%';
+
+      ctrls.appendChild(mkBtn('-', 'zoom-out', () => applyScale(mermaidZoomScale - 0.25)));
+      ctrls.appendChild(scaleLbl);
+      ctrls.appendChild(mkBtn('+', 'zoom-in', () => applyScale(mermaidZoomScale + 0.25)));
+      ctrls.appendChild(mkBtn('100%', 'zoom-reset', () => applyScale(1)));
+      ctrls.appendChild(
+        mkBtn(t('rnavMermaidExportSvg', 'Download SVG'), 'export-svg', () => {
+          try {
+            const Serializer = win?.XMLSerializer || globalThis.XMLSerializer;
+            const rawSvg = Serializer ? new Serializer().serializeToString(svgEl) : String(svgEl.outerHTML || '');
+            if (!rawSvg) return;
+            const BlobCtor = win?.Blob || globalThis.Blob;
+            const UrlApi = win?.URL || globalThis.URL;
+            if (!BlobCtor || !UrlApi?.createObjectURL) return;
+            const url = UrlApi.createObjectURL(new BlobCtor([rawSvg], { type: 'image/svg+xml;charset=utf-8' }));
+            const a = coexist?.markOwnedNoTranslate ? coexist.markOwnedNoTranslate(doc.createElement('a')) : doc.createElement('a');
+            a.href = url;
+            a.download = 'mermaid-diagram.svg';
+            if (a.style) a.style.display = 'none';
+            doc.body.appendChild(a);
+            a.click?.();
+            a.remove?.();
+            const timer = setTimeout(() => { try { UrlApi.revokeObjectURL?.(url); } catch {} }, 1000);
+            timer?.unref?.();
+          } catch {}
+        })
+      );
+      ctrls.appendChild(mkBtn(t('rnavClose', 'Close'), 'close', closeMermaidModal));
+
+      head.appendChild(ttl);
+      head.appendChild(ctrls);
+      box.appendChild(head);
+      box.appendChild(stage);
+      overlay.appendChild(box);
+      doc.body.appendChild(overlay);
+      mermaidModalEl = overlay;
+      return true;
+    }
+
+    function cleanupMermaidButtons() {
+      closeMermaidModal();
+      for (const [svg, btn] of mermaidBtns.entries()) {
+        try { btn?.remove?.(); } catch {}
+        mermaidBtns.delete(svg);
+      }
+      if (doc && typeof doc.querySelectorAll === 'function') {
+        try {
+          doc.querySelectorAll(`[${MERMAID_BTN_ATTR}="1"]`).forEach((n) => n.remove?.());
+        } catch {}
+      }
+    }
+
+    function scanMermaidDiagrams() {
+      if (destroyed || !enabled) return 0;
+      const containers = collectTargetContainers();
+      if (!containers.length) return 0;
+      for (const [svg, btn] of mermaidBtns.entries()) {
+        if (svg.isConnected === false) {
+          try { btn?.remove?.(); } catch {}
+          mermaidBtns.delete(svg);
+        }
+      }
+      let count = 0;
+      for (const { el: rootEl } of containers) {
+        const svgs = Array.from(rootEl.querySelectorAll?.('svg[id^="mermaid"], .mermaid svg') || []);
+        for (const svg of svgs) {
+          if (!svg || isOwnedNode(svg)) continue;
+          count += 1;
+          const existing = mermaidBtns.get(svg);
+          if (existing && existing.isConnected !== false) continue;
+          const btn = coexist?.markOwnedNoTranslate
+            ? coexist.markOwnedNoTranslate(doc.createElement('button'))
+            : doc.createElement('button');
+          btn.type = 'button';
+          btn.className = 'ag-sag-code-btn ag-sag-mermaid-btn';
+          btn.setAttribute(MERMAID_BTN_ATTR, '1');
+          btn.textContent = '⤢';
+          btn.title = t('rnavMermaidZoom', 'Zoom Mermaid Diagram');
+          btn.setAttribute('aria-label', btn.title);
+          btn.addEventListener('click', (ev) => {
+            ev?.preventDefault?.();
+            ev?.stopPropagation?.();
+            openMermaidZoom(svg);
+          });
+          if (svg.parentElement && typeof svg.parentElement.insertBefore === 'function') {
+            svg.parentElement.insertBefore(btn, svg);
+          }
+          mermaidBtns.set(svg, btn);
+        }
+      }
+      return count;
     }
 
     function recountFolded() {
@@ -356,9 +622,150 @@
       foldedCount = f;
     }
 
+    function removeOutline() {
+      try { outlineEl?.remove?.(); } catch {}
+      outlineEl = null;
+      outlineOpen = false;
+    }
+
     function removeRail() {
       try { railEl?.remove?.(); } catch {}
       railEl = null;
+      removeOutline();
+    }
+
+    function renderOutlinePopover(focusInput = false) {
+      if (destroyed || !enabled || !outlineOpen || !doc?.body) {
+        try { outlineEl?.remove?.(); } catch {}
+        outlineEl = null;
+        return;
+      }
+      ensureStyle();
+      const turns = getUserTurnElements();
+      const starred = getStarredTurnSet();
+
+      if (!outlineEl || outlineEl.isConnected === false) {
+        outlineEl = coexist?.markOwnedNoTranslate
+          ? coexist.markOwnedNoTranslate(doc.createElement('div'))
+          : doc.createElement('div');
+        outlineEl.className = 'ag-sag-rnav-outline';
+        outlineEl.setAttribute('data-testid', OUTLINE_TESTID);
+        doc.body.appendChild(outlineEl);
+      }
+
+      let inp = outlineEl.querySelector?.('[data-testid="ag-sag-rnav-outline-input"]');
+      let listBox = outlineEl.querySelector?.('[data-testid="ag-sag-rnav-outline-list"]');
+      let starBtn = outlineEl.querySelector?.('[data-testid="ag-sag-rnav-outline-star"]');
+
+      if (!inp || !listBox) {
+        while (outlineEl.firstChild) outlineEl.removeChild(outlineEl.firstChild);
+        const head = doc.createElement('div');
+        head.className = 'ag-sag-rnav-outline-head';
+
+        inp = doc.createElement('input');
+        inp.type = 'search';
+        inp.className = 'ag-sag-search-input';
+        inp.setAttribute('data-testid', 'ag-sag-rnav-outline-input');
+        inp.placeholder = t('rnavOutlinePlaceholder', 'Filter turns (Enter to jump)…');
+        inp.value = outlineQuery;
+        inp.addEventListener('input', () => {
+          outlineQuery = inp.value;
+          populateOutlineList(listBox, getUserTurnElements(), getStarredTurnSet());
+        });
+        inp.addEventListener('keydown', (ev) => {
+          if (ev?.key === 'Escape') {
+            ev.preventDefault?.();
+            removeOutline();
+            return;
+          }
+          if (ev?.key === 'Enter') {
+            ev.preventDefault?.();
+            const firstItem = listBox.querySelector?.('[data-ag-sag-outline-idx]');
+            if (firstItem) {
+              const idx = Number(firstItem.getAttribute('data-ag-sag-outline-idx'));
+              if (Number.isFinite(idx)) {
+                jumpToTurn(idx);
+                removeOutline();
+              }
+            }
+          }
+        });
+
+        starBtn = doc.createElement('button');
+        starBtn.type = 'button';
+        starBtn.className = 'ag-sag-code-btn';
+        starBtn.setAttribute('data-testid', 'ag-sag-rnav-outline-star');
+        starBtn.addEventListener('click', () => {
+          outlineStarOnly = !outlineStarOnly;
+          starBtn.setAttribute('aria-pressed', String(outlineStarOnly));
+          populateOutlineList(listBox, getUserTurnElements(), getStarredTurnSet());
+        });
+
+        const closeBtn = doc.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'ag-sag-code-btn';
+        closeBtn.textContent = '×';
+        closeBtn.title = t('rnavClose', 'Close');
+        closeBtn.addEventListener('click', () => removeOutline());
+
+        head.appendChild(inp);
+        head.appendChild(starBtn);
+        head.appendChild(closeBtn);
+        outlineEl.appendChild(head);
+
+        listBox = doc.createElement('div');
+        listBox.className = 'ag-sag-rnav-outline-list';
+        listBox.setAttribute('data-testid', 'ag-sag-rnav-outline-list');
+        outlineEl.appendChild(listBox);
+      }
+
+      if (starBtn) {
+        starBtn.textContent = `★ ${t('rnavOutlineStarOnly', 'Starred')}`;
+        starBtn.setAttribute('aria-pressed', String(outlineStarOnly));
+      }
+      populateOutlineList(listBox, turns, starred);
+      if (focusInput) {
+        try { inp?.focus?.(); } catch {}
+      }
+    }
+
+    function populateOutlineList(listBox, turns, starred) {
+      if (!listBox) return;
+      while (listBox.firstChild) listBox.removeChild(listBox.firstChild);
+      const q = String(outlineQuery || '').trim().toLowerCase();
+      let matched = 0;
+      for (let i = 0; i < turns.length; i += 1) {
+        const turnNum = i + 1;
+        const isStar = starred.has(turnNum);
+        if (outlineStarOnly && !isStar) continue;
+        const rawText = String(turns[i]?.textContent || '').replace(/\s+/g, ' ').trim();
+        if (q && !rawText.toLowerCase().includes(q) && !`#${turnNum}`.includes(q)) continue;
+        matched += 1;
+        const row = doc.createElement('button');
+        row.type = 'button';
+        row.className = 'ag-sag-rnav-outline-item';
+        row.setAttribute('data-ag-sag-outline-idx', String(i));
+        if (i === currentTurnIndex) row.setAttribute('data-active', '1');
+        row.textContent = `#${turnNum}${isStar ? ' ★' : ''} ${rawText.slice(0, 72) || '(empty)'}`;
+        row.addEventListener('click', () => {
+          jumpToTurn(i);
+          removeOutline();
+        });
+        listBox.appendChild(row);
+      }
+      if (matched === 0) {
+        const empty = doc.createElement('div');
+        empty.className = 'ag-sag-badge-note';
+        empty.textContent = t('rnavOutlineEmpty', 'No matching turns');
+        listBox.appendChild(empty);
+      }
+    }
+
+    function openOutlineSearch() {
+      if (destroyed || !enabled) return false;
+      outlineOpen = true;
+      renderOutlinePopover(true);
+      return true;
     }
 
     function getStarredTurnSet() {
@@ -405,6 +812,29 @@
       const starred = getStarredTurnSet();
       while (railEl.firstChild) railEl.removeChild(railEl.firstChild);
 
+      const outlineBtn = doc.createElement('button');
+      outlineBtn.type = 'button';
+      outlineBtn.className = 'ag-sag-rnav-step';
+      outlineBtn.setAttribute('data-ag-sag-rnav-act', 'outline');
+      outlineBtn.textContent = '☰';
+      outlineBtn.title = t('rnavOutlineBtn', 'Search Outline (Alt+F)');
+      outlineBtn.addEventListener('click', () => {
+        outlineOpen = !outlineOpen;
+        renderOutlinePopover(outlineOpen);
+      });
+      railEl.appendChild(outlineBtn);
+
+      const foldAllBtn = doc.createElement('button');
+      foldAllBtn.type = 'button';
+      foldAllBtn.className = 'ag-sag-rnav-step';
+      foldAllBtn.setAttribute('data-ag-sag-rnav-act', 'fold-all');
+      foldAllBtn.textContent = '⊟';
+      foldAllBtn.title = t('rnavFoldAllBtn', 'Toggle fold all code blocks & steps');
+      foldAllBtn.addEventListener('click', () => {
+        toggleFoldAllStepsAndCode();
+      });
+      railEl.appendChild(foldAllBtn);
+
       const prevBtn = doc.createElement('button');
       prevBtn.type = 'button';
       prevBtn.className = 'ag-sag-rnav-step';
@@ -416,8 +846,8 @@
 
       const dotsWrap = doc.createElement('div');
       dotsWrap.className = 'ag-sag-rnav-dots';
-      const maxDots = Math.min(turns.length, 30);
-      for (let i = 0; i < maxDots; i += 1) {
+      // Uncapped scrollable turn dots (no 30-turn truncation)
+      for (let i = 0; i < turns.length; i += 1) {
         const turnNum = i + 1;
         const snippet = String(turns[i]?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 64);
         const dot = doc.createElement('button');
@@ -441,13 +871,27 @@
       nextBtn.title = t('rnavNextTip', 'Next turn (Alt+↓)');
       nextBtn.addEventListener('click', () => jumpRelative(1));
       railEl.appendChild(nextBtn);
+
+      if (outlineOpen) renderOutlinePopover(false);
     }
 
     function onKeyDown(ev) {
       if (destroyed || !enabled) return;
+      const key = String(ev?.key || '');
+      if (key === 'Escape') {
+        if (mermaidModalEl) {
+          closeMermaidModal();
+          ev.preventDefault?.();
+          return;
+        }
+        if (outlineOpen) {
+          removeOutline();
+          ev.preventDefault?.();
+          return;
+        }
+      }
       if (!ev?.altKey || ev?.ctrlKey || ev?.metaKey || ev?.shiftKey) return;
       if (isEditableTarget(ev?.target)) return;
-      const key = String(ev?.key || '');
       if (key === 'ArrowUp') {
         if (jumpRelative(-1)) {
           ev.preventDefault?.();
@@ -455,6 +899,11 @@
         }
       } else if (key === 'ArrowDown') {
         if (jumpRelative(1)) {
+          ev.preventDefault?.();
+          ev.stopPropagation?.();
+        }
+      } else if (key.toLowerCase() === 'f') {
+        if (openOutlineSearch()) {
           ev.preventDefault?.();
           ev.stopPropagation?.();
         }
@@ -468,6 +917,7 @@
         if (destroyed || !enabled) return;
         if (coexist?.isWindowHibernated?.(doc, win, false)) return;
         scanCodeBlocks();
+        scanMermaidDiagrams();
         renderRail();
       }, 80);
       observerTimer?.unref?.();
@@ -524,10 +974,12 @@
       if (destroyed) return;
       if (!enabled) {
         cleanupEnhancedCodeBlocks();
+        cleanupMermaidButtons();
         removeRail();
         return;
       }
       scanCodeBlocks();
+      scanMermaidDiagrams();
       renderRail();
     }
 
@@ -546,6 +998,7 @@
         detachListeners();
         clearPulse();
         cleanupEnhancedCodeBlocks();
+        cleanupMermaidButtons();
         removeRail();
         railYielded = false;
       }
@@ -564,6 +1017,9 @@
         collapseLines,
         enhancedCodeBlocks: enhancedCount,
         foldedCodeBlocks: foldedCount,
+        mermaidCount: mermaidBtns.size,
+        mermaidModalOpen: Boolean(mermaidModalEl && mermaidModalEl.isConnected !== false),
+        outlineOpen: Boolean(outlineOpen && outlineEl && outlineEl.isConnected !== false),
         railMounted: Boolean(railEl && railEl.isConnected !== false),
         railYielded,
         currentTurnIndex,
@@ -577,6 +1033,7 @@
       detachListeners();
       clearPulse();
       cleanupEnhancedCodeBlocks();
+      cleanupMermaidButtons();
       removeRail();
       try { createdStyleEl?.remove?.(); } catch {}
       createdStyleEl = null;
@@ -595,6 +1052,9 @@
       setCollapseLines,
       jumpToTurn,
       jumpRelative,
+      openOutlineSearch,
+      toggleFoldAllStepsAndCode,
+      openMermaidZoom,
       getDebugState,
       destroy,
     };

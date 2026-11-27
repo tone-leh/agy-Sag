@@ -278,6 +278,20 @@
       onExportMarkdown: options.onExportMarkdown,
       onDownloadMarkdown: options.onDownloadMarkdown,
       isRollbackAvailable: () => Boolean(novSynergy?.isConnected?.() && novSynergy?.getState?.()?.config?.modules?.guard),
+      onCompactFromTurn: ({ turnNum, snippet }) => {
+        const cmd = `/compact Focus on turn #${turnNum}${snippet ? `: ${snippet}` : ''}`;
+        if (promptLibrary?.insertIntoComposer) {
+          return promptLibrary.insertIntoComposer(cmd, { mode: 'replace' });
+        }
+        const ctxSrc = resolveDep('__agSgContextSource', './context-source.js');
+        const ed = ctxSrc?.findComposerEditor?.(doc);
+        if (!ed) return { ok: false, reason: 'no-editor' };
+        const tag = String(ed.tagName || '').toUpperCase();
+        if (tag === 'TEXTAREA' || tag === 'INPUT') ed.value = cmd;
+        else ed.textContent = cmd;
+        try { ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true })); } catch {}
+        return { ok: true };
+      },
       onRollbackTurn: ({ turnNum, snippet }) => {
         const prompt = `Please use agy-NOV guard to list snapshots before turn #${turnNum}${snippet ? ` ("${snippet}")` : ''} and confirm before rolling back workspace files.`;
         if (promptLibrary?.insertIntoComposer) {
@@ -599,6 +613,7 @@
           autoObserve: options.autoObserve,
           getLang: options.getLang,
           onCopyCode: options.onCopyText,
+          isStreaming: () => Boolean(compactGuard?.getDebugState?.()?.lastSnapshot?.streaming),
           getStarredTurns: () => {
             const st = outlineBookmarks?.getDebugState?.();
             if (Array.isArray(st?.bookmarkedTurns)) return st.bookmarkedTurns;
@@ -619,8 +634,10 @@
           onUpdateConfig: (patch) => api.updateConfig(patch),
           onCompactNow: () => compactGuard.insertCompact({ submit: true }),
           onCleanRestart: (opts) => cleanSlate?.triggerCleanClear?.(opts),
+          onExportSession: () => compactGuard.exportMarkdown?.({ download: true }),
           onOpenVault: openVault,
           onOpenSettings: (tabId) => prismBridge?.openDrawer?.(tabId),
+          onOpenShortcuts: () => prismBridge?.openShortcutSheet?.(),
         })
       : null;
 
@@ -688,6 +705,19 @@
           getBookmarkState: () => outlineBookmarks?.getDebugState?.() || null,
           getPromptLibraryState: () => promptLibrary?.getDebugState?.() || null,
           onOpenPromptLibrary: () => promptLibrary?.open?.(),
+          onRequestStorageAudit: async () => {
+            if (!novSynergy || typeof novSynergy.requestRaw !== 'function' || !novSynergy.isBridgeAvailable?.()) {
+              return { ok: false, reason: 'bridge-offline' };
+            }
+            try {
+              const res = await novSynergy.requestRaw('sag:storage_audit', {});
+              const data = res?.raw?.data || res?.data || null;
+              if (res?.ok && data) return { ok: true, data };
+              return { ok: false, error: res?.error || 'Storage audit unavailable' };
+            } catch (err) {
+              return { ok: false, error: err?.message || String(err) };
+            }
+          },
           onTestRadarAudio: () => sessionRadar?.testAudioAlert?.(),
           onExportPromptSnippets: () => promptLibrary?.exportSnippetsJson?.() || '{"version":1,"snippets":[]}',
           onImportPromptSnippets: (raw) => promptLibrary?.importSnippetsJson?.(raw) || { ok: false, errors: ['Prompt Library unavailable'] },
