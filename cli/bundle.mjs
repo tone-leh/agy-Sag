@@ -599,6 +599,7 @@ export function buildInjectExpression(config = null, opts = {}) {
   ${extPrelude}
   const prev = window.__agSag || window.__agSessionGuard;
   if (prev && !prev.getDebugState?.()?.destroyed && prev.__agSgHash === targetHash) {
+    if (typeof prev.syncExtPacks === 'function') prev.syncExtPacks();
     if (bootCfg && typeof prev.updateConfig === 'function') prev.updateConfig(bootCfg);
     if (typeof prev.evaluateNow === 'function') void prev.evaluateNow();
     return { ok: true, reused: true, codeHash: targetHash, brand: 'agy-Sag' };

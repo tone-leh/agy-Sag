@@ -33,6 +33,27 @@ function createMiniDom() {
       hasAttribute(k) { return attrs.has(k); },
       removeAttribute(k) { attrs.delete(k); },
       appendChild(c) { c.parentElement = el; el.children.push(c); return c; },
+      insertBefore(c, ref) {
+        c.parentElement = el;
+        const idx = el.children.indexOf(ref);
+        if (idx >= 0) el.children.splice(idx, 0, c);
+        else el.children.push(c);
+        return c;
+      },
+      closest(sel) {
+        let cur = el;
+        while (cur) {
+          const parts = String(sel || '').split(',').map((s) => s.trim()).filter(Boolean);
+          for (const atom of parts) {
+            const mAttr = atom.match(/^\[([^=\]]+)="([^"]+)"\]$/);
+            if (mAttr && cur.getAttribute(mAttr[1]) === mAttr[2]) return cur;
+            if (atom.startsWith('.') && String(cur.className || '').split(/\s+/).includes(atom.slice(1))) return cur;
+            if (cur.tagName.toLowerCase() === atom.toLowerCase()) return cur;
+          }
+          cur = cur.parentElement;
+        }
+        return null;
+      },
       remove() {
         if (el.parentElement) {
           el.parentElement.children = el.parentElement.children.filter((x) => x !== el);
@@ -284,4 +305,96 @@ test('Phase 14: themeStudio detectConvStateFromDom ignores CSS-hidden nodes via 
   const ruExpr = buildInjectExpression({ hostI18nLocale: 'ru' });
   new Function(ruExpr);
   assert.ok(Buffer.byteLength(ruExpr) <= 1_540_000, `Expected ru bundle <= 1,540,000 B, got ${Buffer.byteLength(ruExpr)} B`);
+});
+
+test('Phase 14 final-audit hardening: EEXIST safe cleanup, strict WS port & app:// URL, /proc unreadable, case-folded ReDoS, no-config reuse syncExtPacks & HUD verify/force_ask propagation', async () => {
+  const vm = await import('node:vm');
+  const { isAntigravityHostTarget, isLoopbackWsUrl } = await import('../cli/cdp-attach.mjs');
+  const { detectAntigravityProcesses } = await import('../cli/launcher.mjs');
+  const { computeCoreHash } = await import('../cli/bundle.mjs');
+  const saaMod = require('../packages/core/safe-auto-accept.js');
+  const pqMod = require('../packages/core/prompt-queue.js');
+
+  // (a) Omitted port on WS URL rejected when non-80 expectedPort specified; foreign app:// with fake Antigravity title rejected
+  assert.equal(isLoopbackWsUrl('ws://127.0.0.1/page/1', 9222), false);
+  assert.equal(
+    isAntigravityHostTarget(
+      { type: 'page', title: 'Antigravity', url: 'app://foreign-electron/index.html', webSocketDebuggerUrl: 'ws://127.0.0.1:9222/p1' },
+      { expectedPort: 9222 }
+    ),
+    false
+  );
+
+  // (b) Case-folded overlapping optional/variable quantifiers rejected in case-insensitive mode
+  assert.equal(saaMod.validateCustomPattern('A?a?'), false);
+  assert.equal(saaMod.validateCustomPattern('[A-Z]+[a-z]+'), false);
+
+  // (c) PromptQueue retains item if button only mutates draft without clearing or entering streaming
+  const { doc, mk } = createMiniDom();
+  const box = mk('div');
+  box.setAttribute('data-testid', 'agent-input-box');
+  const ta = mk('textarea');
+  const mutBtn = mk('button', 'Send');
+  mutBtn.setAttribute('data-testid', 'input-send-button');
+  mutBtn.addEventListener('click', () => {
+    ta.value = `${ta.value} [edited-not-sent]`;
+  });
+  box.appendChild(ta);
+  box.appendChild(mutBtn);
+  doc.body.appendChild(box);
+  const pq = pqMod.createPromptQueueController({
+    win: { document: doc, localStorage: { getItem: () => null, setItem() {}, removeItem() {} }, Event },
+    doc,
+    autoObserve: false,
+    dispatchDelayMs: 5000,
+  });
+  try {
+    pq.enqueue('Do not drop me');
+    const res = pq.flushIfReady();
+    assert.equal(res.dispatched, false);
+    assert.equal(res.reason, 'submit-unconfirmed');
+    assert.equal(pq.getItems().length, 1);
+  } finally {
+    pq.destroy();
+  }
+
+  // (d) Missing forceAskCount on legacy snapshot with lastEvent.decision='force_ask' infers 1 (never full askCount)
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-sag-p14-fa-'));
+  try {
+    fs.writeFileSync(
+      path.join(tmpHome, 'feed-snapshot.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        guard: { blockedCount: 0, askCount: 7, lastEvent: { decision: 'force_ask', tool: 'run_command', reason: 'gate' } },
+      }),
+      'utf8'
+    );
+    const out = readNovFeed({ homeDir: tmpHome, explicitDataDir: tmpHome });
+    assert.equal(out.feed.guard.forceAskCount, 1);
+  } finally {
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  }
+
+  // (e) Windows stderr with empty stdout fails closed (does not report "not running")
+  const winErr = await detectAntigravityProcesses({
+    platform: 'win32',
+    execFileFn: async () => ({ stdout: '', stderr: 'Access is denied', exitCode: 1 }),
+  });
+  assert.equal(winErr.detectionFailed, true);
+
+  // (f) Same-hash no-config reuse still triggers prev.syncExtPacks()
+  const noCfgExpr = buildInjectExpression(null, { extLocale: 'fr' });
+  let syncExtCalled = 0;
+  const reuseWin = {
+    __agSag: {
+      __agSgHash: computeCoreHash(),
+      getDebugState: () => ({ destroyed: false }),
+      syncExtPacks() { syncExtCalled += 1; },
+      evaluateNow() {},
+    },
+  };
+  reuseWin.self = reuseWin.top = reuseWin;
+  const reuseRes = vm.runInNewContext(noCfgExpr, { window: reuseWin });
+  assert.equal(reuseRes.reused, true);
+  assert.equal(syncExtCalled, 1);
 });

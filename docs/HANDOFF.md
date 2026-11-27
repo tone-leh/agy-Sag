@@ -69,8 +69,8 @@
   - *Phase 7 Evaluation*: Kept cross-session bookmark search in `BookmarkVault` (`Ctrl/Cmd+Shift+B`) and full offline session archival in `storage-doctor` CLI without adding extra renderer bloat, keeping `ru` injection comfortably under the 1.6 MiB hard cap.
   - *IA Simplification Check (PASS)*: Still 13 modules in `Overview`, zero duplicate controls, zero `:has()` / `.ag-cs-` rules, zero `"Prism"` leaks, `186/186` tests passing, and `ru` bundle size `1,604,340 B` (`<= 1,677,721 B`).
 - **v1.3 Phase 14 — `agy-NOV` v0.8/v0.9 Alignment, Bundle Headroom & Dictionary Quality (`cli/nov-bridge.mjs`, `cli/bundle.mjs`, `cli/sag-cli.mjs`, `packages/core/nov-synergy.js`, `packages/core/prompt-library.js`, `packages/core/prism-bridge.js`, `packages/core/status-pill.js`, `packages/core/theme-studio.js`, `packages/core/index.js`, `packages/core/locales/ext/zh-CN.json`, `test/phase14-nov-v09-hardening.test.mjs`)**:
-  - Synced read-only `readNovFeed()` & renderer HUD/Settings with `agy-NOV v0.8/v0.9` (`guard.forceAskCount`, `guard.permissionMode`, `lastEvent.decision`, `verify`, redacted `alerts`), exposed `/nov-spec`, `/nov-debug`, `/nov-review`, `/nov-handoff` in `promptLibrary` when NOV is connected, upgraded `themeStudio` visibility checks with `getComputedStyle`, fixed all 6 `zh-CN.json` placeholder/brand anomalies (0 defects across all 9 extended packs), and reclaimed >21 KB in `cli/bundle.mjs` (`ru` sync `1,531,194 B`, Watch deferred `917,748 B`).
-  - *Verification Baseline*: `236/236` tests passing, `i18n:validate` 0 errors, `workbench:smoke` HTTP 200 (`1,260,794 B`, 22 markers).
+  - Synced read-only `readNovFeed()` & renderer HUD/Settings with `agy-NOV v0.8/v0.9` (`guard.forceAskCount`, `guard.permissionMode`, `lastEvent.decision`, `verify`, redacted `alerts`), exposed `/nov-spec`, `/nov-debug`, `/nov-review`, `/nov-handoff` in `promptLibrary` when NOV is connected, upgraded `themeStudio` visibility checks with `getComputedStyle`, fixed all 6 `zh-CN.json` placeholder/brand anomalies (0 defects across all 9 extended packs), and reclaimed >21 KB in `cli/bundle.mjs` (`ru` sync `1,532,015 B`, Watch deferred `918,569 B`).
+  - *Verification Baseline*: `237/237` tests passing, `i18n:validate` 0 errors, `workbench:smoke` HTTP 200 (`1,261,876 B`, 22 markers).
 - **v1.3 Audit & Windows/Linux Cross-Platform Hardening (`cli/platform-utils.mjs`, `cli/*.mjs`, `packages/core/*.js`, `workbench/server.mjs`, `test/cross-platform-audit-fixes.test.mjs`, `test/renderer-audit-fixes.test.mjs`)**:
   - Completed independent Codex CLI (`gpt-6.2-sol`) read-only security/bug audit + Windows/Linux compatibility remediation covering cross-platform CLI entry/symlink/path identity, Windows PowerShell UTF-8/`pwsh`/`renameSync` lock retry/quoted guidance, Linux XDG/Flatpak/Snap/`/proc` fallback & strict basename matching, fail-closed CDP top-level frame auth & loopback WS validation, destination symlink guards on install/backup, per-session NOV feed sync, and renderer reliability fixes (`safeAutoAccept`, `promptQueue`, `compactGuard`, `hostI18n`, `promptLibrary`, `readingNav`, `themeStudio`, `prismBridge`, `index`).
   - *Verification Baseline*: `233/233` tests passing, `ru` sync bundle `1,548,739 B` (`<= 1,550,000 B` / `<= 1,677,721 B`), Watch deferred `935,293 B`, `workbench:smoke` HTTP 200 (`1,256,145 B`, 22 markers).
@@ -96,9 +96,9 @@
 
 Run inside repository root:
 ```bash
-npm test                                  # 236/236 tests passing (node --test)
+npm test                                  # 237/237 tests passing (node --test)
 npm run i18n:validate                     # 10 built-in + 9 extended packs, 0 errors
-npm run workbench:smoke                   # HTTP 200, 1260794 B, 22 markers verified
+npm run workbench:smoke                   # HTTP 200, 1261876 B, 22 markers verified
 node cli/sag-cli.mjs launch --dry-run --json  # Read-only launch plan + Prism yield check
 ```
 

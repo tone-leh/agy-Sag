@@ -547,14 +547,18 @@ function readLinuxProcProcesses(procDir = '/proc') {
   } catch {}
 
   const entries = [];
+  let pidDirsFound = 0;
+  let readableCmdlines = 0;
   for (const ent of dirents) {
     if (!/^\d+$/.test(ent.name)) continue;
     const pid = Number(ent.name);
     if (!Number.isInteger(pid) || pid <= 0) continue;
+    pidDirsFound += 1;
     const cmdlinePath = path.join(procDir, ent.name, 'cmdline');
     let rawCmd;
     try {
       rawCmd = fs.readFileSync(cmdlinePath, 'utf8');
+      readableCmdlines += 1;
     } catch {
       continue;
     }
@@ -583,6 +587,9 @@ function readLinuxProcProcesses(procDir = '/proc') {
     } catch {}
 
     entries.push({ pid, ppid, startMs, commandLine });
+  }
+  if (pidDirsFound > 0 && readableCmdlines === 0) {
+    throw new Error(`All ${pidDirsFound} /proc/<pid>/cmdline entries were unreadable`);
   }
   return entries;
 }
@@ -614,6 +621,11 @@ export async function detectAntigravityProcesses({
         const res = await execFileFn(psExe, ['-NoProfile', '-NonInteractive', '-Command', psCmd], {
           windowsHide: true,
         });
+        const outText = String(res?.stdout ?? (typeof res === 'string' ? res : '')).trim();
+        const errText = String(res?.stderr ?? '').trim();
+        if ((typeof res?.exitCode === 'number' && res.exitCode !== 0) || (!outText && errText)) {
+          throw new Error(errText || `Non-zero exit code ${res.exitCode}`);
+        }
         entries = parseWindowsProcessOutput(res?.stdout ?? res, { strictJson: true });
         succeeded = true;
         break;
@@ -629,6 +641,11 @@ export async function detectAntigravityProcesses({
           ['process', 'where', "name='Antigravity.exe'", 'get', 'ProcessId,ParentProcessId,CreationDate,CommandLine', '/format:list'],
           { windowsHide: true }
         );
+        const outText = String(res?.stdout ?? (typeof res === 'string' ? res : '')).trim();
+        const errText = String(res?.stderr ?? '').trim();
+        if ((typeof res?.exitCode === 'number' && res.exitCode !== 0) || (!outText && errText)) {
+          throw new Error(errText || `Non-zero exit code ${res.exitCode}`);
+        }
         entries = parseWindowsProcessOutput(res?.stdout ?? res, { strictJson: false });
         succeeded = true;
       } catch (err) {

@@ -621,10 +621,9 @@
         }
         return null;
       };
-      const before = readEditorValue(ed);
       const isSubmitted = () => {
         const after = readEditorValue(ed);
-        return after === '' || after !== before || checkStreaming(scope);
+        return after === '' || checkStreaming(scope);
       };
       const sendBtn =
         pickBtn([box, formScope, fb], ['[data-testid="send-button"]', '[data-testid="input-send-button"]']) ||

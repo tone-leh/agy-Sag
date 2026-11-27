@@ -900,7 +900,7 @@ export function readNovFeed(opts = {}) {
     const permMode = typeof g.permissionMode === 'string' && ALLOWED_PERM_MODES.has(g.permissionMode.trim()) ? g.permissionMode.trim() : null;
     const verifyStatus = typeof vf.lastStatus === 'string' && ALLOWED_VERIFY_STATUS.has(vf.lastStatus.trim().toLowerCase()) ? vf.lastStatus.trim().toLowerCase() : null;
     const forceAskCount = toSafeNonNegInt(
-      g.forceAskCount ?? (lastEvDecision === 'force_ask' ? Math.max(1, toSafeNonNegInt(g.askCount)) : 0)
+      g.forceAskCount ?? (lastEvDecision === 'force_ask' ? 1 : 0)
     );
     const rawAlerts = Array.isArray(snap.alerts) ? snap.alerts : [];
     const alerts = rawAlerts

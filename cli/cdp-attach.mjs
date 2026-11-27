@@ -189,6 +189,8 @@ export function isLoopbackWsUrl(wsUrl, expectedPort = null) {
     if (hasExpectedPort && expectedPort !== portNum) {
       return false;
     }
+  } else if (hasExpectedPort && expectedPort !== 80) {
+    return false;
   }
   return true;
 }
@@ -199,7 +201,7 @@ export function isAntigravityHostUrl(rawUrl) {
   if (/^(?:devtools|chrome|chrome-extension|data|blob|plugin):/.test(url)) return false;
   if (/\/launchpad(?:\.html)?(?:[?#]|$)/i.test(url)) return false;
   if (/^(?:vscode-file|app):/.test(url)) {
-    return /(?:antigravity|\/workbench\/workbench|workbench\.html)/i.test(url);
+    return /(?:^app:\/\/antigravity\/|\/antigravity\/|\/workbench\/workbench|workbench\.html|^vscode-file:\/\/vscode-app\/index\.html(?:[?#]|$))/i.test(url);
   }
   if (/^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?\//.test(url)) {
     return true;
@@ -218,10 +220,7 @@ export function isAntigravityHostTarget(target, opts = null) {
   if (/^(?:devtools|chrome|chrome-extension|data|blob|plugin):/.test(url)) return false;
   if (/\/launchpad(?:\.html)?(?:[?#]|$)/i.test(url)) return false;
   if (/^(?:vscode-file|app):/.test(url)) {
-    return (
-      /(?:antigravity|\/workbench\/workbench|workbench\.html)/i.test(url) ||
-      /antigravity/i.test(title)
-    );
+    return isAntigravityHostUrl(url);
   }
   if (/^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?\//.test(url) && /antigravity/i.test(title)) {
     return true;

@@ -602,8 +602,12 @@
           }
           continue;
         }
-        const txt = String(el.textContent || el.getAttribute?.('data-value') || '').trim().toLowerCase();
-        if (/(?:^|\s)\/compact(?:\s|$)|^compact(?:\s|$)/.test(txt)) {
+        const dataVal = String(el.getAttribute?.('data-value') || '').trim().toLowerCase();
+        if (dataVal === 'compact' || dataVal === '/compact') {
+          return { opt: el, clickTarget: el };
+        }
+        const txt = String(el.textContent || '').trim().toLowerCase();
+        if (/^(?:\/compact|compact)(?:\s|$)/.test(txt)) {
           return { opt: el, clickTarget: el };
         }
       }

@@ -125,11 +125,24 @@
           specWriteLocked: Boolean(novFeed?.spec?.writeLockActive),
           memDrifted: Number(novFeed?.mem?.driftedCount) || 0,
           guardBlocked: Number(novFeed?.guard?.blockedCount) || 0,
+          guardForceAsk: Number(novFeed?.guard?.forceAskCount) || 0,
+          verifyFailed: novFeed?.verify?.lastStatus === 'fail',
           radarAwaiting: Number(novFeed?.radar?.awaitingCount) || 0,
         },
         hostLocale: hiState?.locale || 'en',
         synergyConnected: novConnected,
       });
+    };
+
+    const syncExtPacks = () => {
+      const liveExtPacks = win?.__agSagExtPacks || globalRoot?.__agSagExtPacks || null;
+      if (liveExtPacks && hostI18nPacksMod?.registerExtendedPack) {
+        for (const [extLoc, extPack] of Object.entries(liveExtPacks)) {
+          if (extPack && typeof extPack === 'object' && !hostI18nPacksMod.hasExtendedPack?.(extLoc)) {
+            try { hostI18nPacksMod.registerExtendedPack(extLoc, extPack); } catch {}
+          }
+        }
+      }
     };
 
     const syncSubModulesFromConfig = (nextCfg) => {
@@ -141,14 +154,7 @@
       sessionRadar?.setQuietHours?.(nextCfg.radarQuietHours || '');
 
       if (hostI18n) {
-        const liveExtPacks = win?.__agSagExtPacks || globalRoot?.__agSagExtPacks || null;
-        if (liveExtPacks && hostI18nPacksMod?.registerExtendedPack) {
-          for (const [extLoc, extPack] of Object.entries(liveExtPacks)) {
-            if (extPack && typeof extPack === 'object' && !hostI18nPacksMod.hasExtendedPack?.(extLoc)) {
-              try { hostI18nPacksMod.registerExtendedPack(extLoc, extPack); } catch {}
-            }
-          }
-        }
+        syncExtPacks();
         hostI18n.setConflictPolicy?.(nextCfg.hostI18nConflictPolicy || 'yield');
         hostI18n.setCollectMissing?.(Boolean(nextCfg.hostI18nCollectMissing));
         hostI18n.setLocale?.(nextCfg.hostI18nLocale || 'auto');
@@ -879,6 +885,7 @@
       closeSettingsDrawer: () => prismBridge?.closeDrawer?.(),
       openPromptLibrary: () => promptLibrary?.open?.(),
       openBookmarkVault: (q) => bookmarkVault?.open?.(q),
+      syncExtPacks,
       getDebugState: () => ({
         version: VERSION,
         brand: 'agy-Sag',

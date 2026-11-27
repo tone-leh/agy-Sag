@@ -95,50 +95,50 @@ test('SagWatchDaemon: adaptive backoff on missing/unreachable port, auto-attach,
   // 3) Host window appears (plus non-host DevTools page which must be skipped)
   listThrows = false;
   targets = [
-    { id: 't-host-1', type: 'page', title: 'Antigravity', url: 'app://antigravity/index.html', webSocketDebuggerUrl: 'ws://127.0.0.1/t1' },
-    { id: 't-devtools', type: 'page', title: 'DevTools', url: 'devtools://devtools/bundled/inspector.html', webSocketDebuggerUrl: 'ws://127.0.0.1/dt' },
-    { id: 't-ext', type: 'page', title: 'Web', url: 'https://example.com', webSocketDebuggerUrl: 'ws://127.0.0.1/ext' },
+    { id: 't-host-1', type: 'page', title: 'Antigravity', url: 'app://antigravity/index.html', webSocketDebuggerUrl: 'ws://127.0.0.1:9229/t1' },
+    { id: 't-devtools', type: 'page', title: 'DevTools', url: 'devtools://devtools/bundled/inspector.html', webSocketDebuggerUrl: 'ws://127.0.0.1:9229/dt' },
+    { id: 't-ext', type: 'page', title: 'Web', url: 'https://example.com', webSocketDebuggerUrl: 'ws://127.0.0.1:9229/ext' },
   ];
   const c6 = await daemon.reconcileOnce();
   assert.equal(c6.status, 'ok');
   assert.equal(c6.hostPages, 1);
   assert.equal(c6.attached, 1);
   assert.equal(c6.nextDelayMs, 1000, 'Activity resets backoff to base interval');
-  assert.deepEqual(evalLog.slice(-1), [{ wsUrl: 'ws://127.0.0.1/t1', kind: 'inject' }]);
+  assert.deepEqual(evalLog.slice(-1), [{ wsUrl: 'ws://127.0.0.1:9229/t1', kind: 'inject' }]);
 
   // 4) Steady-state cycle -> lightweight probe only (zero redundant full inject!), smoothly backs off
   const c7 = await daemon.reconcileOnce();
   assert.equal(c7.attached, 0);
   assert.equal(c7.reused, 1);
   assert.equal(c7.nextDelayMs, 1500);
-  assert.deepEqual(evalLog.slice(-1), [{ wsUrl: 'ws://127.0.0.1/t1', kind: 'probe' }]);
+  assert.deepEqual(evalLog.slice(-1), [{ wsUrl: 'ws://127.0.0.1:9229/t1', kind: 'probe' }]);
 
   // 5) Simulated Cmd+R reload wipes window.__agSessionGuard -> probe detects missing -> auto re-injects!
-  mountedHashes.delete('ws://127.0.0.1/t1');
+  mountedHashes.delete('ws://127.0.0.1:9229/t1');
   const c8 = await daemon.reconcileOnce();
   assert.equal(c8.attached, 1);
   assert.equal(c8.nextDelayMs, 1000, 'Reload recovery resets backoff to base interval');
   assert.deepEqual(
     evalLog.slice(-2),
     [
-      { wsUrl: 'ws://127.0.0.1/t1', kind: 'probe' },
-      { wsUrl: 'ws://127.0.0.1/t1', kind: 'inject' },
+      { wsUrl: 'ws://127.0.0.1:9229/t1', kind: 'probe' },
+      { wsUrl: 'ws://127.0.0.1:9229/t1', kind: 'inject' },
     ]
   );
 
   // 6) Second window owned by Obsidian Prism -> yields and stays yielded on probe without re-injecting
-  yieldedTargets.add('ws://127.0.0.1/t2');
+  yieldedTargets.add('ws://127.0.0.1:9229/t2');
   targets = [
     ...targets,
-    { id: 't-host-2', type: 'page', title: 'Antigravity #2', url: 'vscode-file://vscode-app/index.html', webSocketDebuggerUrl: 'ws://127.0.0.1/t2' },
+    { id: 't-host-2', type: 'page', title: 'Antigravity #2', url: 'vscode-file://vscode-app/index.html', webSocketDebuggerUrl: 'ws://127.0.0.1:9229/t2' },
   ];
   const c9 = await daemon.reconcileOnce();
   assert.equal(c9.yielded, 1);
   assert.equal(c9.reused, 1);
-  const injectCountBefore = evalLog.filter((e) => e.wsUrl === 'ws://127.0.0.1/t2' && e.kind === 'inject').length;
+  const injectCountBefore = evalLog.filter((e) => e.wsUrl === 'ws://127.0.0.1:9229/t2' && e.kind === 'inject').length;
   const c10 = await daemon.reconcileOnce();
   assert.equal(c10.yielded, 1);
-  const injectCountAfter = evalLog.filter((e) => e.wsUrl === 'ws://127.0.0.1/t2' && e.kind === 'inject').length;
+  const injectCountAfter = evalLog.filter((e) => e.wsUrl === 'ws://127.0.0.1:9229/t2' && e.kind === 'inject').length;
   assert.equal(injectCountAfter, injectCountBefore, 'Yielded window must not be repeatedly re-injected');
 
   // 7) Close window t-host-2 -> pruned cleanly

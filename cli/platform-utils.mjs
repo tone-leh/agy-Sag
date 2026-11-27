@@ -298,8 +298,10 @@ export function copyFileSafeAtomic(srcPath, destPath, realDestRoot, { platform =
   const tmpName = `.sag-tmp.${process.pid}.${Date.now()}.${atomicCopyCounter}.${Math.random().toString(16).slice(2)}`;
   const tmpPath = path.join(realParent, tmpName);
   const srcBuf = fs.readFileSync(srcPath);
+  let createdTmp = false;
   try {
     fs.writeFileSync(tmpPath, srcBuf, { flag: 'wx' });
+    createdTmp = true;
     const recheckParent = fs.realpathSync(destDir);
     if (!isPathWithinBase(recheckParent, realDestRoot, platform)) {
       throw new Error(`Security violation: destination parent moved outside root (${destPath})`);
@@ -314,9 +316,11 @@ export function copyFileSafeAtomic(srcPath, destPath, realDestRoot, { platform =
     }
     atomicRenameWithRetry(tmpPath, destPath, { platform });
   } catch (err) {
-    try {
-      fs.unlinkSync(tmpPath);
-    } catch {}
+    if (createdTmp) {
+      try {
+        fs.unlinkSync(tmpPath);
+      } catch {}
+    }
     throw err;
   }
 }

@@ -607,9 +607,27 @@
     return all ? { m: [-1, -1, -1, -1], na: true } : { m: [0, 0, 0, 0], na: false };
   }
 
-  function setCode(mk, c) {
-    if (c >= 0 && c < 128) mk.m[c >>> 5] |= 1 << (c & 31);
-    else if (c >= 128) mk.na = true;
+  function setCode(mk, c, foldCase = false) {
+    if (c >= 0 && c < 128) {
+      mk.m[c >>> 5] |= 1 << (c & 31);
+      if (foldCase) {
+        if (c >= 65 && c <= 90) mk.m[(c + 32) >>> 5] |= 1 << ((c + 32) & 31);
+        else if (c >= 97 && c <= 122) mk.m[(c - 32) >>> 5] |= 1 << ((c - 32) & 31);
+      }
+    } else if (c >= 128) mk.na = true;
+  }
+
+  function foldMaskAsciiCase(mk) {
+    if (!mk) return mk;
+    for (let c = 65; c <= 90; c += 1) {
+      const up = (mk.m[c >>> 5] & (1 << (c & 31))) !== 0;
+      const lo = (mk.m[(c + 32) >>> 5] & (1 << ((c + 32) & 31))) !== 0;
+      if (up || lo) {
+        mk.m[c >>> 5] |= 1 << (c & 31);
+        mk.m[(c + 32) >>> 5] |= 1 << ((c + 32) & 31);
+      }
+    }
+    return mk;
   }
 
   function addShort(mk, ch) {
@@ -708,7 +726,8 @@
     return { ex: false, v: false, u: false, n: pos };
   }
 
-  function hasUnsafeCustomRegex(source) {
+  function hasUnsafeCustomRegex(source, flags = 'i') {
+    const foldCase = String(flags || '').includes('i');
     if (typeof source !== 'string' || !source || source.length > MAX_CUSTOM_PATTERN_CHARS) return true;
     if (/\([^)]*[+*][^)]*\)[+*?{]/.test(source) || /\([^)]*\{\d+,\d*\}[^)]*\)[+*?{]/.test(source)) return true;
     if (/(?:^|[^\\])\\[1-9]/.test(source)) return true;
@@ -748,7 +767,7 @@
       let wild = false;
       let end = i + 1;
       if (ch === '.') { wild = true; mk = mkMask(true); }
-      else if (ch === '[') { const p = parseClassMask(source, i); mk = p.mk; end = p.end + 1; }
+      else if (ch === '[') { const p = parseClassMask(source, i); mk = foldCase ? foldMaskAsciiCase(p.mk) : p.mk; end = p.end + 1; }
       else if (ch === '\\') {
         if (i + 1 >= source.length) { i += 1; continue; }
         const e = source[i + 1];
@@ -756,7 +775,8 @@
         if (e === 'b' || e === 'B') { top.prev = null; i = end; continue; }
         mk = mkMask(false);
         addShort(mk, e);
-      } else { mk = mkMask(false); setCode(mk, ch.charCodeAt(0)); }
+        if (foldCase) foldMaskAsciiCase(mk);
+      } else { mk = mkMask(false); setCode(mk, ch.charCodeAt(0), foldCase); }
 
       const q = readQuant(source, end);
       if (wild && q.u && ++wilds >= 3) return true;
@@ -775,8 +795,8 @@
   function compileCustomPattern(entry) {
     if (!entry) return null;
     if (entry instanceof RegExp) {
-      if (hasUnsafeCustomRegex(entry.source)) return null;
       const flags = entry.flags.replace(/g/g, '');
+      if (hasUnsafeCustomRegex(entry.source, flags)) return null;
       try {
         return { raw: entry.toString(), regex: new RegExp(entry.source, flags) };
       } catch {
@@ -790,16 +810,16 @@
     // Support /pattern/flags literal syntax
     const slashMatch = trimmed.match(/^\/(.+)\/([a-zA-Z]*)$/);
     if (slashMatch) {
-      if (hasUnsafeCustomRegex(slashMatch[1])) return null;
+      const flags = slashMatch[2].replace(/g/g, '');
+      if (hasUnsafeCustomRegex(slashMatch[1], flags)) return null;
       try {
-        const flags = slashMatch[2].replace(/g/g, '');
         return { raw: trimmed, regex: new RegExp(slashMatch[1], flags) };
       } catch {
         return null;
       }
     }
 
-    if (hasUnsafeCustomRegex(trimmed)) return null;
+    if (hasUnsafeCustomRegex(trimmed, 'i')) return null;
     try {
       return { raw: trimmed, regex: new RegExp(trimmed, 'i') };
     } catch {
