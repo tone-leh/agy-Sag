@@ -229,7 +229,10 @@ export async function runCdpAttachCli(argv = process.argv.slice(2)) {
       ? REMOVE_EXPRESSION
       : opts.action === 'status'
         ? '(() => (window.__agSag || window.__agSessionGuard)?.getDebugState?.() || { mounted: false })()'
-        : buildInjectExpression(Object.keys(cfgPatch).length ? cfgPatch : null, { source: 'standalone' });
+        : buildInjectExpression(Object.keys(cfgPatch).length ? cfgPatch : null, {
+            source: 'standalone',
+            extLocale: opts.lang || null,
+          });
 
   const results = [];
   for (const page of hostPages) {

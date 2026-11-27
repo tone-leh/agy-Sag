@@ -779,6 +779,8 @@
     return LOCALES.map((loc) => ({ ...META[loc] }));
   }
 
+  const EXTENDED_PACKS = new Map();
+
   function clonePack(pack) {
     return {
       meta: { ...pack.meta },
@@ -791,9 +793,78 @@
     };
   }
 
+  function registerExtendedPack(locale, extPack) {
+    const norm = normalizeHostLocale(locale);
+    if (norm === 'en' || !extPack || typeof extPack !== 'object') {
+      return { ok: false, locale: norm, exactCount: 0, patternCount: 0 };
+    }
+    const cleanExact = Object.create(null);
+    if (extPack.exact && typeof extPack.exact === 'object' && !Array.isArray(extPack.exact)) {
+      for (const [k, v] of Object.entries(extPack.exact)) {
+        if (typeof k !== 'string' || !k.trim()) continue;
+        if (KEEP_SET.has(k) || KEEP_SET.has(k.trim())) continue;
+        if (typeof v !== 'string' || !v.trim()) continue;
+        cleanExact[k] = v;
+      }
+    }
+    const cleanPatterns = [];
+    if (Array.isArray(extPack.patterns)) {
+      for (const item of extPack.patterns) {
+        const clean = sanitizePatternEntry(item);
+        if (clean) cleanPatterns.push(clean);
+      }
+    }
+    EXTENDED_PACKS.set(norm, {
+      meta: extPack.meta && typeof extPack.meta === 'object' ? { ...extPack.meta, locale: norm } : { locale: norm, schemaVersion: SCHEMA_VERSION },
+      exact: cleanExact,
+      patterns: cleanPatterns,
+    });
+    return {
+      ok: true,
+      locale: norm,
+      exactCount: Object.keys(cleanExact).length,
+      patternCount: cleanPatterns.length,
+    };
+  }
+
+  function hasExtendedPack(locale) {
+    const norm = normalizeHostLocale(locale);
+    return EXTENDED_PACKS.has(norm);
+  }
+
+  function clearExtendedPacks(locale) {
+    if (locale) {
+      EXTENDED_PACKS.delete(normalizeHostLocale(locale));
+    } else {
+      EXTENDED_PACKS.clear();
+    }
+  }
+
   function getPack(locale) {
     const norm = normalizeHostLocale(locale);
-    return clonePack(BUILTIN_PACKS[norm] || BUILTIN_PACKS.en);
+    const core = BUILTIN_PACKS[norm] || BUILTIN_PACKS.en;
+    const ext = norm !== 'en' ? EXTENDED_PACKS.get(norm) : null;
+    if (!ext) return clonePack(core);
+
+    // Priority: built-in 465 core > extended pack (custom pack overlays above this in mergeCustomPack)
+    const mergedExact = { ...ext.exact, ...core.exact };
+    const seenSources = new Set((core.patterns || []).map((p) => (p.source instanceof RegExp ? p.source.source : String(p.source))));
+    const mergedPatterns = (core.patterns || []).map((p) => ({
+      source: p.source instanceof RegExp ? p.source.source : String(p.source),
+      flags: p.source instanceof RegExp ? p.source.flags : String(p.flags || ''),
+      replace: String(p.replace),
+    }));
+    for (const p of ext.patterns || []) {
+      if (!seenSources.has(p.source)) {
+        seenSources.add(p.source);
+        mergedPatterns.push({ ...p });
+      }
+    }
+    return {
+      meta: { ...core.meta, extendedCount: Object.keys(ext.exact).length + ext.patterns.length },
+      exact: mergedExact,
+      patterns: mergedPatterns,
+    };
   }
 
   function sanitizePatternEntry(entry) {
@@ -1213,8 +1284,13 @@
     normalizeHostLocale,
     listLocales,
     getPack,
+    registerExtendedPack,
+    hasExtendedPack,
+    clearExtendedPacks,
     mergeCustomPack,
     sanitizeImportedPack,
+    sanitizePatternEntry,
+    countCapturingGroups,
     validatePacks,
   };
 });

@@ -35,6 +35,7 @@ export const CORE_FILES = [
 
 const GLOBAL_KEYS = [
   '__agSag',
+  '__agSagExtPacks',
   '__agSagCore',
   '__agSagCoexist',
   '__agSagHostI18nPacks',
@@ -117,6 +118,49 @@ export function readCoreSources() {
   }));
 }
 
+export const EXT_PACK_LOCALES = Object.freeze([
+  'zh-CN',
+  'zh-TW',
+  'ja',
+  'ko',
+  'es',
+  'fr',
+  'de',
+  'ru',
+  'pt-BR',
+]);
+
+export function resolveInjectExtLocale(rawLocale, navigatorLang = '') {
+  const candidate = String(rawLocale || '').trim();
+  const effective = !candidate || candidate.toLowerCase() === 'auto' ? String(navigatorLang || '').trim() : candidate;
+  if (!effective) return null;
+  const s = effective.toLowerCase().replace(/_/g, '-');
+  if (s === 'en' || s.startsWith('en-')) return null;
+  if (/^zh-(?:tw|hk|mo|hant)/.test(s) || /^yue\b/.test(s)) return 'zh-TW';
+  if (s === 'zh' || s.startsWith('zh-')) return 'zh-CN';
+  if (s === 'ja' || s.startsWith('ja-') || s === 'jp') return 'ja';
+  if (s === 'ko' || s.startsWith('ko-') || s === 'kr') return 'ko';
+  if (s === 'es' || s.startsWith('es-')) return 'es';
+  if (s === 'fr' || s.startsWith('fr-')) return 'fr';
+  if (s === 'de' || s.startsWith('de-')) return 'de';
+  if (s === 'ru' || s.startsWith('ru-')) return 'ru';
+  if (s === 'pt' || s.startsWith('pt-')) return 'pt-BR';
+  return null;
+}
+
+export function readExtendedPackFile(locale, repoRoot = path.resolve(__dirname, '..')) {
+  if (!EXT_PACK_LOCALES.includes(locale)) return null;
+  const filePath = path.join(repoRoot, 'packages', 'core', 'locales', 'ext', `${locale}.json`);
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export function computeCoreHash(parts = readCoreSources()) {
   const combined = parts.map((p) => `/* ${p.file} */\n${p.code}`).join('\n;\n');
   return crypto.createHash('sha256').update(combined).digest('hex').slice(0, 16);
@@ -128,6 +172,15 @@ export function buildInjectExpression(config = null, opts = {}) {
   const codeHash = crypto.createHash('sha256').update(combined).digest('hex').slice(0, 16);
   const cfgJson = JSON.stringify(config && typeof config === 'object' ? config : null);
   const sourceJson = JSON.stringify(typeof opts.source === 'string' && opts.source ? opts.source : 'standalone');
+
+  const resolvedExtLoc = resolveInjectExtLocale(
+    opts.extLocale ?? (config && typeof config === 'object' ? config.hostI18nLocale : null),
+    opts.navigatorLang || ''
+  );
+  const extPack = resolvedExtLoc ? readExtendedPackFile(resolvedExtLoc) : null;
+  const extPrelude = extPack
+    ? `window.__agSagExtPacks = window.__agSagExtPacks || {}; window.__agSagExtPacks[${JSON.stringify(resolvedExtLoc)}] = ${JSON.stringify(extPack)};`
+    : '';
 
   return `(() => {
   try {
@@ -144,6 +197,7 @@ export function buildInjectExpression(config = null, opts = {}) {
     if (typeof prev.evaluateNow === 'function') void prev.evaluateNow();
     return { ok: true, reused: true, codeHash: targetHash, brand: 'agy-Sag' };
   }
+  ${extPrelude}
   ${combined}
   const api = (window.__agSagCore || window.__agSgCore)?.mountSag?.({
     win: window,

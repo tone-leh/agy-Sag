@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PROBE_EXPRESSION, SagWatchDaemon, parseWatchArgs } from '../cli/watch-daemon.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {
+  PROBE_EXPRESSION,
+  SagWatchDaemon,
+  isPrismDaemonActive,
+  parsePrismPidFileContent,
+  parseWatchArgs,
+} from '../cli/watch-daemon.mjs';
 
 test('parseWatchArgs validates flags and rejects invalid ranges', () => {
   const parsed = parseWatchArgs([
@@ -141,4 +150,55 @@ test('SagWatchDaemon: adaptive backoff on missing/unreachable port, auto-attach,
 
   daemon.stop();
   assert.equal(daemon.getState().running, false);
+});
+
+test('isPrismDaemonActive: supports plain numeric and JSON .daemon.pid formats, rejects symlinks & stale PIDs', () => {
+  assert.equal(parsePrismPidFileContent('37018\n'), 37018);
+  assert.equal(parsePrismPidFileContent('{"pid":37018,"token":"37018-abc","startedAt":1795707376929}'), 37018);
+  assert.equal(parsePrismPidFileContent('{"pid":-1}'), null);
+  assert.equal(parsePrismPidFileContent('not-json'), null);
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-sag-pid-'));
+  try {
+    const prismDir = path.join(tmp, '.gemini', 'config', 'plugins', 'obsidian-prism');
+    fs.mkdirSync(prismDir, { recursive: true });
+    const pidFile = path.join(prismDir, '.daemon.pid');
+
+    // 1) JSON format with alive PID
+    fs.writeFileSync(pidFile, JSON.stringify({ pid: process.pid, token: 'tok', startedAt: Date.now() }));
+    assert.equal(isPrismDaemonActive(tmp), true);
+
+    // 2) JSON format with EPERM -> still treated as active
+    assert.equal(
+      isPrismDaemonActive(tmp, () => {
+        const err = new Error('EPERM');
+        err.code = 'EPERM';
+        throw err;
+      }),
+      true
+    );
+
+    // 3) Dead PID (ESRCH) -> false
+    assert.equal(
+      isPrismDaemonActive(tmp, () => {
+        const err = new Error('ESRCH');
+        err.code = 'ESRCH';
+        throw err;
+      }),
+      false
+    );
+
+    // 4) Plain numeric format
+    fs.writeFileSync(pidFile, `${process.pid}\n`);
+    assert.equal(isPrismDaemonActive(tmp), true);
+
+    // 5) Symlink guard -> false
+    const realTarget = path.join(tmp, 'real.pid');
+    fs.writeFileSync(realTarget, `${process.pid}`);
+    fs.rmSync(pidFile);
+    fs.symlinkSync(realTarget, pidFile);
+    assert.equal(isPrismDaemonActive(tmp), false);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });

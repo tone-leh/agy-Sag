@@ -11,11 +11,13 @@
  *   - Quota Pulse (read-only 5h/7d ledger + 429 Rate Limit DOM alert detection)
  *   - Compact Guard + Smart /compact Focus Presets + Post-Compact Recovery Strip + Bookmarks + Session Radar + Watchdog
  */
+import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readCoreSources } from '../cli/bundle.mjs';
 
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_PORT = 4179;
 
 export const SMOKE_REQUIRED_MARKERS = Object.freeze([
@@ -34,6 +36,7 @@ export const SMOKE_REQUIRED_MARKERS = Object.freeze([
   '__agSagNovSynergy',
   'ag-sag-synergy',
   'agSag.hostI18n.customPacks.v1',
+  'requestExtendedPack',
 ]);
 
 export function buildHtmlPage() {
@@ -314,6 +317,14 @@ export function buildHtmlPage() {
         <span id="sim-ui-thought-for">Thought for 6s</span>
         <span>·</span>
         <span id="sim-ui-resets-in">Resets in 2h 15m</span>
+        <span>·</span>
+        <span id="sim-ui-ext-local">Runs on this machine</span>
+        <span>·</span>
+        <span id="sim-ui-ext-cloud">Runs in a cloud environment</span>
+        <span>·</span>
+        <span id="sim-ui-ext-proceed">Always Proceed</span>
+        <span>·</span>
+        <span id="sim-ui-ext-sidebar">Select Sidebar Item 1</span>
       </div>
       <div class="host-immunity-row">
         <span class="slash-cmd" id="sim-ui-slash-cmd">/compact</span>
@@ -780,6 +791,15 @@ ${coreScript}
         now: () => Date.now() + clockOffsetMs,
         promptQueueDispatchDelayMs: 400,
         autoAcceptCooldownMs: 250,
+        extendedPackLoader: async (loc) => {
+          try {
+            const resp = await fetch('/ext/' + encodeURIComponent(loc) + '.json');
+            if (!resp.ok) return null;
+            return await resp.json();
+          } catch {
+            return null;
+          }
+        },
         novTransport: simNovTransport,
         onNovStateChange: () => {
           renderNovMirror();
@@ -1105,11 +1125,32 @@ ${coreScript}
 </html>`;
 }
 
+const EXT_LOCALE_ALLOWLIST = new Set(['zh-CN', 'zh-TW', 'ja', 'ko', 'es', 'fr', 'de', 'ru', 'pt-BR']);
+
 export function startWorkbenchServer(port = DEFAULT_PORT) {
   const server = http.createServer((req, res) => {
-    if (req.url === '/' || req.url === '/index.html') {
+    const urlPath = String(req.url || '/').split('?')[0];
+    if (urlPath === '/' || urlPath === '/index.html') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(buildHtmlPage());
+      return;
+    }
+    const extMatch = urlPath.match(/^\/ext\/([A-Za-z-]+)\.json$/);
+    if (extMatch && req.method === 'GET') {
+      const loc = extMatch[1];
+      if (!EXT_LOCALE_ALLOWLIST.has(loc)) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: 'Unsupported locale' }));
+        return;
+      }
+      const extPath = path.join(REPO_ROOT, 'packages', 'core', 'locales', 'ext', `${loc}.json`);
+      if (!fs.existsSync(extPath)) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: 'Extended pack not found' }));
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(fs.readFileSync(extPath, 'utf8'));
       return;
     }
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });

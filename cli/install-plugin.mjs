@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
 
-export const PLUGIN_ROOT_FILES = ['plugin.json', 'package.json', 'README.md', 'README.zh-CN.md', 'AGENTS.md', 'LICENSE'];
+export const PLUGIN_ROOT_FILES = ['plugin.json', 'package.json', 'README.md', 'README.zh-CN.md', 'AGENTS.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md'];
 export const PLUGIN_SUBDIRS = ['assets', 'packages/core', 'cli', 'sidecars/daemon'];
 
 export function parseInstallArgs(argv) {

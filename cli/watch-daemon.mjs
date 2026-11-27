@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildInjectExpression, computeCoreHash } from './bundle.mjs';
+import { EXT_PACK_LOCALES, buildInjectExpression, computeCoreHash, readExtendedPackFile } from './bundle.mjs';
 import {
   buildConfigPatchFromOpts,
   discoverCdpPort,
@@ -56,18 +56,36 @@ function decodeWsMessageData(data) {
  * Read-only check for whether an Obsidian Prism background daemon is currently alive.
  * Helps agy-Sag coexist politely without prompting redundant restarts.
  */
-export function isPrismDaemonActive(homeDir = os.homedir()) {
+export function parsePrismPidFileContent(raw) {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return null;
+  const firstLine = trimmed.split(/\r?\n/)[0]?.trim() || '';
+  if (/^\d+$/.test(firstLine)) {
+    const pid = Number(firstLine);
+    return Number.isInteger(pid) && pid > 0 ? pid : null;
+  }
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      const pid = Number(parsed?.pid);
+      return Number.isInteger(pid) && pid > 0 ? pid : null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+export function isPrismDaemonActive(homeDir = os.homedir(), killFn = process.kill) {
   try {
     const pidFile = path.join(path.resolve(homeDir), '.gemini', 'config', 'plugins', 'obsidian-prism', '.daemon.pid');
     const st = fs.lstatSync(pidFile);
     if (st.isSymbolicLink() || !st.isFile()) return false;
-    const raw = fs.readFileSync(pidFile, 'utf8').trim();
-    const firstLine = raw.split(/\r?\n/)[0]?.trim() || '';
-    if (!/^\d+$/.test(firstLine)) return false;
-    const pid = Number(firstLine);
-    if (!Number.isInteger(pid) || pid <= 0) return false;
+    const raw = fs.readFileSync(pidFile, 'utf8');
+    const pid = parsePrismPidFileContent(raw);
+    if (!pid) return false;
     try {
-      process.kill(pid, 0);
+      killFn(pid, 0);
       return true;
     } catch (err) {
       return err?.code === 'EPERM';
@@ -508,12 +526,23 @@ export class HostBridgeSession {
 
 export const PROBE_EXPRESSION = `(() => {
   const owner = window.__agSagOwner || window.__agSessionGuardOwner;
-  if (owner && owner !== 'standalone') return { state: 'yielded', owner };
+  let locale = '';
+  try {
+    const rawCfg = localStorage.getItem('agSag.config.v1') || localStorage.getItem('agSessionGuard.config.v1');
+    if (rawCfg) {
+      const parsed = JSON.parse(rawCfg);
+      if (parsed && typeof parsed.hostI18nLocale === 'string') locale = parsed.hostI18nLocale;
+    }
+  } catch {}
+  if (!locale || locale === 'auto') {
+    locale = document.documentElement?.getAttribute?.('data-ag-cs-lang') || navigator.language || 'en';
+  }
+  if (owner && owner !== 'standalone') return { state: 'yielded', owner, locale };
   const api = window.__agSag || window.__agSessionGuard;
   if (api && !api.getDebugState?.()?.destroyed) {
-    return { state: 'mounted', codeHash: api.__agSgHash || '' };
+    return { state: 'mounted', codeHash: api.__agSgHash || '', locale };
   }
-  return { state: 'missing' };
+  return { state: 'missing', locale };
 })()`;
 
 export function parseWatchArgs(argv) {
@@ -586,10 +615,14 @@ export class SagWatchDaemon {
     this.evalTarget = options.evalTarget || ((wsUrl, expr) => evalViaCdp(wsUrl, expr));
     this.buildInject =
       options.buildInject ||
-      (() => ({
+      (({ extLocale = null } = {}) => ({
         codeHash: computeCoreHash(),
-        expression: buildInjectExpression(this.config, { source: 'standalone' }),
+        expression: buildInjectExpression(this.config, {
+          source: 'standalone',
+          extLocale: extLocale || this.config?.hostI18nLocale || null,
+        }),
       }));
+    this.extPacksRepoRoot = options.extPacksRepoRoot || undefined;
     this.onEvent = typeof options.onEvent === 'function' ? options.onEvent : () => {};
     this.now = options.now || (() => Date.now());
     this.setTimer = options.setTimer || ((fn, ms) => setTimeout(fn, ms));
@@ -662,6 +695,24 @@ export class SagWatchDaemon {
   _handleHostBridgePayload(rawPayload, meta = {}) {
     if (this._stopped) {
       return { reqId: null, ok: false, error: 'Watch daemon is stopped' };
+    }
+    // Check extended pack request first (strict allowlist, zero path traversal, max 64KB payload)
+    if (typeof rawPayload === 'string' && rawPayload.length <= 65536 && Buffer.byteLength(rawPayload, 'utf8') <= 65536) {
+      try {
+        const parsed = JSON.parse(rawPayload);
+        if (parsed && typeof parsed === 'object' && parsed.type === 'sag:ext_pack') {
+          const reqId = typeof parsed.reqId === 'string' && parsed.reqId.length <= 128 ? parsed.reqId : null;
+          const loc = parsed.payload && typeof parsed.payload.locale === 'string' ? parsed.payload.locale : '';
+          if (!EXT_PACK_LOCALES.includes(loc)) {
+            return { reqId, ok: false, error: 'Unsupported or invalid extended pack locale' };
+          }
+          const pack = readExtendedPackFile(loc, this.extPacksRepoRoot);
+          if (!pack) {
+            return { reqId, ok: false, error: `Extended pack not found for locale: ${loc}` };
+          }
+          return { reqId, ok: true, data: { locale: loc, pack } };
+        }
+      } catch {}
     }
     // Delegate size check (64KB) and JSON parsing exclusively to handleBridgePayload
     const res = handleBridgePayload(rawPayload, this.novBridgeOpts);
@@ -883,10 +934,13 @@ export class SagWatchDaemon {
     let errors = 0;
 
     // Lazy-build inject bundle only if at least one target needs full injection
-    let bundleCache = null;
-    const getBundle = () => {
-      if (!bundleCache) bundleCache = this.buildInject();
-      return bundleCache;
+    const bundleCache = new Map();
+    const getBundle = (extLocale = null) => {
+      const cacheKey = String(extLocale || '');
+      if (!bundleCache.has(cacheKey)) {
+        bundleCache.set(cacheKey, this.buildInject(extLocale ? { extLocale } : undefined));
+      }
+      return bundleCache.get(cacheKey);
     };
 
     for (const page of hostPages) {
@@ -894,11 +948,13 @@ export class SagWatchDaemon {
       const key = String(page.id || page.webSocketDebuggerUrl);
       activeKeys.add(key);
       const prev = this.attachedTargets.get(key);
+      let probedLocale = null;
 
       try {
         if (prev && prev.wsUrl === page.webSocketDebuggerUrl && prev.url === page.url) {
           const probe = await this.evalTarget(page.webSocketDebuggerUrl, PROBE_EXPRESSION);
           if (this._stopped) break;
+          if (probe?.locale && typeof probe.locale === 'string') probedLocale = probe.locale;
           if (probe?.state === 'yielded') {
             yielded += 1;
             prev.status = 'yielded';
@@ -915,7 +971,7 @@ export class SagWatchDaemon {
           // Window reloaded or agy-Sag was cleared -> re-inject cleanly below
         }
 
-        const bundle = getBundle();
+        const bundle = getBundle(probedLocale);
         const res = await this.evalTarget(page.webSocketDebuggerUrl, bundle.expression);
         if (this._stopped) break;
         changed = true;

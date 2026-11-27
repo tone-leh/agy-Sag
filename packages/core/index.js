@@ -348,6 +348,36 @@
       }
     }
 
+    const preloadedExtPacks = win?.__agSagExtPacks || globalRoot?.__agSagExtPacks || null;
+    if (preloadedExtPacks && typeof preloadedExtPacks === 'object' && hostI18nPacksMod?.registerExtendedPack) {
+      for (const [extLoc, extPack] of Object.entries(preloadedExtPacks)) {
+        if (extPack && typeof extPack === 'object') {
+          try { hostI18nPacksMod.registerExtendedPack(extLoc, extPack); } catch {}
+        }
+      }
+    }
+
+    const requestExtendedPack = async (locale) => {
+      if (typeof options.extendedPackLoader === 'function') {
+        try {
+          const loaded = await options.extendedPackLoader(locale);
+          if (loaded && typeof loaded === 'object') return loaded;
+        } catch {}
+      }
+      if (novSynergy && typeof novSynergy.requestRaw === 'function' && novSynergy.isBridgeAvailable?.()) {
+        try {
+          const res = await novSynergy.requestRaw('sag:ext_pack', { locale });
+          if (res?.ok && res?.raw?.data?.pack && typeof res.raw.data.pack === 'object') {
+            return res.raw.data.pack;
+          }
+          if (res?.ok && res?.raw?.pack && typeof res.raw.pack === 'object') {
+            return res.raw.pack;
+          }
+        } catch {}
+      }
+      return null;
+    };
+
     hostI18n = hostI18nMod?.createHostI18nController
       ? hostI18nMod.createHostI18nController({
           win,
@@ -359,6 +389,7 @@
           collectMissing: Boolean(cfg.hostI18nCollectMissing),
           autoObserve: options.autoObserve,
           customPacks: initialCustomPacks,
+          requestExtendedPack,
         })
       : null;
 
@@ -440,6 +471,12 @@
           now: options.now,
           getSagConfig: () => compactGuard.getConfig(),
           onStateChange: (novState) => {
+            if (novState?.bridgeConnected && hostI18n) {
+              const dbg = hostI18n.getDebugState?.();
+              if (dbg?.enabled && !dbg.destroyed && dbg.locale && dbg.locale !== 'en' && !dbg.extendedPackLoaded) {
+                void hostI18n.ensureExtendedPack?.();
+              }
+            }
             prismBridge?.sync?.();
             syncStatusPill();
             if (typeof options.onNovStateChange === 'function') options.onNovStateChange(novState);
@@ -587,6 +624,7 @@
       importCustomHostPack,
       exportCustomHostPacks,
       clearCustomHostPacks,
+      requestExtendedPack,
       exportMissingHostTemplate: (loc) => hostI18n?.exportMissingTemplate?.(loc) || null,
       setNovModule: (id, enabled) => {
         if (!novSynergy?.setModule) return Promise.resolve({ ok: false, error: 'nov-synergy unavailable' });
@@ -659,6 +697,8 @@
           if (win && coexist.LEGACY_OWNER_GLOBAL && win[coexist.LEGACY_OWNER_GLOBAL] === source) {
             delete win[coexist.LEGACY_OWNER_GLOBAL];
           }
+          if (win && '__agSagExtPacks' in win) delete win.__agSagExtPacks;
+          if (globalRoot && '__agSagExtPacks' in globalRoot) delete globalRoot.__agSagExtPacks;
         } catch {}
       },
     };

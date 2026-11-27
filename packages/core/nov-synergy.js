@@ -556,14 +556,16 @@
       } catch {}
 
       const ok = msg.ok !== false && !msg.error;
-      const stateObj = extractStateFromPayload(msg);
-      if (ok && stateObj) {
-        applyIncomingState(stateObj, true);
-      } else if (ok) {
-        bridgeConnected = true;
-        currentState = { ...currentState, bridgeConnected: true };
-      } else {
-        lastError = String(msg.error || 'Bridge request failed');
+      if (!entry.skipStateApply) {
+        const stateObj = extractStateFromPayload(msg);
+        if (ok && stateObj) {
+          applyIncomingState(stateObj, true);
+        } else if (ok) {
+          bridgeConnected = true;
+          currentState = { ...currentState, bridgeConnected: true };
+        } else {
+          lastError = String(msg.error || 'Bridge request failed');
+        }
       }
 
       entry.resolve({
@@ -608,7 +610,7 @@
       } catch {}
     }
 
-    function sendRequest(type, payload = {}) {
+    function sendRequest(type, payload = {}, opts = {}) {
       if (destroyed) {
         return Promise.resolve({ ok: false, error: 'Controller destroyed', state: getState() });
       }
@@ -621,6 +623,7 @@
       reqSeq += 1;
       const reqId = `sag-nov-${reqSeq}-${Math.random().toString(36).slice(2, 7)}`;
       const envelope = { reqId, type, payload };
+      const skipStateApply = Boolean(opts && opts.rawOnly);
 
       // Mode A: Injected novTransport (offline workbench & unit tests)
       if (hasTransport()) {
@@ -639,7 +642,7 @@
             lastError = 'Bridge request timed out';
             finish({ ok: false, reqId, timedOut: true, error: 'Bridge request timed out', state: getState() });
           }, timeoutMs);
-          pending.set(reqId, { resolve: finish, timer, type });
+          pending.set(reqId, { resolve: finish, timer, type, skipStateApply });
 
           try {
             const callPromise =
@@ -653,7 +656,6 @@
               (resp) => {
                 if (settled || destroyed) return;
                 if (resp !== undefined && resp !== null) {
-                  // Direct return value from transport
                   const msg = parseIncomingMessage(resp);
                   if (msg && !msg.reqId) msg.reqId = reqId;
                   if (msg) {
@@ -661,7 +663,6 @@
                     return;
                   }
                 }
-                // Otherwise transport resolves asynchronously via receiver.onResponse(msg)
               },
               (err) => {
                 if (settled || destroyed) return;
@@ -684,7 +685,7 @@
           lastError = 'Bridge request timed out';
           resolve({ ok: false, reqId, timedOut: true, error: 'Bridge request timed out', state: getState() });
         }, timeoutMs);
-        pending.set(reqId, { resolve, timer, type });
+        pending.set(reqId, { resolve, timer, type, skipStateApply });
 
         try {
           win[HOST_BRIDGE_GLOBAL](JSON.stringify(envelope));
@@ -699,6 +700,10 @@
           resolve({ ok: false, reqId, error: lastError, state: getState() });
         }
       });
+    }
+
+    function requestRaw(type, payload = {}) {
+      return sendRequest(type, payload, { rawOnly: true });
     }
 
     function refresh() {
@@ -803,6 +808,7 @@
       setModule,
       applyPreset,
       setLocale,
+      requestRaw,
       getState,
       getSynergyEffects,
       isBridgeAvailable,

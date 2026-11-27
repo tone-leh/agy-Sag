@@ -340,6 +340,37 @@
 
     // Missing UI phrases collector (opt-in, deduped, capped at 500)
     const missingSet = new Set();
+    const inFlightExtPacks = new Map();
+    const requestExtendedPackFn = typeof options.requestExtendedPack === 'function' ? options.requestExtendedPack : null;
+
+    function ensureExtendedPack(targetLocale) {
+      if (destroyed || !requestExtendedPackFn) return Promise.resolve(false);
+      const norm = packsMod.normalizeHostLocale(targetLocale);
+      if (norm === 'en') return Promise.resolve(false);
+      if (packsMod.hasExtendedPack?.(norm)) return Promise.resolve(true);
+      if (inFlightExtPacks.has(norm)) return inFlightExtPacks.get(norm);
+
+      const p = Promise.resolve()
+        .then(() => requestExtendedPackFn(norm))
+        .then((extPack) => {
+          inFlightExtPacks.delete(norm);
+          if (destroyed || !extPack || typeof extPack !== 'object') return false;
+          const reg = packsMod.registerExtendedPack?.(norm, extPack);
+          if (!reg?.ok) return false;
+          if (!destroyed && currentLocale === norm) {
+            compileActivePack();
+            if (enabled) scanNow();
+            emitStateChange();
+          }
+          return true;
+        })
+        .catch(() => {
+          inFlightExtPacks.delete(norm);
+          return false;
+        });
+      inFlightExtPacks.set(norm, p);
+      return p;
+    }
 
     // Reversible DOM tracking via WeakMap + WeakRef registries
     const textRecords = new WeakMap(); // TextNode -> { orig, translated }
@@ -992,6 +1023,8 @@
           return;
         }
         if (configuredLocale === 'auto' && (attr === 'data-ag-cs-lang' || attr === 'lang')) {
+          const resolved = resolveLocaleConfig('auto');
+          if (resolved.resolved !== 'en') void ensureExtendedPack(resolved.resolved);
           pendingFullScan = true;
           scheduleFlush();
           return;
@@ -1077,6 +1110,7 @@
       } else if (enabled) {
         startObservers();
         scanNow();
+        void ensureExtendedPack(currentLocale);
       }
       emitStateChange();
       return currentLocale;
@@ -1093,6 +1127,7 @@
         startObservers();
         if (currentLocale !== 'en') {
           scanNow();
+          void ensureExtendedPack(currentLocale);
         } else {
           evaluateConflictAndActivation();
         }
@@ -1234,6 +1269,7 @@
         sweepCount,
         collectMissing,
         missingCount: missingSet.size,
+        extendedPackLoaded: Boolean(packsMod.hasExtendedPack?.(currentLocale)),
         observerCount: observers.length,
         hibernatedDirty,
       };
@@ -1250,6 +1286,7 @@
       compiledPatterns = [];
       customPacks.clear();
       missingSet.clear();
+      packsMod.clearExtendedPacks?.();
       yieldedTo = null;
     }
 
@@ -1261,9 +1298,12 @@
     if (options.autoScan !== false && doc) {
       if (enabled && currentLocale !== 'en') {
         scanNow();
+        void ensureExtendedPack(currentLocale);
       } else {
         evaluateConflictAndActivation();
       }
+    } else if (enabled && currentLocale !== 'en') {
+      void ensureExtendedPack(currentLocale);
     }
 
     return {
@@ -1284,6 +1324,7 @@
       exportMissingTemplate,
       clearMissingPhrases,
       restoreAll,
+      ensureExtendedPack: () => ensureExtendedPack(currentLocale),
       getStats: getDebugState,
       getDebugState,
       destroy,

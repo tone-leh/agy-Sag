@@ -741,3 +741,57 @@ test('8. doctor dual-star agy-NOV detection & install-plugin agy-sag default pat
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('9. mountSag retries sag:ext_pack when bridgeConnected becomes true and destroy() cleans __agSagExtPacks', async () => {
+  const packsMod = require('../packages/core/host-i18n-packs.js');
+  packsMod.clearExtendedPacks();
+  const { win, doc, storage } = createFullMockDom();
+  win.navigator = { language: 'zh-CN' };
+  win.__agSagExtPacks = { ja: { exact: { __Pre__: 'プレ' }, patterns: [] } };
+
+  let bridgeReqCount = 0;
+  const api = core.mountSag({
+    win,
+    doc,
+    storage,
+    autoPoll: false,
+    autoObserve: false,
+    config: { hostI18nLocale: 'zh-CN' },
+  });
+
+  try {
+    // Initially __agSagHostBridge is missing -> extended pack not yet loaded
+    assert.equal(api.hostI18n.getDebugState().extendedPackLoaded, false);
+
+    // Late bind __agSagHostBridge and emit nov:state reverse push (bridgeConnected -> true)
+    win.__agSagHostBridge = (raw) => {
+      const msg = JSON.parse(raw);
+      if (msg.type === 'sag:ext_pack') {
+        bridgeReqCount += 1;
+        queueMicrotask(() => {
+          win.__agSagBridgeReceiver.onResponse(
+            JSON.stringify({
+              reqId: msg.reqId,
+              ok: true,
+              data: {
+                locale: msg.payload.locale,
+                pack: { exact: { __LateBridgeKey__: '延迟桥接词条' }, patterns: [] },
+              },
+            })
+          );
+        });
+      }
+    };
+    win.__agSagBridgeReceiver.onPush({ event: 'nov:state', state: { installed: true, preset: 'core', modules: {} } });
+
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(bridgeReqCount, 1);
+    assert.equal(api.hostI18n.getDebugState().extendedPackLoaded, true);
+    assert.equal(packsMod.hasExtendedPack('zh-CN'), true);
+  } finally {
+    api.destroy();
+    assert.equal('__agSagExtPacks' in win, false, 'api.destroy() must delete win.__agSagExtPacks');
+    assert.equal(packsMod.hasExtendedPack('zh-CN'), false, 'api.destroy() must clear module EXTENDED_PACKS');
+    packsMod.clearExtendedPacks();
+  }
+});
