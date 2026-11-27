@@ -1,21 +1,21 @@
 # Obsidian Prism Channel 13 Integration Blueprint (Post-`v1.0.8-beta.4` Ready)
 
-This document defines the exact, zero-rework contract for absorbing one or more modules from **Antigravity Session Guard (`tone-leh/agy-session-guard`, MIT)** into **Obsidian Prism (`RMvdesi/obsidian-prism`, GPL-3.0)** as an on-demand channel **after** Prism completes its `v1.0.8-beta.4` `src/` repository restructure (see upstream [Issue #69](https://github.com/RMvdesi/obsidian-prism/issues/69) & [Issue #87](https://github.com/RMvdesi/obsidian-prism/issues/87)).
+This document defines the exact, zero-rework contract for absorbing one or more modules from **agy-Sag (`tone-leh/agy-Sag`, formerly `agy-session-guard`, MIT)** into **Obsidian Prism (`RMvdesi/obsidian-prism`, GPL-3.0)** as an on-demand channel **after** Prism completes its `v1.0.8-beta.4` `src/` repository restructure (see upstream [Issue #69](https://github.com/RMvdesi/obsidian-prism/issues/69) & [Issue #87](https://github.com/RMvdesi/obsidian-prism/issues/87)).
 
 ## 1. Zero Channel 1 Byte Overhead
 
 - **Channel 1 Delta**: **`0 B` (or `< 150 B` config key plumbing only)**.
-- All Session Guard runtime code (`packages/core/*.js`) loads strictly as an **on-demand Channel** (e.g., `Channel 13: Session Guard`) only when the user enables it in Settings → **Modules**, matching the lazy-loading discipline of Channels 8–12.
+- All agy-Sag runtime code (`packages/core/*.js`) loads strictly as an **on-demand Channel** (e.g., `Channel 13: agy-Sag`) only when the user enables it in Settings → **Modules**, matching the lazy-loading discipline of Channels 8–12.
 - All stylesheets contain **0 `:has()`** selectors and consume only host/Prism CSS custom properties (`--card`, `--foreground`, `--muted-foreground`, `--primary`, `--border`, `--warning`, `--error`, `--success`).
 
 ## 2. Host Ownership & Automatic Standalone Yield
 
-When Obsidian Prism mounts any absorbed Session Guard module, set the host ownership flag before or via `mountSessionGuard`:
+When Obsidian Prism mounts any absorbed agy-Sag module, set the host ownership flag before or via `mountSag`:
 
 ```js
-window.__agSessionGuardOwner = 'obsidian-prism';
+window.__agSagOwner = 'obsidian-prism';
 
-const guard = window.__agSgCore.mountSessionGuard({
+const guard = window.__agSagCore.mountSag({
   win: window,
   doc: document,
   source: 'obsidian-prism',
@@ -36,11 +36,11 @@ const guard = window.__agSgCore.mountSessionGuard({
 });
 ```
 
-- Any standalone `agy-session-guard` CLI attachment or `watch-daemon.mjs` detects `window.__agSessionGuardOwner !== 'standalone'` and immediately yields with zero DOM nodes, zero timers, and zero duplicate listeners.
+- Any standalone `agy-Sag` CLI attachment or `watch-daemon.mjs` detects `window.__agSagOwner !== 'standalone'` (and still honors legacy `window.__agSessionGuardOwner` and `window.__agSgCore.mountSessionGuard`) and immediately yields with zero DOM nodes, zero timers, and zero duplicate listeners.
 
 ## 3. Alignment with `Obsidian Prism v1.0.8-beta.2+` Invariants
 
-| Upstream Invariant | Session Guard Compliance |
+| Upstream Invariant | agy-Sag Compliance |
 | :--- | :--- |
 | **8-Locale Parity** (`zh-CN`, `zh-TW`, `en`, `ja`, `ko`, `es`, `fr`, `de`) | Built directly into `packages/core/i18n.js` with 100% key parity verified in `test/split-view-i18n.test.mjs`. |
 | **Multi-Pane Split View (`#62`)** | `context-source.js` resolves the active focused split pane (`resolveActivePaneScope`) and scopes telemetry (`__agPrismMetricsBridge` by `cascadeId`, per-pane `#ag-prism-pulse-bar`), composer editor, banner anchor, bookmarks, and watchdog per pane. |

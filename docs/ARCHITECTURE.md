@@ -1,46 +1,53 @@
-# Architecture & Coexistence / Integration Contract
+# agy-Sag Architecture
 
-## 1. Design Principles
+## Design Principles
 
-1. **Zero runtime dependencies**: Pure UMD/ESM JavaScript running on Node.js `>= 22` and Chromium renderer contexts.
-2. **Zero-ASAR**: Never patches `app.asar` or application binaries; attaches strictly to an existing localhost CDP port.
-3. **Zero `:has()`, 0fps idle hibernation**: Styles rely purely on host CSS custom properties (`--background`, `--card`, `--foreground`, `--muted-foreground`, `--primary`, `--border`, `--warning`, `--error`), and all timers pause immediately on `document.hidden`, `window.blur`, or `html[data-ag-cs-win-blur="1"]`.
-4. **Triple anti-mis-trigger guard for `/compact`**:
-   - **Never interrupts streaming**: When `[data-testid="stop-button"]` / `[data-testid="input-cancel-button"]` is present or telemetry reports `streaming: true`, confirmation actions disable and countdown pauses.
-   - **Zero draft overwrite**: Before filling or auto-sending `/compact`, non-empty composer text aborts insertion and cancels any active countdown.
-   - **Per-`cascadeId` dismiss & auto-reset**: Dismissing suppresses alerts until either usage climbs another `+10%` (`rearmDeltaPct`) or compaction occurs (`compactedAtStepIndices` increases or usage drops below `threshold - 10%`).
+1. **Zero-ASAR & Zero Runtime Dependencies**: Built strictly on Node.js >= 22 built-ins and plain UMD browser modules (`packages/core/`). Never touches `app.asar`, Apple Developer ID notarization, or `language_server` binaries.
+2. **Modular & Pick-What-You-Need**: 11 independently toggleable renderer modules (`hostI18n`, `compactGuard`, `precompactExport`, `draftGuard`, `promptQueue`, `sessionWatchdog`, `outlineBookmarks`, `sessionRadar`, `safeAutoAccept`, `themeStudio`, `quotaPulse`) + 4 one-click scene presets (`essential`, `i18n-only`, `power`, `full-auto`) + offline `storage-doctor` CLI. Disabled modules stop all DOM observers and timers.
+3. **Strict Opt-In for Aggressive Capabilities**: `safeAutoAccept`, `themeStudio`, `quotaPulse`, `outlineBookmarks`, and `sessionRadar` default to OFF. `safeAutoAccept` enforces a non-bypassable `HARD_DENY_PATTERNS` blacklist across every policy mode. `quotaPulse` is strictly read-only with zero credential access.
+4. **Zero-Overlap Companion Pairing with `agy-NOV`**: `agy-NOV` owns native MCP Apps (SEP-1865) + Lifecycle Hooks (`review`, `guard`, `xray`, `canvas`, `mem`, `remote`), while `agy-Sag` owns deep renderer DOM, 10-language UI translation, composer automation, visual themes, and offline storage diagnostics.
+5. **100% Lossless Teardown**: Calling `destroy()` or running `REMOVE_EXPRESSION` restores every translated DOM node/attribute via `WeakMap` snapshots, removes injected `<style>` tags and `data-ag-sag-*` / `data-ag-sg-owned` nodes, and deletes module globals.
 
-## 2. Module Layout
+## Module Topology
 
 ```text
-packages/core/
-├── i18n.js               # 5-locale table (zh-CN, zh-TW, yue, en, ja)
-├── coexist.js            # Config validation, owner auto-yield, hibernation helpers
-├── context-source.js     # Telemetry adapter (__agPrismMetricsBridge -> agPulseHost -> Pulse DOM -> DOM fallback)
-├── precompact-export.js  # Structured Markdown exporter + .md file download + secret redaction + per-session bookmarks
-├── recovery-handoff.js   # Post-compact lossless snapshot & recovery prompt builder
-├── bookmark-vault.js     # Cross-session searchable bookmark vault modal, Ctrl+Shift+B & combined MD export
-├── session-watchdog.js   # Burn-rate estimator (turns left, >=18% spike) & streaming stall detector
-├── outline-bookmarks.js  # Module D: per-turn ☆/★ bookmarks, standalone floating ★ N jump drawer & Prism outline filter
-├── styles.js             # Theme-adaptive zero-:has() CSS
-├── compact-guard.js      # Module G: threshold banner, smart /compact focus presets, recovery strip, countdown, ↓ .md download
-├── session-radar.js      # Module B: sidebar All/Running/Awaiting filter pill + opt-in blurred OS alerts (incl. stall alerts)
-└── index.js              # mountSessionGuard(opts) unified registry & lossless destroy()
-
 cli/
-├── bundle.mjs            # Zero-eval idempotent hash-guarded bundle builder & REMOVE_EXPRESSION
-├── cdp-attach.mjs        # One-shot Zero-ASAR CDP attacher, status inspector & lossless remover
-└── watch-daemon.mjs      # Adaptive-backoff Watch Daemon for new/reloaded Antigravity host windows
+ ├── sag-cli.mjs         — Unified CLI router (attach, watch, doctor, i18n, storage, presets, install, workbench)
+ ├── bundle.mjs          — Deterministic UMD concatenator, SHA-256 hash idempotency & lossless REMOVE_EXPRESSION
+ ├── cdp-attach.mjs      — Loopback DevToolsActivePort discovery & target allowlist filter
+ ├── watch-daemon.mjs    — Adaptive-backoff (3s -> 30s) CDP watcher with lightweight reload probe
+ ├── doctor.mjs          — Read-only Node/CDP/Obsidian Prism/agy-NOV coexistence diagnostics
+ ├── storage-doctor.mjs  — Read-only ~/.gemini/antigravity audit, WAL lock detection, backup & redacted export
+ └── install-plugin.mjs  — Local plugin installer (~/.gemini/config/plugins/agy-sag)
+
+packages/core/ (UMD, zero runtime deps, 0 :has() CSS)
+ ├── coexist.js          — Config sanitization, 4 presets, 11-module catalog, owner yield & idle hibernation
+ ├── i18n.js             — Plugin UI strings (8+1 Prism-aligned locales + agy-Sag suite strings)
+ ├── host-i18n-packs.js  — 10-language offline UI dictionary (465 exact entries + 25 templates per target locale)
+ ├── host-i18n.js        — WeakMap DOM translator with physical skip selectors, Shadow DOM & conflict arbitration
+ ├── compact-guard.js    — Configurable /compact guard, auto-silent scroll shield, Lexical slash picker & recovery
+ ├── precompact-export.js— Redacted Markdown export & download
+ ├── recovery-handoff.js — Post-compact anchor recovery & new-session handoff prompt
+ ├── clean-slate.js      — Same-project /clear fresh restart with optional redacted brief
+ ├── draft-guard.js      — Per-session debounced unsent draft vault
+ ├── prompt-queue.js     — Streaming follow-up queue with triple safety circuit-breakers
+ ├── safe-auto-accept.js — Policy-gated approval clicker + non-bypassable hard deny blacklist + audit log
+ ├── theme-studio.js     — 5 optical presets, CJK typography, density & fixed-point sanitized custom CSS
+ ├── quota-pulse.js      — Read-only 5h/7d turn ledger & visible UI rate-limit signal parser
+ ├── outline-bookmarks.js— Opt-in turn stars & floating jump drawer
+ ├── bookmark-vault.js   — Searchable cross-session bookmark archive (Ctrl/Cmd+Shift+B)
+ ├── session-watchdog.js — Context burn-rate estimator & streaming stall detector (+5m snooze)
+ ├── session-radar.js    — Opt-in sidebar attention filter & blurred OS notifications
+ ├── status-pill.js      — Adaptive control surface (Prism Context Card Shadow DOM or calm standalone pill)
+ ├── prism-bridge.js     — Unified Settings bridge (native Settings -> Appearance or Obsidian Prism Modules tab)
+ ├── styles.js           — Zero-:has() host-variable-adaptive stylesheet
+ └── index.js            — mountSag / mountSessionGuard lifecycle orchestrator
 ```
 
-## 3. Coexistence & Downstream Absorption Contract (e.g. Obsidian Prism)
+## Naming & Legacy Aliases
 
-`agy-session-guard` is licensed under **MIT** (upward-compatible with `GPL-3.0-only`) and ships an explicit coexistence contract so theme suites such as **Obsidian Prism** can either coexist side-by-side or absorb `packages/core/` directly into `vendor/` as an on-demand channel:
+The project is unified under **`agy-Sag`** (storage prefix `agSag.*`, globals `window.__agSag`, `window.__agSagCore`, `window.__agSagOwner`). To guarantee zero-breakage upgrades and seamless coexistence with existing host integrations (such as Obsidian Prism), the following internal identifiers and legacy aliases are intentionally preserved:
 
-- **Owner Auto-Yield**: If a host suite absorbs `packages/core/` and sets `window.__agSessionGuardOwner = 'obsidian-prism'` (or calls `mountSessionGuard({ source: 'obsidian-prism', ... })`), any standalone CDP injection automatically detects the owner and yields with zero DOM or timer side effects.
-- **Zero-Overhead Telemetry Reuse**: `context-source.js` automatically reads `window.__agPrismMetricsBridge` / `window.agPulseHost` before falling back to DOM estimation, avoiding duplicate Language Server RPC polling.
-- **Channel 4 Host i18n Isolation**: All owned DOM nodes carry `data-ag-sg-owned="1"`, `data-ag-no-i18n="1"`, and `translate="no"` so external DOM localizers never mutate Guard UI text.
-- **Settings Sheet Placement Guidance for Host Suites**:
-  - Recommended host sheet: **Modules (`modules`)**, directly below `telemetryModule` (automatically dimmed when `telemetryModule === 'off'`).
-  - Controlled externally via `api.updateConfig({ compactThreshold, compactTriggerMode })` with `persistConfig: false` when the host suite manages persistence.
-- **100% Lossless Teardown**: Calling `window.__agSessionGuard.destroy()` removes the `<style id="ag-sg-core-css">`, removes every `[data-ag-sg-owned="1"]` node, clears all timers/listeners, and deletes all `window.__agSg*` globals.
+- **Internal DOM/CSS prefixes (`ag-sg-*`, `data-ag-sg-*`)**: Retained to preserve style isolation and Obsidian Prism's `.ag-sg-*` / `.ag-cs-*` non-collision contract.
+- **UMD module globals (`__agSgCore`, `__agSgCoexist`, `__agSg*`)**: Retained alongside `__agSag*` aliases for backwards compatibility with existing loaders.
+- **Legacy compatibility aliases (`mountSessionGuard`, `SessionGuardWatchDaemon`, `__agSessionGuard`, `__agSessionGuardOwner`)**: Kept as aliases / fallback checks; `mountSag` automatically migrates `agSessionGuard.*` storage keys to `agSag.*` on startup when not yielded.

@@ -22,5 +22,7 @@ jobs:
           node-version: 22
       - name: Run unit & hygiene test suite
         run: npm test
+      - name: Validate 10-language host i18n packs
+        run: npm run i18n:validate
       - name: Smoke test offline workbench
         run: node workbench/server.mjs --smoke

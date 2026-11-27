@@ -1,6 +1,19 @@
 # Changelog
 
-All notable changes to **Antigravity Session Guard (领航哨)** are documented in this file.
+All notable changes to **agy-Sag** *(formerly Antigravity Session Guard / 领航哨)* are documented in this file.
+
+## [1.0.0] - 2026-11-27
+
+### Added
+- **Project Rebrand to `agy-Sag` & Unified Modular Suite Architecture (`packages/core/coexist.js`, `packages/core/index.js`, `plugin.json`, `package.json`)**: Evolved from `agy-session-guard` into a modular, pick-what-you-need Zero-ASAR CDP deep-enhancement suite with 11 independently toggleable renderer modules + offline Storage Doctor CLI, 4 one-click scene presets (`essential`, `i18n-only`, `power`, `full-auto`), unified `agy-Sag` UI/CLI naming, automatic `agSessionGuard.*` → `agSag.*` storage migration, and backward-compatible `mountSag` / `mountSessionGuard`, `SagWatchDaemon` / `SessionGuardWatchDaemon`, and `__agSagOwner` / `__agSessionGuardOwner` aliases.
+- **Native 10-Language Antigravity UI Translator (`packages/core/host-i18n-packs.js`, `packages/core/host-i18n.js`)**: Zero-ASAR real-time DOM localization across `en`, `zh-CN`, `zh-TW`, `ja`, `ko`, `es`, `fr`, `de`, `ru`, and `pt-BR` with 465+ exact UI entries and 25 parameterized templates per target locale, physical isolation for code blocks / inputs / chat bubbles / slash command names, Shadow DOM recursion, `WeakMap` lossless hot-switch & restore, Obsidian Prism conflict yield/takeover arbitration, custom JSON pack merging, and an opt-in untranslated phrase collector.
+- **Streaming Prompt Queue (`packages/core/prompt-queue.js`)**: Queue up to 20 follow-up prompts per session while the Agent is streaming, with triple safety circuit-breakers (streaming active, composer draft occupied, blocking approval card / paused).
+- **Policy-Gated Safe Auto-Accept (`packages/core/safe-auto-accept.js`)**: Strict opt-in inline approval automation (`readonly-safe`, `dev-flow`, `custom`) protected by a non-bypassable hard deny blacklist (`rm -rf`, `git push --force`, `git reset --hard`, `DROP TABLE`, `curl|sh`, `sudo`, `.env`, `~/.ssh`, etc.), dry-run simulation, pause toggle, and 50-entry redacted audit log.
+- **Optical Theme & Typography Studio (`packages/core/theme-studio.js`)**: Opt-in zero-`:has()` CSS variable layer with 5 curated presets (`native`, `midnight-ink`, `nord-frost`, `warm-paper`, `oled-pure`), CJK + monospace font stack polish, density controls, compact sidebar, wide reading layout, sanitized custom CSS injection, and Prism theme yield/takeover.
+- **Read-Only Quota Pulse (`packages/core/quota-pulse.js`)**: Zero-credential, zero-network 5-hour / 7-day local turn & token ledger combined with visible UI rate-limit / reset-countdown signal parsing.
+- **Offline Storage Doctor & Unified CLI (`cli/storage-doctor.mjs`, `cli/sag-cli.mjs`)**: Added `agy-sag` unified CLI (`attach`, `watch`, `status`, `remove`, `doctor`, `i18n validate|list`, `storage audit|backup|export`, `presets`, `install`, `workbench`) with SQLite WAL lock safety checks and secret-redacted session export.
+- **Native Embedded Control Center & `agy-Sag` × `agy-NOV` Zero-Port Dual-Star Synergy (`packages/core/nov-synergy.js`, `packages/core/prism-bridge.js`, `cli/nov-bridge.mjs`, `cli/watch-daemon.mjs`)**: Upgraded the native Settings panel with a collapsible summary header, TopDeck scene presets, and 5 segmented SubTabs including a live **`✦ agy-NOV`** panel. Over zero-port CDP `Runtime.addBinding`, users can toggle all 9 `agy-NOV` modules and 5 presets directly inside Antigravity Settings with real-time reverse push and dual-star synergy cards (dual-layer safety shield, compaction×memory, and alert deduplication), plus `agy-sag nov status|enable|disable|preset|locale` CLI commands.
+- **Dual-Plugin Ecosystem Cross-Promotion (`README.md`, `README.zh-CN.md`, `AGENTS.md`)**: Documented the zero-overlap pairing between **`agy-NOV`** (100% official native protocols, 9 zero-CDP modules) and **`agy-Sag`** (deep Zero-ASAR CDP renderer & local suite).
 
 ## [0.4.0] - 2026-11-26
 
