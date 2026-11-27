@@ -11,6 +11,8 @@ import {
   ALLOWED_NOV_LOCALES,
   MAX_BRIDGE_PAYLOAD_BYTES,
   NOV_MODULES_CATALOG,
+  NOV_MODULE_CATEGORIES,
+  NOV_MODULE_CATEGORY_IDS,
   NOV_MODULE_IDS,
   NOV_PRESETS,
   applyNovCommand,
@@ -128,26 +130,50 @@ function createMockWebSocketClass() {
   return { MockWebSocket, instances };
 }
 
-test('1. NOV constants align 100% with agy-NOV 9 native modules, tool counts & 5 presets', () => {
+test('1. NOV constants align 100% with agy-NOV 13 native modules, 5 categories, tool counts & 5 presets', () => {
   assert.deepEqual(
     [...NOV_MODULE_IDS],
-    ['review', 'guard', 'xray', 'turbo', 'radar', 'canvas', 'mem', 'ops', 'remote']
+    [
+      'review',
+      'guard',
+      'xray',
+      'turbo',
+      'radar',
+      'verify',
+      'worktree',
+      'spec',
+      'studio',
+      'canvas',
+      'mem',
+      'ops',
+      'remote',
+    ]
   );
+  assert.deepEqual([...NOV_MODULE_CATEGORY_IDS], ['core-dev', 'safety', 'observability', 'workspace', 'connectivity']);
+  for (const catId of NOV_MODULE_CATEGORY_IDS) {
+    assert.equal(NOV_MODULE_CATEGORIES[catId].id, catId);
+    assert.ok(NOV_MODULE_CATEGORIES[catId].label);
+  }
   assert.deepEqual([...ALLOWED_NOV_LOCALES], ['auto', 'en', 'zh-CN', 'zh-TW', 'ja', 'ko', 'es', 'fr', 'de']);
 
   const expectedTools = {
-    review: { tier: 'offline', toolsCount: 2, defaultEnabled: true },
-    guard: { tier: 'offline', toolsCount: 4, defaultEnabled: true },
-    xray: { tier: 'offline', toolsCount: 4, defaultEnabled: true },
-    turbo: { tier: 'offline', toolsCount: 3, defaultEnabled: false },
-    radar: { tier: 'offline', toolsCount: 2, defaultEnabled: false },
-    canvas: { tier: 'offline', toolsCount: 4, defaultEnabled: false },
-    mem: { tier: 'offline', toolsCount: 3, defaultEnabled: false },
-    ops: { tier: 'offline', toolsCount: 3, defaultEnabled: false },
-    remote: { tier: 'network', toolsCount: 4, defaultEnabled: false },
+    review: { category: 'core-dev', tier: 'offline', toolsCount: 2, defaultEnabled: true },
+    guard: { category: 'safety', tier: 'offline', toolsCount: 4, defaultEnabled: true },
+    xray: { category: 'observability', tier: 'offline', toolsCount: 4, defaultEnabled: true },
+    turbo: { category: 'core-dev', tier: 'offline', toolsCount: 3, defaultEnabled: false },
+    radar: { category: 'observability', tier: 'offline', toolsCount: 2, defaultEnabled: false },
+    verify: { category: 'safety', tier: 'offline', toolsCount: 4, defaultEnabled: false },
+    worktree: { category: 'core-dev', tier: 'offline', toolsCount: 4, defaultEnabled: false },
+    spec: { category: 'workspace', tier: 'offline', toolsCount: 4, defaultEnabled: false },
+    studio: { category: 'workspace', tier: 'offline', toolsCount: 4, defaultEnabled: false },
+    canvas: { category: 'workspace', tier: 'offline', toolsCount: 4, defaultEnabled: false },
+    mem: { category: 'workspace', tier: 'offline', toolsCount: 3, defaultEnabled: false },
+    ops: { category: 'workspace', tier: 'offline', toolsCount: 3, defaultEnabled: false },
+    remote: { category: 'connectivity', tier: 'network', toolsCount: 4, defaultEnabled: false },
   };
   for (const [id, spec] of Object.entries(expectedTools)) {
     assert.equal(NOV_MODULES_CATALOG[id].id, id);
+    assert.equal(NOV_MODULES_CATALOG[id].category, spec.category);
     assert.equal(NOV_MODULES_CATALOG[id].tier, spec.tier);
     assert.equal(NOV_MODULES_CATALOG[id].toolsCount, spec.toolsCount);
     assert.equal(NOV_MODULES_CATALOG[id].defaultEnabled, spec.defaultEnabled);
@@ -157,17 +183,20 @@ test('1. NOV constants align 100% with agy-NOV 9 native modules, tool counts & 5
   assert.deepEqual([...NOV_PRESETS.minimal.enabledModules], ['guard']);
   assert.equal(NOV_PRESETS.core.toolsCount, 12);
   assert.deepEqual([...NOV_PRESETS.core.enabledModules], ['review', 'guard', 'xray']);
-  assert.equal(NOV_PRESETS.power.toolsCount, 20);
-  assert.deepEqual([...NOV_PRESETS.power.enabledModules], ['review', 'guard', 'xray', 'turbo', 'radar', 'ops']);
-  assert.equal(NOV_PRESETS['local-all'].toolsCount, 27);
+  assert.equal(NOV_PRESETS.power.toolsCount, 32);
+  assert.deepEqual(
+    [...NOV_PRESETS.power.enabledModules],
+    ['review', 'guard', 'xray', 'turbo', 'radar', 'verify', 'worktree', 'spec', 'ops']
+  );
+  assert.equal(NOV_PRESETS['local-all'].toolsCount, 43);
   assert.deepEqual(
     [...NOV_PRESETS['local-all'].enabledModules],
-    ['review', 'guard', 'xray', 'turbo', 'radar', 'canvas', 'mem', 'ops']
+    ['review', 'guard', 'xray', 'turbo', 'radar', 'verify', 'worktree', 'spec', 'studio', 'canvas', 'mem', 'ops']
   );
-  assert.equal(NOV_PRESETS.full.toolsCount, 31);
+  assert.equal(NOV_PRESETS.full.toolsCount, 47);
   assert.deepEqual([...NOV_PRESETS.full.enabledModules], [...NOV_MODULE_IDS]);
 
-  assert.equal(countNovEnabledTools(NOV_PRESETS.power.modules), 20);
+  assert.equal(countNovEnabledTools(NOV_PRESETS.power.modules), 32);
   assert.equal(detectNovPreset(NOV_PRESETS.power.modules), 'power');
   assert.equal(detectNovPreset({ ...NOV_PRESETS.core.modules, turbo: true }), 'custom');
 });
@@ -292,6 +321,37 @@ test('3. readNovState is strictly read-only when uninstalled or unconfigured, an
     assert.equal(stCustom.config.defaultTab, 'canvas');
     assert.equal(stCustom.config.locale, 'zh-CN');
     assert.equal(stCustom.enabledToolsCount, 16);
+
+    // Backward compatibility: legacy 9-module config.json missing verify/worktree/spec/studio defaults them to false
+    const legacyDir = path.join(tmp, 'legacy-9mod-data');
+    fs.mkdirSync(legacyDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(legacyDir, 'config.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        preset: 'core',
+        modules: {
+          review: true,
+          guard: true,
+          xray: true,
+          turbo: false,
+          radar: false,
+          canvas: false,
+          mem: false,
+          ops: false,
+          remote: false,
+        },
+        defaultTab: 'review',
+        locale: 'auto',
+      })
+    );
+    const stLegacy = readNovState({ homeDir, env: {}, explicitDataDir: legacyDir });
+    assert.equal(stLegacy.config.modules.verify, false);
+    assert.equal(stLegacy.config.modules.worktree, false);
+    assert.equal(stLegacy.config.modules.spec, false);
+    assert.equal(stLegacy.config.modules.studio, false);
+    assert.equal(stLegacy.config.preset, 'core');
+    assert.equal(stLegacy.enabledToolsCount, 12);
   });
 });
 
@@ -753,7 +813,7 @@ test('8. sag-cli.mjs nov subcommands (status|enable|disable|preset|locale) & doc
     assert.equal(prRun.res.exitCode, 0);
     const prJson = JSON.parse(prRun.stdout);
     assert.equal(prJson.state.config.preset, 'power');
-    assert.equal(prJson.state.enabledToolsCount, 20);
+    assert.equal(prJson.state.enabledToolsCount, 32);
 
     // nov locale zh-CN
     const locRun = await runCli(['nov', 'locale', 'zh-CN', '--json', `--data-dir=${dataDir}`]);
@@ -777,8 +837,8 @@ test('8. sag-cli.mjs nov subcommands (status|enable|disable|preset|locale) & doc
     assert.equal(inspected.found, true);
     assert.equal(inspected.version, '2.0.0');
     assert.equal(inspected.preset, 'power');
-    assert.equal(inspected.enabledCount, 6);
-    assert.equal(inspected.totalModules, 9);
+    assert.equal(inspected.enabledCount, 9);
+    assert.equal(inspected.totalModules, 13);
     assert.equal(inspected.configPath, path.join(dataDir, 'config.json'));
     assert.equal(inspected.bridgeReady, true);
 
@@ -795,7 +855,7 @@ test('8. sag-cli.mjs nov subcommands (status|enable|disable|preset|locale) & doc
     const human = formatDoctorHuman(docReport);
     assert.ok(human.includes('双星协同：agy-NOV v2.0.0 + agy-Sag'));
     assert.ok(human.includes('preset=power'));
-    assert.ok(human.includes('6/9 modules'));
+    assert.ok(human.includes('9/13 modules'));
     assert.ok(human.includes(path.join(dataDir, 'config.json')));
     assert.ok(human.includes('双星协同桥就绪'));
 

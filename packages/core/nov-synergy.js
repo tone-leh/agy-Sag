@@ -25,11 +25,61 @@
     'xray',
     'turbo',
     'radar',
+    'verify',
+    'worktree',
+    'spec',
+    'studio',
     'canvas',
     'mem',
     'ops',
     'remote',
   ]);
+
+  const NOV_MODULE_CATEGORY_IDS = Object.freeze([
+    'core-dev',
+    'safety',
+    'observability',
+    'workspace',
+    'connectivity',
+  ]);
+
+  const NOV_MODULE_CATEGORIES = Object.freeze({
+    'core-dev': Object.freeze({
+      id: 'core-dev',
+      nameZh: '代码与极速',
+      nameEn: 'Code & Speed',
+      descZh: 'PR 行内审阅、并行 Worktree 与极速检索压缩',
+      descEn: 'PR-grade diff review, worktrees, and token-saving batch tools',
+    }),
+    safety: Object.freeze({
+      id: 'safety',
+      nameZh: '安全护盾与门禁',
+      nameEn: 'Safety Shield & Gate',
+      descZh: '密钥防火墙、改前快照与 Stop 实测校验门',
+      descEn: 'Secret firewall, pre-edit snapshots, and stop verify gate',
+    }),
+    observability: Object.freeze({
+      id: 'observability',
+      nameZh: '透视与雷达',
+      nameEn: 'Context & Radar',
+      descZh: 'Token 缓存透视、跨会话检索与多会话雷达',
+      descEn: 'Token/cache X-Ray, cross-session search, and completion radar',
+    }),
+    workspace: Object.freeze({
+      id: 'workspace',
+      nameZh: '工作区、Spec 与记忆',
+      nameEn: 'Spec, Studio & Workspace',
+      descZh: 'Spec 写锁任务图、离线数据实验室、视觉画布与长期记忆',
+      descEn: 'Spec DAG, local data studio, visual canvas, memory graph & ops',
+    }),
+    connectivity: Object.freeze({
+      id: 'connectivity',
+      nameZh: '按需远程协作',
+      nameEn: 'Opt-In Remote',
+      descZh: '默认零端口关闭；按需开启手机 PWA 与 IM 远程审批',
+      descEn: 'Strictly OFF by default: mobile PWA and IM webhook approvals',
+    }),
+  });
 
   const NOV_MODULES_META = Object.freeze([
     Object.freeze({
@@ -98,6 +148,58 @@
       defaultEnabled: false,
     }),
     Object.freeze({
+      id: 'verify',
+      category: 'safety',
+      nameZh: '校验门禁',
+      nameEn: 'Verify Gate',
+      shortZh: '校验',
+      shortEn: 'Verify',
+      descZh: 'Stop Hook 实测门禁与证据链，拦截未验证完成声明',
+      descEn: 'Stop-hook verification gate blocking unverified "done" claims',
+      toolCount: 4,
+      privacy: 'offline',
+      defaultEnabled: false,
+    }),
+    Object.freeze({
+      id: 'worktree',
+      category: 'core-dev',
+      nameZh: '工作树编排',
+      nameEn: 'Worktree Orchestrator',
+      shortZh: '工作树',
+      shortEn: 'Worktree',
+      descZh: '安全并行 Git Worktree、分支 Diff 预览与孤儿清理',
+      descEn: 'Safe parallel Git worktrees, branch diff previews & orphan cleanup',
+      toolCount: 4,
+      privacy: 'offline',
+      defaultEnabled: false,
+    }),
+    Object.freeze({
+      id: 'spec',
+      category: 'workspace',
+      nameZh: 'Spec 流程与任务图',
+      nameEn: 'Spec Flow & Task DAG',
+      shortZh: 'Spec',
+      shortEn: 'Spec',
+      descZh: '结构化 Spec -> Plan -> Task DAG 与审批前写锁门禁',
+      descEn: 'Spec-driven development, dependency task DAG & pre-approval write lock',
+      toolCount: 4,
+      privacy: 'offline',
+      defaultEnabled: false,
+    }),
+    Object.freeze({
+      id: 'studio',
+      category: 'workspace',
+      nameZh: '工作区数据实验室',
+      nameEn: 'Workspace Studio',
+      shortZh: '实验室',
+      shortEn: 'Studio',
+      descZh: '离线 SQLite/CSV/DOCX/XLSX/PDF 切片与本地回环探测',
+      descEn: 'Offline SQLite/CSV/DOCX/XLSX/PDF slicer & loopback HTTP probe',
+      toolCount: 4,
+      privacy: 'offline',
+      defaultEnabled: false,
+    }),
+    Object.freeze({
       id: 'canvas',
       category: 'workspace',
       nameZh: '视觉画布',
@@ -127,11 +229,11 @@
       id: 'ops',
       category: 'workspace',
       nameZh: '提示词库与体检',
-      nameEn: 'Prompt Vault & Doctor',
+      nameEn: 'Prompt Vault & Budget Doctor',
       shortZh: '运维',
       shortEn: 'Ops',
       descZh: '参数化提示词模板库、工作区资产与存储审计',
-      descEn: 'Parameterized prompt vault & workspace asset audit',
+      descEn: 'Parameterized prompt vault & workspace rule/tool budget audit',
       toolCount: 3,
       privacy: 'offline',
       defaultEnabled: false,
@@ -192,35 +294,81 @@
     }),
     Object.freeze({
       id: 'power',
-      nameZh: '极客日常',
+      nameZh: '极客日常 9 项',
       nameEn: 'Power',
-      descZh: 'Core + Turbo + Radar + Ops，高能本地 (20 工具)',
-      descEn: 'Core + Turbo + Radar + Ops, offline (20 tools)',
-      enabledModules: Object.freeze(['review', 'guard', 'xray', 'turbo', 'radar', 'ops']),
-      modules: buildPresetModulesMap(['review', 'guard', 'xray', 'turbo', 'radar', 'ops']),
-      toolCount: 20,
+      descZh: 'Core + Turbo + Radar + Verify + Worktree + Spec + Ops，纯离线工程闭环 (32 工具)',
+      descEn: 'Core + Turbo + Radar + Verify + Worktree + Spec + Ops, offline workflow (32 tools)',
+      enabledModules: Object.freeze([
+        'review',
+        'guard',
+        'xray',
+        'turbo',
+        'radar',
+        'verify',
+        'worktree',
+        'spec',
+        'ops',
+      ]),
+      modules: buildPresetModulesMap([
+        'review',
+        'guard',
+        'xray',
+        'turbo',
+        'radar',
+        'verify',
+        'worktree',
+        'spec',
+        'ops',
+      ]),
+      toolCount: 32,
       privacy: 'offline',
     }),
     Object.freeze({
       id: 'local-all',
-      nameZh: '全本地 8 项',
+      nameZh: '全本地 12 项',
       nameEn: 'Local All',
-      descZh: '全部 8 个离线模块，Remote 零端口 (27 工具)',
-      descEn: 'All 8 offline modules, zero ports (27 tools)',
-      enabledModules: Object.freeze(['review', 'guard', 'xray', 'turbo', 'radar', 'canvas', 'mem', 'ops']),
-      modules: buildPresetModulesMap(['review', 'guard', 'xray', 'turbo', 'radar', 'canvas', 'mem', 'ops']),
-      toolCount: 27,
+      descZh: '全部 12 个离线模块含工作区实验室，Remote 零端口 (43 工具)',
+      descEn: 'All 12 offline modules incl. Studio, Remote zero ports (43 tools)',
+      enabledModules: Object.freeze([
+        'review',
+        'guard',
+        'xray',
+        'turbo',
+        'radar',
+        'verify',
+        'worktree',
+        'spec',
+        'studio',
+        'canvas',
+        'mem',
+        'ops',
+      ]),
+      modules: buildPresetModulesMap([
+        'review',
+        'guard',
+        'xray',
+        'turbo',
+        'radar',
+        'verify',
+        'worktree',
+        'spec',
+        'studio',
+        'canvas',
+        'mem',
+        'ops',
+      ]),
+      toolCount: 43,
       privacy: 'offline',
     }),
     Object.freeze({
       id: 'full',
-      nameZh: '全套 9 项',
+      nameZh: '全套 13 项',
       nameEn: 'Full',
-      descZh: '全部 9 个模块含按需联网的 Remote (31 工具)',
-      descEn: 'All 9 modules incl. opt-in Remote (31 tools)',
+      descZh: '全部 13 个模块含按需联网的 Remote (47 工具)',
+      descEn: 'All 13 modules incl. opt-in Remote (47 tools)',
       enabledModules: NOV_MODULE_IDS,
       modules: buildPresetModulesMap(NOV_MODULE_IDS),
-      toolCount: 31,
+      toolCount: 47,
       privacy: 'opt-in-network',
     }),
   ]);
@@ -335,17 +483,23 @@
       return effects;
     }
 
-    // 1) dual-shield: safeAutoAccept x agy-NOV guard
+    // 1) dual-shield: safeAutoAccept x agy-NOV guard (+ optional verify gate awareness)
     if (Boolean(sagMods.safeAutoAccept)) {
       if (Boolean(novMods.guard)) {
+        const verifyActive = Boolean(novMods.verify);
         effects.push({
           id: 'dual-shield',
           status: 'active',
           tone: 'ok',
-          titleZh: '双层安全护盾已激活',
-          titleEn: 'Dual-Layer Safety Shield Active',
-          descZh: '🛡 双层安全护盾已激活：前端铁壁黑名单 + agy-NOV 后端改前快照',
-          descEn: '🛡 Dual-layer shield active: frontend hard-deny blacklist + agy-NOV backend pre-edit snapshots',
+          verifyActive,
+          titleZh: verifyActive ? '三层安全校验护盾已激活' : '双层安全护盾已激活',
+          titleEn: verifyActive ? 'Triple-Layer Safety & Verify Shield Active' : 'Dual-Layer Safety Shield Active',
+          descZh: verifyActive
+            ? '🛡 安全护盾已激活：前端铁壁黑名单 + agy-NOV 后端改前快照 + Verify 校验门'
+            : '🛡 双层安全护盾已激活：前端铁壁黑名单 + agy-NOV 后端改前快照',
+          descEn: verifyActive
+            ? '🛡 Safety shield active: frontend hard-deny + agy-NOV pre-edit snapshots + Verify Gate'
+            : '🛡 Dual-layer shield active: frontend hard-deny blacklist + agy-NOV backend pre-edit snapshots',
           quickAction: null,
         });
       } else {
@@ -353,6 +507,7 @@
           id: 'dual-shield',
           status: 'recommend',
           tone: 'warn',
+          verifyActive: Boolean(novMods.verify),
           titleZh: '建议开启 agy-NOV 后端快照护盾',
           titleEn: 'Recommend Enabling agy-NOV Guard',
           descZh: '🛡 已开启前端自动审批，建议一键开启 agy-NOV guard 补齐密钥防火墙与改前快照防线',
@@ -434,9 +589,39 @@
       });
     }
 
-    // 4) dual-star-hub: unified dual-star control plane
+    // 4) verify-watchdog: sessionWatchdog x agy-NOV verify (only when both enabled)
+    if (Boolean(sagMods.sessionWatchdog) && Boolean(novMods.verify)) {
+      effects.push({
+        id: 'verify-watchdog',
+        status: 'active',
+        tone: 'ok',
+        titleZh: '看门狗 × Verify 实测闭环',
+        titleEn: 'Watchdog × Verify Gate Closed-Loop',
+        descZh: '✅ 会话卡死监测 + agy-NOV Stop Verify 实测门禁已形成交付闭环',
+        descEn: '✅ Session Watchdog + agy-NOV Stop Verify Gate active for end-to-end delivery checks',
+        quickAction: null,
+      });
+    }
+
+    // 5) spec-queue: promptQueue x agy-NOV spec (only when both enabled)
+    if (Boolean(sagMods.promptQueue) && Boolean(novMods.spec)) {
+      effects.push({
+        id: 'spec-queue',
+        status: 'active',
+        tone: 'ok',
+        titleZh: '提示词排队 × Spec 流程协同',
+        titleEn: 'Prompt Queue × Spec Flow Synced',
+        descZh: '📐 运行中提示词排队与 agy-NOV Spec 任务图写锁门禁已协同',
+        descEn: '📐 Prompt Queue + agy-NOV Spec Flow write-lock DAG active together',
+        quickAction: null,
+      });
+    }
+
+    // 6) dual-star-hub: unified dual-star control plane
     if (bridgeConnected) {
-      const enabledCount = countEnabledNovModules(novMods);
+      const enabledModules = NOV_MODULE_IDS.filter((id) => Boolean(novMods[id]));
+      const enabledCount = enabledModules.length;
+      const totalModules = NOV_MODULE_IDS.length;
       const toolCount = countNovModelTools(novMods);
       const verLabel = nov.version ? ` v${nov.version}` : '';
       effects.push({
@@ -444,11 +629,13 @@
         status: 'connected',
         tone: 'accent',
         enabledCount,
+        totalModules,
+        enabledModules,
         toolCount,
         titleZh: '双星统一控制面已连通',
         titleEn: 'Dual-Star Control Hub Connected',
-        descZh: `✦ agy-NOV${verLabel} 零端口直连 · 已启用 ${enabledCount}/9 模块 · 暴露 ${toolCount} 个模型工具`,
-        descEn: `✦ agy-NOV${verLabel} zero-port bridged · ${enabledCount}/9 modules ON · ${toolCount} model tools exposed`,
+        descZh: `✦ agy-NOV${verLabel} 零端口直连 · 已启用 ${enabledCount}/${totalModules} 模块 · 暴露 ${toolCount} 个模型工具`,
+        descEn: `✦ agy-NOV${verLabel} zero-port bridged · ${enabledCount}/${totalModules} modules ON · ${toolCount} model tools exposed`,
         quickAction: null,
       });
     }
@@ -825,6 +1012,8 @@
     NOV_INSTALL_CMD,
     NOV_BASE_TOOL_COUNT,
     NOV_MODULE_IDS,
+    NOV_MODULE_CATEGORY_IDS,
+    NOV_MODULE_CATEGORIES,
     NOV_MODULES_META,
     NOV_MODULES_MAP,
     NOV_PRESETS_META,

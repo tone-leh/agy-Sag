@@ -283,14 +283,38 @@ function createSimNovRuntime({ installed = true, preset = 'core', extraModules =
 }
 
 test('1. Metadata, CSS invariants (0 :has(), 0 .ag-cs-) & SAG_UI_PACKS key parity (zero Prism leaks)', () => {
-  assert.equal(novSynergyMod.NOV_MODULES_META.length, 9);
+  assert.equal(novSynergyMod.NOV_MODULES_META.length, 13);
   assert.deepEqual(
     novSynergyMod.NOV_MODULES_META.map((m) => m.id),
-    ['review', 'guard', 'xray', 'turbo', 'radar', 'canvas', 'mem', 'ops', 'remote']
+    [
+      'review',
+      'guard',
+      'xray',
+      'turbo',
+      'radar',
+      'verify',
+      'worktree',
+      'spec',
+      'studio',
+      'canvas',
+      'mem',
+      'ops',
+      'remote',
+    ]
   );
+  assert.deepEqual(
+    [...novSynergyMod.NOV_MODULE_CATEGORY_IDS],
+    ['core-dev', 'safety', 'observability', 'workspace', 'connectivity']
+  );
+  for (const catId of novSynergyMod.NOV_MODULE_CATEGORY_IDS) {
+    assert.equal(novSynergyMod.NOV_MODULE_CATEGORIES[catId].id, catId);
+    assert.ok(novSynergyMod.NOV_MODULE_CATEGORIES[catId].nameZh);
+    assert.ok(novSynergyMod.NOV_MODULE_CATEGORIES[catId].nameEn);
+  }
   assert.equal(novSynergyMod.NOV_MODULES_MAP.remote.privacy, 'opt-in-network');
   for (const m of novSynergyMod.NOV_MODULES_META) {
     if (m.id !== 'remote') assert.equal(m.privacy, 'offline');
+    assert.ok(novSynergyMod.NOV_MODULE_CATEGORIES[m.category], `Unknown category for ${m.id}`);
     assert.ok(m.nameZh && m.nameEn && m.toolCount > 0);
   }
 
@@ -299,9 +323,9 @@ test('1. Metadata, CSS invariants (0 :has(), 0 .ag-cs-) & SAG_UI_PACKS key parit
     [
       ['minimal', 6],
       ['core', 12],
-      ['power', 20],
-      ['local-all', 27],
-      ['full', 31],
+      ['power', 32],
+      ['local-all', 43],
+      ['full', 47],
     ]
   );
 
@@ -369,7 +393,10 @@ test('2. Zero-port CDP window.__agSagHostBridge request/response, reverse onPush
     assert.equal(r3.ok, true);
     assert.equal(r3.state.config.preset, 'power');
     assert.equal(r3.state.config.modules.radar, true);
-    assert.equal(r3.state.toolCount, 20);
+    assert.equal(r3.state.config.modules.verify, true);
+    assert.equal(r3.state.config.modules.worktree, true);
+    assert.equal(r3.state.config.modules.spec, true);
+    assert.equal(r3.state.toolCount, 32);
 
     // setLocale('ja') -> nov:set_locale
     const r4 = await ctrl.setLocale('ja');
@@ -508,6 +535,39 @@ test('3. Four Dual-Star Synergy Effects: dual-shield, context-memory, radar-dedu
   assert.equal(byIdB['context-memory'].quickAction, null);
   assert.equal(byIdB['radar-dedup'], undefined);
   assert.equal(byIdB['dual-star-hub'].enabledCount, 5);
+  assert.equal(byIdB['dual-star-hub'].totalModules, 13);
+  assert.ok(byIdB['dual-star-hub'].descEn.includes('5/13 modules ON'));
+
+  // Case C: legacy 9-key state fallback & v0.5.0 verify/spec synergy awareness
+  const normalizedLegacy = novSynergyMod.normalizeNovState({
+    installed: true,
+    config: {
+      preset: 'core',
+      modules: { review: true, guard: true, xray: true },
+    },
+  });
+  assert.equal(normalizedLegacy.config.modules.verify, false);
+  assert.equal(normalizedLegacy.config.modules.worktree, false);
+  assert.equal(normalizedLegacy.config.modules.spec, false);
+  assert.equal(normalizedLegacy.config.modules.studio, false);
+
+  const effC = novSynergyMod.computeSynergyEffects(
+    { modules: { safeAutoAccept: true, sessionWatchdog: true, promptQueue: true } },
+    {
+      installed: true,
+      version: '0.5.0',
+      config: {
+        modules: { ...novSynergyMod.NOV_PRESETS_MAP.power.modules },
+      },
+    },
+    { bridgeConnected: true }
+  );
+  const byIdC = Object.fromEntries(effC.map((e) => [e.id, e]));
+  assert.equal(byIdC['dual-shield'].verifyActive, true);
+  assert.equal(byIdC['verify-watchdog'].status, 'active');
+  assert.equal(byIdC['spec-queue'].status, 'active');
+  assert.equal(byIdC['dual-star-hub'].enabledCount, 9);
+  assert.equal(byIdC['dual-star-hub'].toolCount, 32);
 });
 
 test('4. Native-grade settings hub: collapsible header, 5 SubTabs, 9 agy-NOV switches, 5 presets, 1-click synergy actions & reverse push', async () => {
@@ -563,20 +623,20 @@ test('4. Native-grade settings hub: collapsible header, 5 SubTabs, 9 agy-NOV swi
     assert.equal(nativeSec.querySelector('[data-testid="ag-sag-fold-body"]').hidden, false);
     assert.equal(api.prismBridge.getActiveSubTab(), 'nov');
 
-    // Verify all 5 horizontal SubTabs work cleanly
+    // Verify all 6 horizontal SubTabs work cleanly
     const subtabs = nativeSec.querySelectorAll('[data-ag-sag-subtab]');
     assert.deepEqual(
       subtabs.map((b) => b.getAttribute('data-ag-sag-subtab')),
-      ['all', 'ui', 'flow', 'auto', 'nov']
+      ['overview', 'ui', 'conversation', 'guard', 'nov', 'advanced']
     );
     nativeSec.querySelector('[data-ag-sag-subtab="ui"]').click();
     assert.ok(nativeSec.querySelector('[data-testid="ag-sag-host-locale-select"]'));
     assert.equal(nativeSec.querySelector('[data-testid="ag-sag-nov-panel"]'), null);
 
-    // Switch back to 'nov' SubTab to exercise 9 module cards, 5 presets & 1-click synergy actions
+    // Switch back to 'nov' SubTab to exercise 13 module cards, 5 presets & 1-click synergy actions
     nativeSec.querySelector('[data-ag-sag-subtab="nov"]').click();
     assert.equal(nativeSec.querySelectorAll('[data-ag-nov-preset]').length, 5);
-    assert.equal(nativeSec.querySelectorAll('[data-ag-nov-mod]').length, 9);
+    assert.equal(nativeSec.querySelectorAll('[data-ag-nov-mod]').length, 13);
     assert.equal(
       nativeSec.querySelector('[data-ag-nov-mod="remote"]').getAttribute('data-privacy'),
       'opt-in-network'
@@ -621,7 +681,7 @@ test('4. Native-grade settings hub: collapsible header, 5 SubTabs, 9 agy-NOV swi
     nativeSec.querySelector('[data-ag-nov-preset="local-all"]').click();
     await new Promise((r) => setTimeout(r, 15));
     assert.equal(api.novSynergy.getState().config.preset, 'local-all');
-    assert.equal(api.novSynergy.getState().toolCount, 27);
+    assert.equal(api.novSynergy.getState().toolCount, 43);
     assert.equal(nativeSec.querySelector('[data-ag-nov-preset="local-all"]').getAttribute('aria-pressed'), 'true');
 
     // Reverse onPush updates embedded panel automatically
@@ -690,6 +750,7 @@ test('5. Uninstalled agy-NOV fallback: renders companion recommendation card wit
     assert.equal(nativeSec.textContent.includes('Prism'), false);
     assert.equal(nativeSec.querySelector('[data-testid="ag-sag-dual-star-pill"]'), null);
 
+    nativeSec.querySelector('[data-ag-sag-subtab="nov"]').click();
     const promo = nativeSec.querySelector('[data-testid="ag-sag-nov-promo"]');
     assert.ok(promo, 'Must render companion recommendation card when agy-NOV is not installed');
     const cmdEl = promo.querySelector('[data-testid="ag-sag-nov-install-cmd"]');

@@ -2,7 +2,7 @@
  * agy-Sag × agy-NOV Dual-Star Zero-Port Bridge Core (Zero runtime npm deps, ESM)
  *
  * Provides read-only discovery, strict-whitelist atomic config mutation, and
- * CDP Runtime.addBinding message dispatch for controlling agy-NOV's 9 native
+ * CDP Runtime.addBinding message dispatch for controlling agy-NOV's 13 native
  * modules & 5 presets directly from agy-Sag without opening any extra HTTP port.
  *
  * Security invariants:
@@ -21,17 +21,58 @@ export const NOV_MODULE_IDS = Object.freeze([
   'xray',
   'turbo',
   'radar',
+  'verify',
+  'worktree',
+  'spec',
+  'studio',
   'canvas',
   'mem',
   'ops',
   'remote',
 ]);
 
+export const NOV_MODULE_CATEGORY_IDS = Object.freeze([
+  'core-dev',
+  'safety',
+  'observability',
+  'workspace',
+  'connectivity',
+]);
+
+export const NOV_MODULE_CATEGORIES = Object.freeze({
+  'core-dev': Object.freeze({
+    id: 'core-dev',
+    label: 'Code & Speed',
+    description: 'PR-grade diff review, worktrees, and token-saving batch codebase tools.',
+  }),
+  safety: Object.freeze({
+    id: 'safety',
+    label: 'Safety Shield',
+    description: 'Pre-tool secret leak firewall, command guard, zero-Git snapshots, and stop verify gate.',
+  }),
+  observability: Object.freeze({
+    id: 'observability',
+    label: 'Context & Radar',
+    description: 'Token/cache X-Ray, cross-session search, and multi-session completion radar.',
+  }),
+  workspace: Object.freeze({
+    id: 'workspace',
+    label: 'Spec, Studio & Workspace',
+    description: 'Spec flow DAG, local data/doc studio, visual canvas, memory graph, and prompt ops.',
+  }),
+  connectivity: Object.freeze({
+    id: 'connectivity',
+    label: 'Opt-In Remote',
+    description: 'Strictly OFF by default: local mobile PWA and IM webhook alerts / approvals.',
+  }),
+});
+
 export const NOV_BASE_TOOLS_COUNT = 2; // nov_open + nov_status
 
 export const NOV_MODULES_CATALOG = Object.freeze({
   review: Object.freeze({
     id: 'review',
+    category: 'core-dev',
     tier: 'offline',
     toolsCount: 2,
     defaultEnabled: true,
@@ -41,6 +82,7 @@ export const NOV_MODULES_CATALOG = Object.freeze({
   }),
   guard: Object.freeze({
     id: 'guard',
+    category: 'safety',
     tier: 'offline',
     toolsCount: 4,
     defaultEnabled: true,
@@ -50,6 +92,7 @@ export const NOV_MODULES_CATALOG = Object.freeze({
   }),
   xray: Object.freeze({
     id: 'xray',
+    category: 'observability',
     tier: 'offline',
     toolsCount: 4,
     defaultEnabled: true,
@@ -59,6 +102,7 @@ export const NOV_MODULES_CATALOG = Object.freeze({
   }),
   turbo: Object.freeze({
     id: 'turbo',
+    category: 'core-dev',
     tier: 'offline',
     toolsCount: 3,
     defaultEnabled: false,
@@ -68,6 +112,7 @@ export const NOV_MODULES_CATALOG = Object.freeze({
   }),
   radar: Object.freeze({
     id: 'radar',
+    category: 'observability',
     tier: 'offline',
     toolsCount: 2,
     defaultEnabled: false,
@@ -75,8 +120,49 @@ export const NOV_MODULES_CATALOG = Object.freeze({
     shortLabel: 'Radar',
     hasUiTab: true,
   }),
+  verify: Object.freeze({
+    id: 'verify',
+    category: 'safety',
+    tier: 'offline',
+    toolsCount: 4,
+    defaultEnabled: false,
+    name: 'Verify Gate',
+    shortLabel: 'Verify',
+    hasUiTab: true,
+  }),
+  worktree: Object.freeze({
+    id: 'worktree',
+    category: 'core-dev',
+    tier: 'offline',
+    toolsCount: 4,
+    defaultEnabled: false,
+    name: 'Worktree Orchestrator',
+    shortLabel: 'Worktree',
+    hasUiTab: true,
+  }),
+  spec: Object.freeze({
+    id: 'spec',
+    category: 'workspace',
+    tier: 'offline',
+    toolsCount: 4,
+    defaultEnabled: false,
+    name: 'Spec Flow & Task DAG',
+    shortLabel: 'Spec',
+    hasUiTab: true,
+  }),
+  studio: Object.freeze({
+    id: 'studio',
+    category: 'workspace',
+    tier: 'offline',
+    toolsCount: 4,
+    defaultEnabled: false,
+    name: 'Workspace Studio',
+    shortLabel: 'Studio',
+    hasUiTab: true,
+  }),
   canvas: Object.freeze({
     id: 'canvas',
+    category: 'workspace',
     tier: 'offline',
     toolsCount: 4,
     defaultEnabled: false,
@@ -86,6 +172,7 @@ export const NOV_MODULES_CATALOG = Object.freeze({
   }),
   mem: Object.freeze({
     id: 'mem',
+    category: 'workspace',
     tier: 'offline',
     toolsCount: 3,
     defaultEnabled: false,
@@ -95,15 +182,17 @@ export const NOV_MODULES_CATALOG = Object.freeze({
   }),
   ops: Object.freeze({
     id: 'ops',
+    category: 'workspace',
     tier: 'offline',
     toolsCount: 3,
     defaultEnabled: false,
-    name: 'Prompt Vault & Doctor',
+    name: 'Prompt Vault & Budget Doctor',
     shortLabel: 'Ops',
     hasUiTab: true,
   }),
   remote: Object.freeze({
     id: 'remote',
+    category: 'connectivity',
     tier: 'network',
     toolsCount: 4,
     defaultEnabled: false,
@@ -146,18 +235,32 @@ function makePresetSpec(id, label, enabledModules) {
 export const NOV_PRESETS = Object.freeze({
   minimal: makePresetSpec('minimal', 'Minimal Shield', ['guard']),
   core: makePresetSpec('core', 'Core (Default)', ['review', 'guard', 'xray']),
-  power: makePresetSpec('power', 'Power Dev (6 Offline)', ['review', 'guard', 'xray', 'turbo', 'radar', 'ops']),
-  'local-all': makePresetSpec('local-all', 'Local All (8 Offline)', [
+  power: makePresetSpec('power', 'Power Dev (9 Offline)', [
     'review',
     'guard',
     'xray',
     'turbo',
     'radar',
+    'verify',
+    'worktree',
+    'spec',
+    'ops',
+  ]),
+  'local-all': makePresetSpec('local-all', 'Local All (12 Offline)', [
+    'review',
+    'guard',
+    'xray',
+    'turbo',
+    'radar',
+    'verify',
+    'worktree',
+    'spec',
+    'studio',
     'canvas',
     'mem',
     'ops',
   ]),
-  full: makePresetSpec('full', 'Full Suite (All 9)', [...NOV_MODULE_IDS]),
+  full: makePresetSpec('full', 'Full Suite (All 13)', [...NOV_MODULE_IDS]),
 });
 
 export const NOV_PRESET_IDS = Object.freeze(Object.keys(NOV_PRESETS));
@@ -518,6 +621,7 @@ export function readNovState(opts = {}) {
     enabledModules: NOV_MODULE_IDS.filter((id) => Boolean(config.modules[id])),
     enabledToolsCount: countNovEnabledTools(config.modules),
     catalog: NOV_MODULES_CATALOG,
+    categories: NOV_MODULE_CATEGORIES,
     presets: NOV_PRESETS,
   };
 }
