@@ -32,7 +32,11 @@
     "watch": "node cli/watch-daemon.mjs",
     "doctor": "node cli/doctor.mjs",
     "storage": "node cli/storage-doctor.mjs audit",
+    "i18n:import": "node scripts/i18n/import-upstream.mjs",
+    "i18n:build-ext": "node scripts/i18n/build-ext-packs.mjs",
     "i18n:validate": "node cli/sag-cli.mjs i18n validate",
+    "launch": "node cli/sag-cli.mjs launch",
+    "keepalive": "node cli/sag-cli.mjs keepalive",
     "install:plugin": "node cli/install-plugin.mjs",
     "remove": "node cli/cdp-attach.mjs --remove",
     "status": "node cli/cdp-attach.mjs --status"

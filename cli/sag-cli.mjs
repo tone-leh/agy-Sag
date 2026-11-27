@@ -17,9 +17,11 @@
  *   agy-sag install [--dir=...] [--dry-run]
  *   agy-sag workbench [--port=4179] [--smoke]
  */
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { EXT_PACK_LOCALES } from './bundle.mjs';
 import { runCdpAttachCli } from './cdp-attach.mjs';
 import { runDoctorCli } from './doctor.mjs';
 import { runInstallPluginCli } from './install-plugin.mjs';
@@ -37,10 +39,12 @@ import {
   formatStorageAuditHuman,
   parseStorageArgs,
 } from './storage-doctor.mjs';
+import { runKeepaliveCli, runLaunchCli } from './launcher.mjs';
 import { startWatchDaemonCli } from './watch-daemon.mjs';
 import { runWorkbenchCli } from '../workbench/server.mjs';
 
 const require = createRequire(import.meta.url);
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const coexist = require('../packages/core/coexist.js');
 const packsMod = require('../packages/core/host-i18n-packs.js');
 
@@ -81,6 +85,8 @@ export function formatHelpText() {
     '  status [...]                 Inspect mounted agy-Sag state on Antigravity CDP windows',
     '  remove [...]                 Losslessly detach & clean agy-Sag from Antigravity CDP windows',
     '  watch [...]                  Start Zero-ASAR auto-attach watch daemon (--preset=, --lang=, --once)',
+    '  launch [...]                 Zero-intrusive CDP launch helper (--port=, --dry-run, --auto-relaunch-cold-start)',
+    '  keepalive [...]              CDP keepalive + SagWatchDaemon supervisor (--port=, --interval=, --once)',
     '  doctor [...]                 Run environment, Obsidian Prism & agy-NOV dual-star diagnostics',
     '  nov <cmd> [...]              Dual-star agy-NOV control: status | enable | disable | preset | locale',
     '  install [...]                Install native plugin bundle to ~/.gemini/config/plugins/agy-sag',
@@ -178,23 +184,113 @@ function formatI18nListHuman(data) {
   return lines.join('\n');
 }
 
+function validateExtendedPacksOnDisk(repoRoot = REPO_ROOT) {
+  const extDir = path.join(repoRoot, 'packages', 'core', 'locales', 'ext');
+  const keepSet = new Set();
+  for (const k of packsMod.KEEP_UNTRANSLATED_EXACT || []) {
+    keepSet.add(k);
+    keepSet.add(String(k).trim());
+  }
+  const errors = [];
+  const extStats = {};
+  if (!fs.existsSync(extDir)) {
+    return { errors, extStats };
+  }
+  for (const file of fs.readdirSync(extDir).sort()) {
+    if (!file.endsWith('.json')) continue;
+    const loc = file.slice(0, -'.json'.length);
+    if (!EXT_PACK_LOCALES.includes(loc)) {
+      errors.push(`[ext:${loc}] Unexpected extended pack locale outside allowlist`);
+      continue;
+    }
+    const full = path.join(extDir, file);
+    let parsed;
+    try {
+      parsed = JSON.parse(fs.readFileSync(full, 'utf8'));
+    } catch (e) {
+      errors.push(`[ext:${loc}] Invalid JSON: ${e.message}`);
+      continue;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      errors.push(`[ext:${loc}] Root must be an object`);
+      continue;
+    }
+    let exactCount = 0;
+    let patternCount = 0;
+    if (parsed.exact && typeof parsed.exact === 'object' && !Array.isArray(parsed.exact)) {
+      for (const [k, v] of Object.entries(parsed.exact)) {
+        if (keepSet.has(k) || keepSet.has(String(k).trim())) {
+          errors.push(`[ext:${loc}] exact contains protected KEEP key "${k}"`);
+        }
+        if (typeof v !== 'string' || !v.trim()) {
+          errors.push(`[ext:${loc}] exact["${k}"] must be a non-empty string`);
+        }
+        exactCount += 1;
+      }
+    } else if (parsed.exact !== undefined) {
+      errors.push(`[ext:${loc}] exact must be an object`);
+    }
+    if (Array.isArray(parsed.patterns)) {
+      for (let i = 0; i < parsed.patterns.length; i++) {
+        const p = parsed.patterns[i];
+        const src = p?.source;
+        const flg = String(p?.flags || '').replace(/[gy]/g, '');
+        if (typeof src !== 'string' || !src.trim() || typeof p?.replace !== 'string' || !p.replace.trim()) {
+          errors.push(`[ext:${loc}] patterns[${i}] missing source or replace`);
+          continue;
+        }
+        try {
+          new RegExp(src, flg);
+        } catch (e) {
+          errors.push(`[ext:${loc}] patterns[${i}] invalid RegExp: ${e.message}`);
+          continue;
+        }
+        if (/\((?:[^()\\]|\\.)*[+*][^()]*\)[+*{]/.test(src)) {
+          errors.push(`[ext:${loc}] patterns[${i}] unsafe nested quantifier`);
+          continue;
+        }
+        if (/\\[1-9]|\\k</.test(src)) {
+          errors.push(`[ext:${loc}] patterns[${i}] backreference not allowed`);
+          continue;
+        }
+        const groups = packsMod.countCapturingGroups ? packsMod.countCapturingGroups(src) : 0;
+        for (const m of p.replace.matchAll(/\{(\d+)\}/g)) {
+          const idx = Number(m[1]);
+          if (idx < 1 || idx > groups) {
+            errors.push(`[ext:${loc}] patterns[${i}] placeholder {${idx}} out of range (groups=${groups})`);
+          }
+        }
+        patternCount += 1;
+      }
+    } else if (parsed.patterns !== undefined) {
+      errors.push(`[ext:${loc}] patterns must be an array`);
+    }
+    extStats[loc] = { exactCount, patternCount, total: exactCount + patternCount };
+  }
+  return { errors, extStats };
+}
+
 function formatI18nValidateHuman(res) {
   const metaMap = new Map(packsMod.listLocales().map((m) => [m.locale, m]));
+  const extStats = res.stats?.extendedLocales || {};
   const lines = [
     `agy-Sag · Host i18n Pack Validation (${res.ok ? 'PASS' : 'FAIL'})`,
-    '=================================================',
-    `${'Locale'.padEnd(8)}  ${'Native Name'.padEnd(20)}  ${'Exact'.padStart(6)}  ${'Distinct'.padStart(8)}  ${'Patterns'.padStart(8)}`,
-    `${'-'.repeat(8)}  ${'-'.repeat(20)}  ${'-'.repeat(6)}  ${'-'.repeat(8)}  ${'-'.repeat(8)}`,
+    '========================================================================',
+    `${'Locale'.padEnd(8)}  ${'Native Name'.padEnd(20)}  ${'Core'.padStart(6)}  ${'Ext'.padStart(6)}  ${'Patterns'.padStart(8)}  ${'Coverage'.padStart(8)}`,
+    `${'-'.repeat(8)}  ${'-'.repeat(20)}  ${'-'.repeat(6)}  ${'-'.repeat(6)}  ${'-'.repeat(8)}  ${'-'.repeat(8)}`,
   ];
   for (const [loc, st] of Object.entries(res.stats?.locales || {})) {
     const nativeName = metaMap.get(loc)?.nativeName || loc;
+    const ext = extStats[loc] || { exactCount: 0, patternCount: 0 };
+    const totalPat = st.patternCount + ext.patternCount;
+    const coverage = st.exactCount + ext.exactCount + totalPat;
     lines.push(
-      `${loc.padEnd(8)}  ${nativeName.padEnd(20)}  ${String(st.exactCount).padStart(6)}  ${String(st.distinctCount).padStart(8)}  ${String(st.patternCount).padStart(8)}`
+      `${loc.padEnd(8)}  ${nativeName.padEnd(20)}  ${String(st.exactCount).padStart(6)}  ${String(ext.exactCount).padStart(6)}  ${String(totalPat).padStart(8)}  ${String(coverage).padStart(8)}`
     );
   }
   lines.push('');
   if (res.ok) {
-    lines.push(`✔ Validated ${res.stats?.localeCount || 0} locale pack(s) with 0 errors.`);
+    lines.push(`✔ Validated ${res.stats?.localeCount || 0} built-in pack(s) + ${Object.keys(extStats).length} extended pack(s) with 0 errors.`);
   } else {
     lines.push(`✖ Validation failed with ${res.errors.length} error(s):`);
     for (const err of res.errors) {
@@ -447,7 +543,16 @@ export async function runSagCli(argv = process.argv.slice(2), io = {}) {
     }
 
     if (sub === 'validate') {
-      const res = packsMod.validatePacks();
+      const coreRes = packsMod.validatePacks();
+      const extCheck = validateExtendedPacksOnDisk();
+      const res = {
+        ok: Boolean(coreRes.ok && extCheck.errors.length === 0),
+        errors: [...(coreRes.errors || []), ...extCheck.errors],
+        stats: {
+          ...(coreRes.stats || {}),
+          extendedLocales: extCheck.extStats,
+        },
+      };
       out.stdout(jsonMode ? JSON.stringify(res, null, 2) : formatI18nValidateHuman(res));
       return { ok: Boolean(res.ok), exitCode: res.ok ? 0 : 1, data: res };
     }
@@ -472,6 +577,18 @@ export async function runSagCli(argv = process.argv.slice(2), io = {}) {
   if (cmd === 'watch') {
     const data = await startWatchDaemonCli(rest);
     const failed = data && data.status && data.status !== 'ok';
+    return { ok: !failed, exitCode: failed ? 1 : 0, data };
+  }
+
+  if (cmd === 'launch') {
+    const data = await runLaunchCli(rest, { out });
+    const ok = data ? data.ok !== false : true;
+    return { ok, exitCode: ok ? 0 : 1, data };
+  }
+
+  if (cmd === 'keepalive') {
+    const data = await runKeepaliveCli(rest, { out });
+    const failed = Boolean(data && data.status === 'blocked');
     return { ok: !failed, exitCode: failed ? 1 : 0, data };
   }
 
