@@ -569,15 +569,18 @@ test('3. Antigravity v2.36.0 dual-composer sidebar isolation, Option+Cmd+/ yield
   assert.equal(clearTriggered, 0, 'Enter inside sidebar floating composer must never trigger main /clear');
   cs.destroy();
 
-  // 3d. prompt-queue trips native-queue-active fuse when v2.36.0 Send Now button is visible in main composer
+  // 3d. prompt-queue trips native-queue-active fuse across all 10 language variants of Send Now
   mainEd.value = '';
   const sendNowBtn = makeEl('button');
   sendNowBtn.textContent = 'Send Now';
   mainBox.appendChild(sendNowBtn);
   const pq = queueMod.createPromptQueueController({ win, doc, storage, enabled: true, autoObserve: false });
   pq.enqueue('follow up task');
-  pq.sync();
-  assert.equal(pq.getDebugState().lastSkipReason, 'native-queue-active');
+  for (const label of ['Send Now', '立即发送', '立即傳送', '今すぐ送信', '지금 보내기', 'Enviar ahora', 'Envoyer maintenant', 'Jetzt senden', 'Отправить сейчас', 'Enviar agora']) {
+    sendNowBtn.textContent = label;
+    pq.sync();
+    assert.equal(pq.getDebugState().lastSkipReason, 'native-queue-active', `Send Now fuse must trip for locale label: ${label}`);
+  }
   assert.equal(sidebar.querySelector('[data-testid="ag-sag-queue-bar"]'), null);
   pq.destroy();
 

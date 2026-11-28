@@ -857,7 +857,7 @@
         dKey.className = 'ag-sag-chip';
         dKey.setAttribute('data-testid', 'ag-sag-drawer-shortcuts');
         dKey.textContent = '⌨';
-        dKey.title = 'Shortcuts (Ctrl/Cmd+Shift+Alt+/)';
+        dKey.title = typeof i18n.getSagStrings === 'function' ? i18n.getSagStrings(getLang())?.scBtnTitle || 'Shortcuts (Ctrl/Cmd+Shift+Alt+/)' : 'Shortcuts (Ctrl/Cmd+Shift+Alt+/)';
         dKey.addEventListener('click', (ev) => {
           ev?.preventDefault?.();
           ev?.stopPropagation?.();
@@ -938,7 +938,7 @@
       ];
       if (mods.promptLibrary) {
         rows.push({ keys: `${modKey} + Alt + P`, desc: sag.scPromptPalette || 'Open Prompt Library & Command Palette' });
-        rows.push({ keys: '// (empty composer)', desc: sag.scSlashSlash || 'Quick-open Prompt Library from composer' });
+        rows.push({ keys: sag.scSlashSlashKey || '// (empty composer)', desc: sag.scSlashSlash || 'Quick-open Prompt Library from composer' });
       }
       if (mods.readingNav) {
         rows.push({ keys: 'Alt + ↑ / ↓', desc: sag.scTurnJump || 'Jump to previous / next user turn' });

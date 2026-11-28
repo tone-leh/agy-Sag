@@ -593,6 +593,10 @@
     ['Installed MCP Servers', '已安装 MCP 服务器', '已安裝 MCP 伺服器', 'インストール済み MCP サーバー', '설치된 MCP 서버', 'Servidores MCP instalados', 'Serveurs MCP installés', 'Installierte MCP-Server', 'Установленные серверы MCP', 'Servidores MCP instalados'],
     ['Default Customizations', '默认自定义项', '預設自訂項目', 'デフォルトカスタマイズ', '기본 사용자 지정', 'Personalizaciones predeterminadas', 'Personnalisations par défaut', 'Standardanpassungen', 'Настройки по умолчанию', 'Personalizações padrão'],
     ['Other Customizations', '其他自定义项', '其他自訂項目', 'その他のカスタマイズ', '기타 사용자 지정', 'Otras personalizaciones', 'Autres personnalisations', 'Weitere Anpassungen', 'Другие настройки', 'Outras personalizações'],
+    ['Archive conversation', '归档对话', '封存對話', '会話をアーカイブ', '대화 보관', 'Archivar conversación', 'Archiver la conversation', 'Unterhaltung archivieren', 'Архивировать диалог', 'Arquivar conversa'],
+    ['Unarchive conversation', '取消归档对话', '取消封存對話', 'アーカイブを解除', '대화 보관 해제', 'Desarchivar conversación', 'Désarchiver la conversation', 'Archivierung aufheben', 'Разархивировать диалог', 'Desarquivar conversa'],
+    ['Maximize sidebar', '最大化侧边栏', '最大化側邊欄', 'サイドバーを最大化', '사이드바 최대화', 'Maximizar barra lateral', 'Agrandir la barre latérale', 'Seitenleiste maximieren', 'Развернуть боковую панель', 'Maximizar barra lateral'],
+    ['Restore sidebar', '恢复侧边栏', '還原側邊欄', 'サイドバーを元に戻す', '사이드바 복원', 'Restaurar barra lateral', 'Restaurer la barre latérale', 'Seitenleiste wiederherstellen', 'Восстановить боковую панель', 'Restaurar barra lateral'],
   ];
 
   // Pattern tuple order: [regexSource, flags, zh-CN, zh-TW, ja, ko, es, fr, de, ru, pt-BR]

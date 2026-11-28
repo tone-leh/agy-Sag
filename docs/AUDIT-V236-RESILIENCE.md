@@ -97,7 +97,7 @@
 
 ### 3. 第二轮验证结果（隔离单测与门禁实测）
 - `npm test`：**255 / 255 通过**（含 `test/v236-resilience-hardening.test.mjs` 新增 Test 5 / Test 6 全套第二轮回归用例）；
-- `npm run i18n:validate`：10 内置包（493 核心词条）+ 9 扩展包，0 错误；
+- `npm run i18n:validate`：10 内置包（497 核心词条）+ 9 扩展包，0 错误；
 - `npm run workbench:smoke`：HTTP 200，`1,416,802 B`，22 项核心标记全验证；
 - `npm run doctor`：`plugin.json v1.4.0 + sidecar.json compliant` 通过（检测到本机已升级至 `Obsidian Prism v1.0.8-beta.5`）。
 - 未测项：上述结果均为离线单测、隔离沙箱与静态门禁实测，真实 Antigravity Desktop `v2.36.0` + `Obsidian Prism v1.0.8-beta.5` 桌面渲染态仍按第五节清单实机冒烟核验。

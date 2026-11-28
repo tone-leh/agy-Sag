@@ -281,7 +281,35 @@
   }
 
   function getUiStrings(lang) {
-    const isZh = String(lang || '').toLowerCase().startsWith('zh');
+    const low = String(lang || '').toLowerCase();
+    if (low === 'zh-tw' || low === 'zh-hk' || low === 'zh-hant') {
+      return {
+        addTrigger: '+ 排隊',
+        title: '指令佇列',
+        pause: '暫停',
+        resume: '繼續',
+        clear: '清空',
+        collapse: '收合',
+        add: '加入',
+        placeholder: '輸入後續指令，按 Enter 加入佇列…',
+        moveUp: '上移',
+        moveDown: '下移',
+        moveTop: '置頂',
+        edit: '編輯',
+        save: '儲存',
+        cancel: '取消',
+        remove: '刪除',
+        statusPaused: '已暫停',
+        statusStreaming: '等待目前回覆完成',
+        statusDraft: '輸入框有草稿，已自動暫停',
+        statusApproval: '等待審批處理，已自動暫停',
+        statusSpecLock: 'agy-NOV Spec 寫鎖生效，佇列暫停',
+        statusNativeQueue: '偵測到原生排隊/立即傳送，已自動暫停',
+        statusSubmitUnconfirmed: '未能確認送出，已保留在佇列並暫停',
+        statusReady: '空閒後自動送出',
+      };
+    }
+    const isZh = low.startsWith('zh');
     if (isZh) {
       return {
         addTrigger: '+ 排队',
@@ -347,7 +375,7 @@
     const dispatchDelayMs = Math.max(0, Number(options.dispatchDelayMs ?? 1200));
     const observeThrottleMs = Math.max(0, Number(options.observeThrottleMs ?? (dispatchDelayMs === 0 ? 40 : 150)));
     const autoObserve = options.autoObserve !== undefined ? Boolean(options.autoObserve) : true;
-    const SEND_NOW_TEXT_RE = /^\s*(?:send\s+now|立即发送)\s*$/i;
+    const SEND_NOW_TEXT_RE = /^\s*(?:send\s+now|立即发送|立即傳送|今すぐ送信|지금\s*보내기|enviar\s+ahora|envoyer\s+maintenant|jetzt\s+senden|отправить\s+сейчас|enviar\s+agora)\s*$/i;
     const safeInsert = (parent, node, ref) => {
       if (typeof coexist?.safeInsertBefore === 'function') return coexist.safeInsertBefore(parent, node, ref);
       try {
