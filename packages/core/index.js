@@ -433,6 +433,7 @@
           win,
           doc,
           storage: options.storage,
+          coexist,
           draftGuardMod: draftMod,
           now: options.now,
           getLang: options.getLang,
@@ -710,6 +711,7 @@
           isStreaming: () => Boolean(compactGuard?.getDebugState?.()?.lastSnapshot?.streaming),
           getStarredTurns: () => {
             const st = outlineBookmarks?.getDebugState?.();
+            if (Array.isArray(st?.bookmarks)) return st.bookmarks;
             if (Array.isArray(st?.bookmarkedTurns)) return st.bookmarkedTurns;
             if (Array.isArray(st?.turns)) return st.turns;
             return [];
@@ -860,7 +862,8 @@
             draftGuard?.sync?.();
             outlineBookmarks?.sync?.();
             sessionRadar?.syncFromDom?.();
-            hostI18n?.scanNow?.();
+            if (typeof hostI18n?.scheduleScan === 'function') hostI18n.scheduleScan();
+            else hostI18n?.scanNow?.();
             promptLibrary?.sync?.();
             readingNav?.sync?.();
             themeStudio?.sync?.();

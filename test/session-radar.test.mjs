@@ -141,11 +141,12 @@ test('SessionRadar: sidebar attention filter pill filters rows, sends blurred-on
     onNotify: (n) => alerts.push(n),
   });
 
-  // Filter to awaiting_decision only
+  // Filter to awaiting_decision only (pure CSS attribute, zero host .hidden mutation)
   ctl.setFilterMode('awaiting_decision');
-  assert.equal(rAwait.hidden, false);
-  assert.equal(rRun.hidden, true);
-  assert.equal(rIdle.hidden, true);
+  assert.equal(rAwait.getAttribute('data-ag-sg-radar-hidden'), null);
+  assert.equal(rRun.getAttribute('data-ag-sg-radar-hidden'), '1');
+  assert.equal(rIdle.getAttribute('data-ag-sg-radar-hidden'), '1');
+  assert.equal(rRun.hidden, false, 'Must not directly mutate React-controlled hidden property');
 
   // While focused (not blurred), transition must NOT send blurred OS notification
   rRun.setAttribute('data-status', 'awaiting_decision');
@@ -162,7 +163,7 @@ test('SessionRadar: sidebar attention filter pill filters rows, sends blurred-on
   assert.equal(alerts[0].id, 's-run');
 
   ctl.destroy();
-  assert.equal(rIdle.hidden, false, 'destroy() must unhide all filtered sidebar rows');
+  assert.equal(rIdle.getAttribute('data-ag-sg-radar-hidden'), null, 'destroy() must remove radar-hidden attribute from all rows');
   assert.equal(doc.querySelector('[data-testid="ag-sg-radar-bar"]'), null);
 });
 

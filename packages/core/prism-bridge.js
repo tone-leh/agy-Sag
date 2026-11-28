@@ -164,8 +164,10 @@
     let settingsNavEl = null;
     let createdStyleEl = null;
     let domObserver = null;
+    let domBusUnsub = null;
     let domDebounceTimer = null;
     let htmlObserver = null;
+    let htmlBusUnsub = null;
     let htmlRaf = 0;
     let htmlSyncInFlight = false;
     let htmlSyncQueued = false;
@@ -264,7 +266,7 @@
             try { UrlApi.revokeObjectURL?.(objectUrl); } catch {}
           }
         } finally {
-          try { a?.remove?.(); } catch {}
+          safeRemove(a);
         }
       }
       return jsonText;
@@ -277,6 +279,10 @@
     };
     const getLang = () => (typeof options.getLang === 'function' ? i18n.normalizeLang(options.getLang()) : i18n.detectLang(doc, win));
     const S = () => i18n.getStrings(getLang());
+    const safeRemove = (node) => {
+      if (typeof coexist?.safeRemoveNode === 'function') return coexist.safeRemoveNode(node);
+      try { node?.remove?.(); return true; } catch { return false; }
+    };
 
     function ensureStyle() {
       if (!doc || !styles) return;
@@ -911,7 +917,7 @@
 
     function closeShortcutSheet() {
       shortcutSheetOpen = false;
-      try { shortcutSheetEl?.remove?.(); } catch {}
+      safeRemove(shortcutSheetEl);
       shortcutSheetEl = null;
       return true;
     }
@@ -1065,8 +1071,8 @@
 
       // Priority 1: Embed cleanly inside Obsidian Prism's Modules tab if #ag-cs-settings-sec exists
       if (prismAvailable) {
-        doc.querySelectorAll?.(`[data-testid="${NATIVE_SECTION_TESTID}"]`)?.forEach?.((n) => n.remove?.());
-        try { settingsNavEl?.remove?.(); } catch {}
+        doc.querySelectorAll?.(`[data-testid="${NATIVE_SECTION_TESTID}"]`)?.forEach?.((n) => safeRemove(n));
+        safeRemove(settingsNavEl);
         settingsNavEl = null;
         let section = modulesGroup.querySelector?.(`[data-testid="${EMBED_SECTION_TESTID}"]`) || null;
         if (!section) {
@@ -1204,77 +1210,116 @@
           doc.removeEventListener?.('compositionend', onCompEnd, true);
         };
       }
-      if (typeof win?.MutationObserver !== 'function') return;
-      try {
-        if (!domObserver) {
-          domObserver = new win.MutationObserver((muts) => {
-            if (destroyed || coexist.isWindowHibernated(doc, win, false)) return;
-            if (typeof coexist.isMutationOwnedOnly === 'function') {
-              if (coexist.isMutationOwnedOnly(muts)) return;
-            } else {
-              const relevant = (muts || []).some((m) => {
-                const t = m?.target;
-                if (
-                  t?.getAttribute?.('data-ag-sg-owned') === '1' ||
-                  t?.getAttribute?.('data-ag-sag-owned') === '1' ||
-                  t?.closest?.('[data-ag-sg-owned="1"], [data-ag-sag-owned="1"]')
-                ) {
-                  return false;
-                }
-                return true;
-              });
-              if (!relevant) return;
-            }
-            if (domDebounceTimer) clearTimeout(domDebounceTimer);
-            domDebounceTimer = setTimeout(() => {
-              domDebounceTimer = null;
-              if (!destroyed && !coexist.isWindowHibernated(doc, win, false)) {
-                renderIntoSettings({ fromObserver: true });
-              }
-            }, 250);
-            domDebounceTimer?.unref?.();
-          });
-          const rootNode = doc.body || doc.documentElement;
-          if (rootNode) domObserver.observe(rootNode, { childList: true, subtree: true });
+      const scheduleDomRender = () => {
+        if (domDebounceTimer) clearTimeout(domDebounceTimer);
+        domDebounceTimer = setTimeout(() => {
+          domDebounceTimer = null;
+          if (!destroyed && !coexist.isWindowHibernated(doc, win, false)) {
+            renderIntoSettings({ fromObserver: true });
+          }
+        }, 250);
+        domDebounceTimer?.unref?.();
+      };
+      const runHtmlSync = () => {
+        if (destroyed || coexist.isWindowHibernated(doc, win, false)) return;
+        if (htmlSyncInFlight) {
+          htmlSyncQueued = true;
+          return;
         }
-        if (!htmlObserver && doc.documentElement) {
-          const runHtmlSync = () => {
-            if (destroyed) return;
-            if (htmlSyncInFlight) {
-              htmlSyncQueued = true;
-              return;
-            }
-            htmlSyncInFlight = true;
-            try {
-              checkHostContextChange();
-            } finally {
-              htmlSyncInFlight = false;
-              if (htmlSyncQueued && !destroyed) {
-                htmlSyncQueued = false;
-                if (typeof queueMicrotask === 'function') queueMicrotask(runHtmlSync);
-                else Promise.resolve().then(runHtmlSync);
-              }
-            }
-          };
-          const scheduleHtmlSync = () => {
-            if (destroyed) return;
-            if (typeof win?.requestAnimationFrame === 'function') {
-              if (htmlRaf) return;
-              htmlRaf = win.requestAnimationFrame(() => {
-                htmlRaf = 0;
-                runHtmlSync();
-              });
-              return;
-            }
+        htmlSyncInFlight = true;
+        try {
+          checkHostContextChange();
+        } finally {
+          htmlSyncInFlight = false;
+          if (htmlSyncQueued && !destroyed) {
+            htmlSyncQueued = false;
+            if (typeof queueMicrotask === 'function') queueMicrotask(runHtmlSync);
+            else Promise.resolve().then(runHtmlSync);
+          }
+        }
+      };
+      const scheduleHtmlSync = () => {
+        if (destroyed || coexist.isWindowHibernated(doc, win, false)) return;
+        if (typeof win?.requestAnimationFrame === 'function') {
+          if (htmlRaf) return;
+          htmlRaf = win.requestAnimationFrame(() => {
+            htmlRaf = 0;
             runHtmlSync();
-          };
-          htmlObserver = new win.MutationObserver(() => {
-            if (!destroyed) scheduleHtmlSync();
           });
-          htmlObserver.observe(doc.documentElement, {
-            attributes: true,
-            attributeFilter: ['data-ag-sag-lang', 'data-ag-sag-theme', 'data-ag-cs-lang', 'data-ag-cs-theme', 'data-ag-cs-style', 'lang'],
-          });
+          return;
+        }
+        runHtmlSync();
+      };
+      const HTML_ATTR_FILTER = ['data-ag-sag-lang', 'data-ag-sag-theme', 'data-ag-cs-lang', 'data-ag-cs-theme', 'data-ag-cs-style', 'lang'];
+      try {
+        if (!domObserver && !domBusUnsub) {
+          const domBus = coexist?.getDomMutationBus?.(doc, win);
+          if (domBus && typeof domBus.subscribe === 'function') {
+            try {
+              domBusUnsub = domBus.subscribe(
+                'prism-bridge-dom',
+                (_muts, meta) => {
+                  if (destroyed) return;
+                  if (!meta?.woken && coexist.isWindowHibernated(doc, win, false)) return;
+                  scheduleDomRender();
+                },
+                { wakeOnResume: true }
+              );
+            } catch {
+              domBusUnsub = null;
+            }
+          }
+          if (!domBusUnsub && typeof win?.MutationObserver === 'function') {
+            domObserver = new win.MutationObserver((muts) => {
+              if (destroyed || coexist.isWindowHibernated(doc, win, false)) return;
+              if (typeof coexist.isMutationOwnedOnly === 'function') {
+                if (coexist.isMutationOwnedOnly(muts)) return;
+              } else {
+                const relevant = (muts || []).some((m) => {
+                  const t = m?.target;
+                  if (
+                    t?.getAttribute?.('data-ag-sg-owned') === '1' ||
+                    t?.getAttribute?.('data-ag-sag-owned') === '1' ||
+                    t?.closest?.('[data-ag-sg-owned="1"], [data-ag-sag-owned="1"]')
+                  ) {
+                    return false;
+                  }
+                  return true;
+                });
+                if (!relevant) return;
+              }
+              scheduleDomRender();
+            });
+            const rootNode = doc.body || doc.documentElement;
+            if (rootNode) domObserver.observe(rootNode, { childList: true, subtree: true });
+          }
+        }
+        if (!htmlObserver && !htmlBusUnsub && doc.documentElement) {
+          const attrBus = coexist?.getHtmlAttrBus?.(doc, win);
+          if (attrBus && typeof attrBus.subscribe === 'function') {
+            try {
+              htmlBusUnsub = attrBus.subscribe(
+                'prism-bridge-html',
+                (_changedAttrs, meta) => {
+                  if (destroyed) return;
+                  if (!meta?.woken && coexist.isWindowHibernated(doc, win, false)) return;
+                  scheduleHtmlSync();
+                },
+                { attributeFilter: HTML_ATTR_FILTER, wakeOnResume: true }
+              );
+            } catch {
+              htmlBusUnsub = null;
+            }
+          }
+          if (!htmlBusUnsub && typeof win?.MutationObserver === 'function') {
+            htmlObserver = new win.MutationObserver(() => {
+              if (!destroyed && !coexist.isWindowHibernated(doc, win, false)) scheduleHtmlSync();
+            });
+            htmlObserver.observe(doc.documentElement, {
+              attributes: true,
+              attributeFilter: HTML_ATTR_FILTER,
+            });
+          }
         }
       } catch {}
     }
@@ -1306,19 +1351,27 @@
         compositionCleanup = null;
       }
       imeComposing = false;
+      if (domBusUnsub) {
+        try { domBusUnsub(); } catch {}
+        domBusUnsub = null;
+      }
+      if (htmlBusUnsub) {
+        try { htmlBusUnsub(); } catch {}
+        htmlBusUnsub = null;
+      }
       try { domObserver?.disconnect?.(); } catch {}
       try { htmlObserver?.disconnect?.(); } catch {}
       domObserver = htmlObserver = null;
-      try { mountedEl?.remove?.(); } catch {}
-      try { drawerBackdropEl?.remove?.(); } catch {}
+      safeRemove(mountedEl);
+      safeRemove(drawerBackdropEl);
       closeShortcutSheet();
-      try { settingsNavEl?.remove?.(); } catch {}
+      safeRemove(settingsNavEl);
       settingsNavEl = null;
-      try { createdStyleEl?.remove?.(); } catch {}
+      safeRemove(createdStyleEl);
       try {
         doc?.querySelectorAll?.(
           `[data-testid="${EMBED_SECTION_TESTID}"], [data-testid="${NATIVE_SECTION_TESTID}"], [data-testid="${DRAWER_BACKDROP_TESTID}"], [data-testid="ag-sag-shortcuts-modal"], [data-testid="ag-sag-settings-nav-item"]`
-        )?.forEach?.((n) => n.remove?.());
+        )?.forEach?.((n) => safeRemove(n));
       } catch {}
       mountedEl = drawerBackdropEl = drawerEl = drawerBodyEl = createdStyleEl = null;
       mountedMode = 'none';

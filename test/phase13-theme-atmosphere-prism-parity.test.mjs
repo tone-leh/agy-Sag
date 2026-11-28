@@ -378,12 +378,14 @@ test('Phase 13: Velvet Stream Feathering (CSS.highlights), FastDOM Smooth Caret 
     ambientGlow: 'subtle',
   });
 
-  // Smooth caret painted
-  const caret = editorHost.querySelector('.ag-sag-smooth-caret');
-  assert.ok(caret, 'smooth caret node must be mounted');
+  // Smooth caret painted as body-level fixed overlay (zero intrusion into Lexical editorHost)
+  const caret = doc.body.querySelector('.ag-sag-smooth-caret');
+  assert.ok(caret, 'smooth caret node must be mounted on doc.body');
+  assert.equal(editorHost.querySelector('.ag-sag-smooth-caret'), null, 'must not intrude into editorHost');
+  assert.equal(editorHost.hasAttribute('data-ag-sag-caret-host'), false, 'must not mutate editorHost attributes');
   assert.equal(caret.getAttribute('data-visible'), '1');
   assert.equal(editor.getAttribute('data-ag-sag-smooth-caret'), '1');
-  assert.equal(caret.style.transform, 'translate3d(28px, 20px, 0)');
+  assert.equal(caret.style.transform, 'translate3d(48px, 60px, 0)');
 
   // Semantic glow state updates
   ctrl.setConvState('running');
@@ -400,7 +402,7 @@ test('Phase 13: Velvet Stream Feathering (CSS.highlights), FastDOM Smooth Caret 
 
   // Destroy leaves zero artifacts
   ctrl.destroy();
-  assert.equal(editorHost.querySelector('.ag-sag-smooth-caret'), null);
+  assert.equal(doc.body.querySelector('.ag-sag-smooth-caret'), null);
   assert.equal(editor.hasAttribute('data-ag-sag-smooth-caret'), false);
   assert.equal(editorHost.hasAttribute('data-ag-sag-caret-host'), false);
   assert.equal(html.hasAttribute('data-ag-sag-conv-state'), false);
@@ -783,16 +785,17 @@ test('Phase 13 hardening: Smooth Caret IME guard + Lexical <br> fallback + lazy 
     smoothCaret: true,
   });
 
-  assert.equal(editorHost.querySelector('.ag-sag-smooth-caret'), null, 'unfocused editor must not eagerly mount caret DOM');
+  assert.equal(doc.body.querySelector('.ag-sag-smooth-caret'), null, 'unfocused editor must not eagerly mount caret DOM');
   assert.ok(doc.querySelector('.ag-sag-ambient-glow'), 'dedicated ambient glow element must be mounted');
 
-  // Focus on empty Lexical <p><br></p> line -> uses BR rect (32-20=12, 84-40=44) instead of jumping to (8,8)
+  // Focus on empty Lexical <p><br></p> line -> uses BR viewport rect (32, 84) in fixed body overlay
   doc.activeElement = editor;
   doc.dispatchEvent({ type: 'focusin' });
-  const caret = editorHost.querySelector('.ag-sag-smooth-caret');
+  const caret = doc.body.querySelector('.ag-sag-smooth-caret');
   assert.ok(caret);
+  assert.equal(editorHost.querySelector('.ag-sag-smooth-caret'), null);
   assert.equal(caret.getAttribute('data-visible'), '1');
-  assert.equal(caret.style.transform, 'translate3d(12px, 44px, 0)');
+  assert.equal(caret.style.transform, 'translate3d(32px, 84px, 0)');
 
   // IME compositionstart hides custom caret and restores native caret; compositionend restores custom caret
   doc.dispatchEvent({ type: 'compositionstart' });

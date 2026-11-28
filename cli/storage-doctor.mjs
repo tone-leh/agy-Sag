@@ -274,11 +274,13 @@ function safeLstat(filePath) {
   }
 }
 
-function walkDirectorySafe(rootDir, { onFile, onDir, onSymlink, onDepthLimit, shouldStop } = {}) {
+function walkDirectorySafe(rootDir, { onFile, onDir, onSymlink, onDepthLimit, shouldStop, getMaxDepth } = {}) {
   function recurse(curDir, depth) {
     if (shouldStop?.()) return;
-    if (depth > MAX_WALK_DEPTH) {
-      onDepthLimit?.({ fullPath: curDir, relPath: toPosixRel(rootDir, curDir), depth });
+    const relCur = depth === 0 ? '' : toPosixRel(rootDir, curDir);
+    const maxDepth = typeof getMaxDepth === 'function' ? getMaxDepth(relCur, depth) : MAX_WALK_DEPTH;
+    if (depth > maxDepth) {
+      onDepthLimit?.({ fullPath: curDir, relPath: relCur, depth, maxDepth });
       return;
     }
     let entries;
@@ -341,7 +343,16 @@ function probeSqliteHeaderReadOnly(dbPath, fileBytes) {
   }
   let fd = null;
   try {
-    fd = fs.openSync(dbPath, 'r');
+    let openFlags = fs.constants.O_RDONLY;
+    if (process.platform !== 'win32') {
+      if (typeof fs.constants?.O_NOFOLLOW === 'number') openFlags |= fs.constants.O_NOFOLLOW;
+      if (typeof fs.constants?.O_NONBLOCK === 'number') openFlags |= fs.constants.O_NONBLOCK;
+    }
+    fd = fs.openSync(dbPath, openFlags);
+    const st = fs.fstatSync(fd);
+    if (!st.isFile()) {
+      return { valid: true, reason: null, bytes: fileBytes };
+    }
     const header = Buffer.alloc(16);
     const bytesRead = fs.readSync(fd, header, 0, 16, 0);
     if (bytesRead < 16 || !header.equals(SQLITE_MAGIC_HEADER)) {
@@ -575,6 +586,7 @@ export function auditAntigravityStorage({
 
   walkDirectorySafe(resolvedDir, {
     shouldStop: checkStop,
+    getMaxDepth: (relPath) => (relPath === 'brain' || relPath.startsWith('brain/') ? MAX_WALK_DEPTH + 2 : MAX_WALK_DEPTH),
     onDepthLimit: ({ relPath }) => {
       truncatedDirs.push(relPath);
     },
@@ -675,6 +687,7 @@ export function auditAntigravityStorage({
 
   const brainSessions = [];
   const orphans = [];
+  const skipOrphanDetection = stopRequested;
 
   for (const sess of brainSessionMap.values()) {
     let transcriptRel = null;
@@ -690,12 +703,19 @@ export function auditAntigravityStorage({
     const hasTranscript = transcriptRel !== null;
     const corruptTranscript = hasTranscript && transcriptBytes === 0;
     const hasConversationMatch = convIdSet.has(sess.sessionId);
+    const sessionHitTruncatedDir = truncatedDirs.some(
+      (t) => t === sess.relPath || t.startsWith(`${sess.relPath}/`)
+    );
 
     let orphanReason = null;
-    if (sess.fileCount === 0) {
-      orphanReason = 'empty-session-dir';
-    } else if (convFiles.length > 0 && !hasConversationMatch && !hasTranscript) {
-      orphanReason = 'orphan-brain-dir';
+    if (!skipOrphanDetection) {
+      if (sess.fileCount === 0) {
+        if (!sessionHitTruncatedDir) {
+          orphanReason = 'empty-session-dir';
+        }
+      } else if (convFiles.length > 0 && !hasConversationMatch && !hasTranscript) {
+        orphanReason = 'orphan-brain-dir';
+      }
     }
 
     if (orphanReason) {
@@ -761,6 +781,12 @@ export function auditAntigravityStorage({
   if (truncated) {
     warnings.push(
       `Audit truncated before completion (${[...truncationReasons].join(', ')}); reported totals may be partial.`
+    );
+  }
+  if (skipOrphanDetection) {
+    const traversalReasons = [...truncationReasons].filter((r) => r === 'max-files' || r === 'max-duration');
+    warnings.push(
+      `Skipped orphan session detection due to truncated traversal (${traversalReasons.join(', ') || 'traversal-limit'}).`
     );
   }
   if (truncatedDirs.length > 0) {
@@ -1335,8 +1361,13 @@ export function createStorageBackup({
     throw new Error('Backup outDir cannot be the same as or inside source dataDir (infinite recursion risk)');
   }
 
-  const audit = auditAntigravityStorage({ dataDir: resolvedSrc, topN: 10 });
-  if (!audit.exists) {
+  let rootStat = null;
+  try {
+    rootStat = fs.statSync(resolvedSrc);
+  } catch {
+    rootStat = null;
+  }
+  if (!rootStat || !rootStat.isDirectory()) {
     return {
       ok: false,
       exists: false,
@@ -1354,10 +1385,9 @@ export function createStorageBackup({
     };
   }
 
-  const walActive = Boolean(audit.sqlite.walActive);
-  const activeDbPaths = [...(audit.sqlite.activeDbPaths || [])];
-  const activeDbSet = new Set(activeDbPaths);
-  const warnings = [...audit.sqlite.warnings];
+  const activeDbPaths = [];
+  const activeDbSet = new Set();
+  const warnings = [];
   const skippedActiveDbs = [];
   const skippedOversizedFiles = [];
   const skippedOverTotalBudget = [];
@@ -1365,7 +1395,26 @@ export function createStorageBackup({
   const files = [];
   const skipped = [];
 
+  const checkSqliteActiveLock = (dbFullPath, dbRelPath) => {
+    const walStat = safeLstat(`${dbFullPath}-wal`);
+    const shmStat = safeLstat(`${dbFullPath}-shm`);
+    const walExists = Boolean(walStat && !walStat.isSymbolicLink() && walStat.isFile());
+    const shmExists = Boolean(shmStat && !shmStat.isSymbolicLink() && shmStat.isFile());
+    const walBytes = walExists ? walStat.size : 0;
+    const shmBytes = shmExists ? shmStat.size : 0;
+    const isActive = Boolean((walExists && walBytes > 0) || (shmExists && shmBytes > 0));
+    if (isActive && !activeDbSet.has(dbRelPath)) {
+      activeDbSet.add(dbRelPath);
+      activeDbPaths.push(dbRelPath);
+      warnings.push(
+        `SQLite WAL/SHM active (${dbRelPath}: wal=${walBytes} B, shm=${shmBytes} B). Close Antigravity before modifying or copying SQLite files directly.`
+      );
+    }
+    return isActive;
+  };
+
   walkDirectorySafe(resolvedSrc, {
+    getMaxDepth: (relPath) => (relPath === 'brain' || relPath.startsWith('brain/') ? MAX_WALK_DEPTH + 2 : MAX_WALK_DEPTH),
     onSymlink: ({ relPath }) => {
       skipped.push({ relPath, reason: 'symlink' });
     },
@@ -1375,11 +1424,15 @@ export function createStorageBackup({
       const isPriorityTree = BACKUP_PRIORITY_ROOTS.has(topSegment);
 
       if (isLockFilename(name)) {
+        const companionBase = getBaseSqliteDbPathFromWalOrShm(fullPath);
+        if (companionBase && stat.size > 0) {
+          checkSqliteActiveLock(companionBase, toPosixRel(resolvedSrc, companionBase));
+        }
         skipped.push({ relPath, bytes: stat.size, reason: 'lock-or-wal-file' });
         return;
       }
 
-      if (activeDbSet.has(relPath)) {
+      if (isSqliteDbFilename(name) && checkSqliteActiveLock(fullPath, relPath)) {
         skippedActiveDbs.push(relPath);
         skipped.push({ relPath, bytes: stat.size, reason: 'sqlite-wal-active' });
         return;
@@ -1404,6 +1457,8 @@ export function createStorageBackup({
     },
   });
 
+  activeDbPaths.sort((a, b) => a.localeCompare(b));
+  const walActive = activeDbPaths.length > 0;
   candidateFiles.sort((a, b) => a.relPath.localeCompare(b.relPath));
 
   let plannedBytes = 0;
@@ -1500,11 +1555,19 @@ export function createStorageBackup({
       throw new Error(`Security violation: refusing symlink target inside backup destination (${destPath})`);
     }
 
+    const remainingTotalBytes = totalByteLimit - copiedBytes;
+    if (remainingTotalBytes <= 0) {
+      skipped.push({ relPath: f.relPath, bytes: f.bytes, reason: 'exceeds-max-total-bytes' });
+      continue;
+    }
+    const perFileMaxBytes = Math.min(fileByteLimit, remainingTotalBytes);
+
     try {
-      copyFileSafeAtomic(f.srcPath, destPath, realDestRoot);
+      const actualCopied = copyFileSafeAtomic(f.srcPath, destPath, realDestRoot, { maxBytes: perFileMaxBytes });
+      const recordedBytes = typeof actualCopied === 'number' && Number.isFinite(actualCopied) ? actualCopied : f.bytes;
       copiedFiles += 1;
-      copiedBytes += f.bytes;
-      copiedList.push({ relPath: f.relPath, bytes: f.bytes });
+      copiedBytes += recordedBytes;
+      copiedList.push({ relPath: f.relPath, bytes: recordedBytes });
     } catch (err) {
       if (/Security violation/i.test(err?.message || '')) throw err;
       skipped.push({ relPath: f.relPath, bytes: f.bytes, reason: `copy-failed: ${err?.code || err?.message || 'error'}` });
@@ -1584,7 +1647,7 @@ export function formatStorageAuditHuman(report) {
 
   if (report.corruptFiles.length > 0) {
     lines.push('');
-    lines.push(`Corrupt / Empty JSONL Files (${report.corruptFiles.length}):`);
+    lines.push(`Corrupt / Empty Files (${report.corruptFiles.length}):`);
     for (const c of report.corruptFiles) {
       lines.push(`  ✖ ${c.relPath} [${c.reason}]`);
     }

@@ -236,6 +236,10 @@
     let quietSuppressedCount = 0;
     const listeners = [];
     const hiddenRows = new Set();
+    const autoObserve = options.autoObserve !== false;
+    let domBusUnsub = null;
+    let domObserver = null;
+    let observerTimer = null;
     const nowFn = typeof options.now === 'function' ? options.now : () => Date.now();
     const safeInsert = (parent, node, ref) => {
       if (typeof coexist?.safeInsertBefore === 'function') return coexist.safeInsertBefore(parent, node, ref);
@@ -245,6 +249,10 @@
         return true;
       } catch { return false; }
     };
+    const safeRemove = (node) => {
+      if (typeof coexist?.safeRemoveNode === 'function') return coexist.safeRemoveNode(node);
+      try { node?.remove?.(); return true; } catch { return false; }
+    };
 
     const getLang = () => (typeof options.getLang === 'function' ? i18n.normalizeLang(options.getLang()) : i18n.detectLang(doc, win));
     const S = () => i18n.getStrings(getLang());
@@ -252,21 +260,19 @@
     const clearFilterHiding = () => {
       for (const row of Array.from(hiddenRows)) {
         try {
-          row.hidden = false;
           row.removeAttribute?.('data-ag-sg-radar-hidden');
         } catch {}
       }
       hiddenRows.clear();
       try {
         doc?.querySelectorAll?.('[data-ag-sg-radar-hidden="1"]')?.forEach?.((row) => {
-          row.hidden = false;
           row.removeAttribute?.('data-ag-sg-radar-hidden');
         });
       } catch {}
     };
 
     const removeBar = () => {
-      try { barEl?.remove?.(); } catch {}
+      safeRemove(barEl);
       barEl = null;
       clearFilterHiding();
     };
@@ -429,17 +435,85 @@
       for (const s of sessions) {
         const match = filterMode === 'all' || s.status === filterMode;
         if (!match) {
-          s.el.hidden = true;
           s.el.setAttribute('data-ag-sg-radar-hidden', '1');
           hiddenRows.add(s.el);
         } else if (s.el.getAttribute?.('data-ag-sg-radar-hidden') === '1' || hiddenRows.has(s.el)) {
-          s.el.hidden = false;
           s.el.removeAttribute?.('data-ag-sg-radar-hidden');
           hiddenRows.delete(s.el);
         }
       }
       return sync(sessions);
     }
+
+    const clearObserverTimer = () => {
+      if (observerTimer) {
+        clearTimeout(observerTimer);
+        observerTimer = null;
+      }
+    };
+
+    const scheduleDomSync = () => {
+      if (destroyed || !enabled) return;
+      clearObserverTimer();
+      observerTimer = setTimeout(() => {
+        observerTimer = null;
+        if (!destroyed && enabled && !coexist?.isWindowHibernated?.(doc, win, blurred)) {
+          syncFromDom();
+        }
+      }, 220);
+      observerTimer?.unref?.();
+    };
+
+    const stopObserver = () => {
+      clearObserverTimer();
+      if (domBusUnsub) {
+        try { domBusUnsub(); } catch {}
+        domBusUnsub = null;
+      }
+      if (domObserver) {
+        try { domObserver.disconnect(); } catch {}
+        domObserver = null;
+      }
+    };
+
+    const startObserver = () => {
+      if (destroyed || !enabled || !autoObserve || !doc || domBusUnsub || domObserver) return;
+      const bus = coexist?.getDomMutationBus?.(doc, win);
+      if (bus && typeof bus.subscribe === 'function') {
+        try {
+          domBusUnsub = bus.subscribe(
+            'session-radar',
+            (_records, meta) => {
+              if (destroyed || !enabled) return;
+              if (meta?.woken) {
+                if (!coexist?.isWindowHibernated?.(doc, win, blurred)) syncFromDom();
+                return;
+              }
+              if (coexist?.isWindowHibernated?.(doc, win, blurred)) return;
+              scheduleDomSync();
+            },
+            { wakeOnResume: true }
+          );
+          return;
+        } catch {
+          domBusUnsub = null;
+        }
+      }
+      const MO = win?.MutationObserver || globalRoot?.MutationObserver;
+      const rootNode = doc.body || doc.documentElement;
+      if (typeof MO !== 'function' || !rootNode) return;
+      try {
+        domObserver = new MO((records) => {
+          if (destroyed || !enabled) return;
+          if (coexist?.isWindowHibernated?.(doc, win, blurred)) return;
+          if (typeof coexist?.isMutationOwnedOnly === 'function' && coexist.isMutationOwnedOnly(records)) return;
+          scheduleDomSync();
+        });
+        domObserver.observe(rootNode, { childList: true, subtree: true });
+      } catch {
+        domObserver = null;
+      }
+    };
 
     const addL = (target, ev, fn) => {
       if (!target || typeof target.addEventListener !== 'function') return;
@@ -453,11 +527,13 @@
       if (destroyed) return;
       enabled = Boolean(v);
       if (!enabled) {
+        stopObserver();
         prevStates.clear();
         filterMode = 'all';
         removeBar();
       } else {
         syncFromDom();
+        startObserver();
       }
     }
 
@@ -501,6 +577,7 @@
       if (destroyed) return;
       destroyed = true;
       enabled = false;
+      stopObserver();
       while (listeners.length) {
         try { listeners.pop()(); } catch {}
       }
@@ -508,7 +585,10 @@
       removeBar();
     }
 
-    if (enabled) syncFromDom();
+    if (enabled) {
+      syncFromDom();
+      startObserver();
+    }
 
     function notifyStall({ cascadeId = '', stalledForSec = 0 } = {}) {
       if (destroyed) return false;

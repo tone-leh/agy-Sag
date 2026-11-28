@@ -77,6 +77,9 @@
   - Added 20 Antigravity `2.35.2` UI terms across all 9 target locales (484 core entries/locale) plus Auxiliary Pane theme styling and deduplicated long code-block folding.
   - Added read-only symlink-guarded redacted `searchSanitizedSessions()` (`storage search`, `sag:search_sessions`, `BookmarkVault` `★ Bookmarks / 🔍 All Sessions` toggle), `draftGuard` attachment count recovery hint, and lossless `EXACT_ROWS` dictionary packing.
   - *Verification Baseline*: `249/249` tests passing, `i18n:validate` 0 errors (484 core + 9 ext packs), `workbench:smoke` HTTP 200 (22 markers), `ru` sync bundle `1,497,317 B` (`<= 1,540,000 B`), Watch deferred `956,274 B` (`< 960,000 B`), `readmeImages = 0`.
+- **v1.4.x Anti-White-Screen / Anti-Freeze & Antigravity `v2.36.0` Dual-Pass Hardening (`docs/AUDIT-V236-RESILIENCE.md`, `packages/core/*`, `cli/*`, `test/v236-resilience-hardening.test.mjs`)**:
+  - Completed two full resilience audit & remediation passes covering React DOM zero-intrusion (safe DOM helpers, Lexical no-`textContent` guard, body-fixed Smooth Caret, pure-CSS hiding for thought/radar/outline), shared `DomMutationBus` + `HtmlAttrBus` consolidation (merging 11 observers into 2 per-document singletons with hibernation gating & wake-up replay), 3,000-step large conversation budgets, Antigravity `v2.36.0` dual-composer isolation & `Option+Cmd+/` yield, `storage-doctor` fail-closed truncation orphan protection + live WAL backup + chunked `copyFileSafeAtomic` with `maxBytes`/`O_NOFOLLOW`, `TranslatorService` strict concurrency handoff & `fe80::/10` SSRF guard, and `cli/bundle.mjs` isolated VM lossless packing (`ruSync = 1,418,898 B`, `ruDefer = 954,621 B`).
+  - *Verification Baseline*: `255/255` tests passing, `i18n:validate` 10 built-in (493 core) + 9 extended packs (0 errors), `workbench:smoke` HTTP 200 (`1,416,802 B`, 22 markers), `doctor` manifest compliant (`Obsidian Prism v1.0.8-beta.5` detected), `readmeImages = 0`.
 - **v1.4 Phase 15–16 & Windows/Linux Deep Compatibility Pass (`packages/core/settings/tab-*.js`, `packages/core/thought-translator.js`, `cli/translator-service.mjs`, `packages/core/safe-auto-accept.js`, `cli/launcher.mjs`, `CONTRIBUTING.md`, `test/thought-translator.test.mjs`, `test/cross-platform-audit-fixes.test.mjs`)**:
   - Split `prism-bridge.js` (3,366 → 1,331 lines) into 6 UMD tab modules under `packages/core/settings/` and added `CONTRIBUTING.md`.
   - Delivered the 14th module `thoughtTranslate` (strict opt-in, default OFF across all 4 presets) with zero-port Node `TranslatorService` supporting 5 engines (`mt`, `openai`, `anthropic`, `gemini`, `ollama`), `0600` isolated secrets outside `~/.gemini/antigravity/`, SSRF/IPv4-mapped IPv6/redirect guards, LRU cache, and Prism yield.
@@ -114,8 +117,8 @@
 
 Run inside repository root:
 ```bash
-npm test                                  # 249/249 tests passing (node --test)
-npm run i18n:validate                     # 10 built-in (484 core) + 9 extended packs, 0 errors
+npm test                                  # 255/255 tests passing (node --test)
+npm run i18n:validate                     # 10 built-in (493 core) + 9 extended packs, 0 errors
 npm run workbench:smoke                   # HTTP 200, 22 markers verified
 npm run doctor                            # Marketplace manifest + environment diagnostics
 node cli/sag-cli.mjs launch --dry-run --json  # Read-only launch plan + Prism yield check

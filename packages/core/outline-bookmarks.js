@@ -32,8 +32,12 @@
     let currentCid = '';
     let bookmarks = new Set();
     let observer = null;
+    let domBusUnsub = null;
     let observerTimer = null;
+    let idleDecorateHandle = null;
+    let idleDecorateType = 'none'; // 'none' | 'ric' | 'timeout'
     let vaultSyncTimer = null;
+    let vaultSyncDirty = false;
     let lastVaultBubbleCount = -1;
     let dockEl = null;
     let chipBtn = null;
@@ -78,6 +82,38 @@
       if (observerTimer) {
         clearTimeout(observerTimer);
         observerTimer = null;
+      }
+    }
+
+    function clearIdleDecorate() {
+      if (idleDecorateHandle !== null) {
+        if (idleDecorateType === 'ric' && typeof win?.cancelIdleCallback === 'function') {
+          try { win.cancelIdleCallback(idleDecorateHandle); } catch {}
+        } else if (idleDecorateType === 'timeout') {
+          try { clearTimeout(idleDecorateHandle); } catch {}
+        }
+        idleDecorateHandle = null;
+        idleDecorateType = 'none';
+      }
+    }
+
+    function scheduleIdleDecorate() {
+      if (idleDecorateHandle !== null || destroyed || !enabled) return;
+      if (coexist?.isWindowHibernated?.(doc, win, false)) return;
+      const run = () => {
+        idleDecorateHandle = null;
+        idleDecorateType = 'none';
+        if (destroyed || !enabled) return;
+        if (coexist?.isWindowHibernated?.(doc, win, false)) return;
+        decorateUserTurns();
+      };
+      if (typeof win?.requestIdleCallback === 'function') {
+        idleDecorateType = 'ric';
+        idleDecorateHandle = win.requestIdleCallback(run, { timeout: 500 });
+      } else {
+        idleDecorateType = 'timeout';
+        idleDecorateHandle = setTimeout(run, 120);
+        idleDecorateHandle?.unref?.();
       }
     }
 
@@ -176,26 +212,35 @@
 
     function syncVaultMetaNow(bubbleCount = -1) {
       clearVaultSyncTimer();
-      if (destroyed || !enabled || !vault || bookmarks.size === 0) return;
+      if (destroyed || !enabled || !vault || bookmarks.size === 0) {
+        vaultSyncDirty = false;
+        return;
+      }
       try {
         const turns = exporter.extractConversationTurns(doc, getScope());
         const title = vault.detectConversationTitle(doc, currentCid);
         vault.syncSessionMeta({ storage, cascadeId: currentCid, bookmarks, turns, title });
         lastVaultBubbleCount = bubbleCount >= 0 ? bubbleCount : getUserBubbles().length;
+        vaultSyncDirty = false;
       } catch {}
     }
 
     function scheduleVaultSync(bubbleCount) {
       if (destroyed || !enabled || !vault || bookmarks.size === 0) {
         clearVaultSyncTimer();
+        vaultSyncDirty = false;
         return;
       }
       if (bubbleCount === lastVaultBubbleCount) return;
+      vaultSyncDirty = true;
       clearVaultSyncTimer();
       vaultSyncTimer = setTimeout(() => {
         vaultSyncTimer = null;
         if (destroyed || !enabled || !vault || bookmarks.size === 0) return;
-        if (coexist?.isWindowHibernated?.(doc, win, false)) return;
+        if (coexist?.isWindowHibernated?.(doc, win, false)) {
+          vaultSyncDirty = true;
+          return;
+        }
         syncVaultMetaNow(getUserBubbles().length);
       }, VAULT_SYNC_DEBOUNCE_MS);
       vaultSyncTimer?.unref?.();
@@ -210,7 +255,9 @@
         onlyBookmarkedFilter = false;
         drawerOpen = false;
         lastVaultBubbleCount = -1;
+        vaultSyncDirty = false;
         clearVaultSyncTimer();
+        clearIdleDecorate();
         lastCascadeChanged = true;
       } else {
         lastCascadeChanged = false;
@@ -257,6 +304,10 @@
       const bubbles = getUserBubbles();
       const target = bubbles[n - 1];
       if (!target) return false;
+      if (enabled && !destroyed) {
+        const ctx = getDecorationContext();
+        ensureBubbleDecorated(target, n, ctx);
+      }
       clearPulse();
       try {
         target.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
@@ -330,6 +381,8 @@
       clearPulse();
       closeRewindMenu();
       clearVaultSyncTimer();
+      clearIdleDecorate();
+      vaultSyncDirty = false;
       for (const n of ownedNodes) {
         safeRemove(n);
       }
@@ -340,9 +393,8 @@
       drawerOpen = false;
       // Unhide any outline rows filtered by onlyBookmarkedFilter
       try {
-        doc?.querySelectorAll?.('.ag-cs-nav-outline-item[data-ag-sg-bm-hidden="1"]')?.forEach?.((row) => {
-          row.hidden = false;
-          row.removeAttribute?.('data-ag-sg-bm-hidden');
+        doc?.querySelectorAll?.('.ag-cs-nav-outline-item[data-ag-sg-outline-hidden="1"]')?.forEach?.((row) => {
+          row.removeAttribute?.('data-ag-sg-outline-hidden');
         });
       } catch {}
     }
@@ -362,7 +414,7 @@
 
       if (!dockEl || dockEl.parentElement !== dockHost) {
         if (dockEl) {
-          try { dockEl.remove?.(); } catch {}
+          safeRemove(dockEl);
           ownedNodes.delete(dockEl);
         }
         dockEl = coexist.markOwnedNoTranslate(doc.createElement('div'));
@@ -392,12 +444,15 @@
         inner.appendChild(drawerEl);
         dockEl.appendChild(inner);
 
-        if (dockHost.firstChild) {
-          safeInsert(dockHost, dockEl, dockHost.firstChild);
+        const mountedDock = dockHost.firstChild
+          ? safeInsert(dockHost, dockEl, dockHost.firstChild)
+          : safeAppend(dockHost, dockEl);
+        if (mountedDock) {
+          ownedNodes.add(dockEl);
         } else {
-          safeAppend(dockHost, dockEl);
+          dockEl = chipBtn = drawerEl = null;
+          return;
         }
-        ownedNodes.add(dockEl);
       }
 
       const strings = S();
@@ -561,43 +616,36 @@
       }
     }
 
-    function decorateUserTurns() {
-      const bubbles = getUserBubbles();
-      if (bubbles.length === 0) {
-        renderNativeJumpDock(bubbles);
-        return 0;
-      }
+    function getDecorationContext() {
       const lang = getLang();
       const strings = S();
       const sagStr = typeof i18n?.getSagStrings === 'function' ? i18n.getSagStrings(lang) : {};
       const rollbackEnabled =
         typeof options.onRollbackTurn === 'function' &&
         (typeof options.isRollbackAvailable !== 'function' || Boolean(options.isRollbackAvailable()));
-      let newDecorated = 0;
+      return { lang, strings, sagStr, rollbackEnabled };
+    }
 
-      // Process newest turns first and cap new mounts per pass to avoid blocking 3,000-step sessions
-      for (let idx = bubbles.length - 1; idx >= 0; idx -= 1) {
-        const bubble = bubbles[idx];
-        if (!bubble) continue;
-        const turnNum = idx + 1;
-        const starred = bookmarks.has(turnNum);
+    function ensureBubbleDecorated(bubble, turnNum, ctx) {
+      if (!bubble) return { mounted: false, wasNew: false };
+      const { lang, strings, sagStr, rollbackEnabled } = ctx;
+      const starred = bookmarks.has(turnNum);
+      const actionSlot = resolveTurnActionSlot(bubble);
+      const expectedHost = actionSlot || bubble;
 
-        if (decoratedBubbles.has(bubble)) {
-          const meta = bubbleMeta.get(bubble);
-          const lateActionSlot = meta && meta.host === bubble ? resolveTurnActionSlot(bubble) : null;
-          if (
-            meta &&
-            !lateActionSlot &&
-            meta.btn &&
-            meta.btn.isConnected !== false &&
-            meta.host &&
-            meta.host.isConnected !== false &&
-            meta.btn.parentElement === meta.host &&
-            meta.rollbackEnabled === rollbackEnabled
-          ) {
-            if (meta.turnNum === turnNum && meta.starred === starred && meta.lang === lang) {
-              continue;
-            }
+      if (decoratedBubbles.has(bubble)) {
+        const meta = bubbleMeta.get(bubble);
+        if (
+          meta &&
+          meta.host === expectedHost &&
+          meta.btn &&
+          meta.btn.isConnected !== false &&
+          meta.host &&
+          meta.host.isConnected !== false &&
+          meta.btn.parentElement === meta.host &&
+          meta.rollbackEnabled === rollbackEnabled
+        ) {
+          if (meta.turnNum !== turnNum || meta.starred !== starred || meta.lang !== lang) {
             meta.btn.setAttribute('data-ag-sg-turn', String(turnNum));
             meta.btn.setAttribute('aria-pressed', String(starred));
             meta.btn.setAttribute('data-starred', starred ? '1' : '0');
@@ -611,124 +659,205 @@
             meta.turnNum = turnNum;
             meta.starred = starred;
             meta.lang = lang;
-            continue;
           }
-          decoratedBubbles.delete(bubble);
+          return { mounted: true, wasNew: false };
         }
+        if (meta && meta.host && meta.host !== expectedHost) {
+          for (const oldBtn of [meta.btn, meta.rbBtn, meta.rwBtn]) {
+            if (oldBtn && oldBtn.parentElement !== expectedHost) {
+              safeRemove(oldBtn);
+              ownedNodes.delete(oldBtn);
+            }
+          }
+        }
+        decoratedBubbles.delete(bubble);
+      }
 
-        if (newDecorated >= MAX_DECORATE_PER_SYNC) continue;
-        newDecorated += 1;
+      const host = expectedHost;
+      // Migrate away from legacy/outer placement when native action slot changes
+      if (actionSlot) {
+        const stepRoot = bubble.closest?.('[data-testid="user-input-step"]') || null;
+        const scanRoots = stepRoot ? [bubble, stepRoot] : [bubble];
+        const legacyBtns = new Set();
+        for (const root of scanRoots) {
+          for (const el of root.querySelectorAll?.('.ag-sg-bm-star') || []) legacyBtns.add(el);
+          for (const el of root.querySelectorAll?.('.ag-sag-turn-rollback') || []) legacyBtns.add(el);
+          for (const el of root.querySelectorAll?.('.ag-sag-turn-rewind') || []) legacyBtns.add(el);
+        }
+        for (const legacyBtn of legacyBtns) {
+          if (legacyBtn.parentElement === actionSlot) continue;
+          safeRemove(legacyBtn);
+          ownedNodes.delete(legacyBtn);
+        }
+      }
 
-        const actionSlot = resolveTurnActionSlot(bubble);
-        const host = actionSlot || bubble;
-        // Migrate away from legacy in-bubble placement if a native action row exists
-        if (actionSlot) {
-          const legacyStars = bubble.querySelectorAll?.('.ag-sg-bm-star') || [];
-          const legacyRollbacks = bubble.querySelectorAll?.('.ag-sag-turn-rollback') || [];
-          const legacyRewinds = bubble.querySelectorAll?.('.ag-sag-turn-rewind') || [];
-          for (const legacyBtn of new Set([...legacyStars, ...legacyRollbacks, ...legacyRewinds])) {
-            if (legacyBtn.parentElement === actionSlot) continue;
-            safeRemove(legacyBtn);
-            ownedNodes.delete(legacyBtn);
-          }
+      const hostStars = host.querySelectorAll?.('.ag-sg-bm-star') || [];
+      let btn = null;
+      for (const el of hostStars) {
+        if (!el.classList?.contains?.('ag-sag-turn-rollback') && !el.classList?.contains?.('ag-sag-turn-rewind')) {
+          btn = el;
+          break;
         }
-        const hostStars = host.querySelectorAll?.('.ag-sg-bm-star') || [];
-        let btn = null;
-        for (const el of hostStars) {
-          if (!el.classList?.contains?.('ag-sag-turn-rollback') && !el.classList?.contains?.('ag-sag-turn-rewind')) {
-            btn = el;
-            break;
-          }
-        }
-        if (!btn) {
-          btn = coexist.markOwnedNoTranslate(doc.createElement('button'));
-          btn.type = 'button';
-          btn.className = 'ag-sg-bm-star';
-          btn.setAttribute('data-ag-sg-turn', String(turnNum));
-          btn.addEventListener('click', (ev) => {
-            ev?.preventDefault?.();
-            ev?.stopPropagation?.();
-            const liveTurn = Number(btn.getAttribute('data-ag-sg-turn')) || turnNum;
-            toggleBookmark(liveTurn);
-          });
-          safeAppend(host, btn);
-          ownedNodes.add(btn);
-        }
-        if (actionSlot) btn.setAttribute('data-inline-action', '1');
-        else btn.removeAttribute?.('data-inline-action');
+      }
+      let btnMounted = Boolean(btn);
+      if (!btn) {
+        btn = coexist.markOwnedNoTranslate(doc.createElement('button'));
+        btn.type = 'button';
+        btn.className = 'ag-sg-bm-star';
         btn.setAttribute('data-ag-sg-turn', String(turnNum));
-        btn.setAttribute('aria-pressed', String(starred));
-        btn.setAttribute('data-starred', starred ? '1' : '0');
-        const tip = starred ? strings.bmUnstarTitle : strings.bmStarTitle;
-        btn.title = tip;
-        btn.setAttribute('aria-label', tip);
-        btn.setAttribute('data-tip', tip);
-        renderBookmarkIcon(btn, starred);
-
-        // Optional dual-star agy-NOV guard rollback prompt filler (visible only when NOV guard connected)
-        let rbBtn = host.querySelector?.('.ag-sag-turn-rollback') || null;
-        if (rollbackEnabled) {
-          if (!rbBtn) {
-            rbBtn = coexist.markOwnedNoTranslate(doc.createElement('button'));
-            rbBtn.type = 'button';
-            rbBtn.className = 'ag-sg-bm-star ag-sag-turn-rollback';
-            rbBtn.setAttribute('data-ag-sag-rollback-turn', String(turnNum));
-            rbBtn.textContent = '↺';
-            rbBtn.title = 'Fill agy-NOV guard rollback prompt for this turn';
-            rbBtn.setAttribute('aria-label', rbBtn.title);
-            rbBtn.addEventListener('click', (ev) => {
-              ev?.preventDefault?.();
-              ev?.stopPropagation?.();
-              const liveTurn = Number(rbBtn.getAttribute('data-ag-sag-rollback-turn')) || turnNum;
-              const rawSnippet = exporter.extractNodeTextWithoutOwned(bubble);
-              const snippet = exporter.redactSecrets(rawSnippet).replace(/\s+/g, ' ').trim().slice(0, 64);
-              options.onRollbackTurn({ turnNum: liveTurn, snippet });
-            });
-            safeAppend(host, rbBtn);
-            ownedNodes.add(rbBtn);
-          } else {
-            rbBtn.setAttribute('data-ag-sag-rollback-turn', String(turnNum));
-          }
-          if (actionSlot) rbBtn.setAttribute('data-inline-action', '1');
-          else rbBtn.removeAttribute?.('data-inline-action');
-        } else if (rbBtn) {
-          safeRemove(rbBtn);
-          ownedNodes.delete(rbBtn);
-          rbBtn = null;
+        btn.addEventListener('click', (ev) => {
+          ev?.preventDefault?.();
+          ev?.stopPropagation?.();
+          const liveTurn = Number(btn.getAttribute('data-ag-sg-turn')) || turnNum;
+          toggleBookmark(liveTurn);
+        });
+        btnMounted = safeAppend(host, btn);
+        if (btnMounted) {
+          ownedNodes.add(btn);
+        } else {
+          return { mounted: false, wasNew: true };
         }
+      }
+      if (actionSlot) btn.setAttribute('data-inline-action', '1');
+      else btn.removeAttribute?.('data-inline-action');
+      btn.setAttribute('data-ag-sg-turn', String(turnNum));
+      btn.setAttribute('aria-pressed', String(starred));
+      btn.setAttribute('data-starred', starred ? '1' : '0');
+      const tip = starred ? strings.bmUnstarTitle : strings.bmStarTitle;
+      btn.title = tip;
+      btn.setAttribute('aria-label', tip);
+      btn.setAttribute('data-tip', tip);
+      renderBookmarkIcon(btn, starred);
 
-        // Per-turn 3-way Rewind / Compact / Handoff micro-menu button (works with or without agy-NOV)
-        let rwBtn = host.querySelector?.('.ag-sag-turn-rewind') || null;
-        if (!rwBtn) {
-          rwBtn = coexist.markOwnedNoTranslate(doc.createElement('button'));
-          rwBtn.type = 'button';
-          rwBtn.className = 'ag-sag-turn-rewind';
-          rwBtn.setAttribute('data-ag-sag-rewind-turn', String(turnNum));
-          rwBtn.textContent = '⤺';
-          rwBtn.title = sagStr.rewindBtnTitle || 'Turn recovery options (Compact / Handoff / Rollback)';
-          rwBtn.setAttribute('aria-label', rwBtn.title);
-          rwBtn.addEventListener('click', (ev) => {
+      // Optional dual-star agy-NOV guard rollback prompt filler (visible only when NOV guard connected)
+      let rbBtn = host.querySelector?.('.ag-sag-turn-rollback') || null;
+      if (rollbackEnabled) {
+        if (!rbBtn) {
+          rbBtn = coexist.markOwnedNoTranslate(doc.createElement('button'));
+          rbBtn.type = 'button';
+          rbBtn.className = 'ag-sg-bm-star ag-sag-turn-rollback';
+          rbBtn.setAttribute('data-ag-sag-rollback-turn', String(turnNum));
+          rbBtn.textContent = '↺';
+          rbBtn.title = 'Fill agy-NOV guard rollback prompt for this turn';
+          rbBtn.setAttribute('aria-label', rbBtn.title);
+          rbBtn.addEventListener('click', (ev) => {
             ev?.preventDefault?.();
             ev?.stopPropagation?.();
-            const liveTurn = Number(rwBtn.getAttribute('data-ag-sag-rewind-turn')) || turnNum;
+            const liveTurn = Number(rbBtn.getAttribute('data-ag-sag-rollback-turn')) || turnNum;
             const rawSnippet = exporter.extractNodeTextWithoutOwned(bubble);
             const snippet = exporter.redactSecrets(rawSnippet).replace(/\s+/g, ' ').trim().slice(0, 64);
-            if (rewindMenuEl && rewindMenuEl.getAttribute('data-ag-sag-rewind-for') === String(liveTurn)) {
-              closeRewindMenu();
-            } else {
-              openTurnRewindMenu(liveTurn, snippet, rwBtn);
-            }
+            options.onRollbackTurn({ turnNum: liveTurn, snippet });
           });
-          safeAppend(host, rwBtn);
+          if (safeAppend(host, rbBtn)) {
+            ownedNodes.add(rbBtn);
+          } else {
+            rbBtn = null;
+          }
+        } else {
+          rbBtn.setAttribute('data-ag-sag-rollback-turn', String(turnNum));
+        }
+        if (rbBtn) {
+          if (actionSlot) rbBtn.setAttribute('data-inline-action', '1');
+          else rbBtn.removeAttribute?.('data-inline-action');
+        }
+      } else if (rbBtn) {
+        safeRemove(rbBtn);
+        ownedNodes.delete(rbBtn);
+        rbBtn = null;
+      }
+
+      // Per-turn 3-way Rewind / Compact / Handoff micro-menu button (works with or without agy-NOV)
+      let rwBtn = host.querySelector?.('.ag-sag-turn-rewind') || null;
+      if (!rwBtn) {
+        rwBtn = coexist.markOwnedNoTranslate(doc.createElement('button'));
+        rwBtn.type = 'button';
+        rwBtn.className = 'ag-sag-turn-rewind';
+        rwBtn.setAttribute('data-ag-sag-rewind-turn', String(turnNum));
+        rwBtn.textContent = '⤺';
+        rwBtn.title = sagStr.rewindBtnTitle || 'Turn recovery options (Compact / Handoff / Rollback)';
+        rwBtn.setAttribute('aria-label', rwBtn.title);
+        rwBtn.addEventListener('click', (ev) => {
+          ev?.preventDefault?.();
+          ev?.stopPropagation?.();
+          const liveTurn = Number(rwBtn.getAttribute('data-ag-sag-rewind-turn')) || turnNum;
+          const rawSnippet = exporter.extractNodeTextWithoutOwned(bubble);
+          const snippet = exporter.redactSecrets(rawSnippet).replace(/\s+/g, ' ').trim().slice(0, 64);
+          if (rewindMenuEl && rewindMenuEl.getAttribute('data-ag-sag-rewind-for') === String(liveTurn)) {
+            closeRewindMenu();
+          } else {
+            openTurnRewindMenu(liveTurn, snippet, rwBtn);
+          }
+        });
+        if (safeAppend(host, rwBtn)) {
           ownedNodes.add(rwBtn);
         } else {
-          rwBtn.setAttribute('data-ag-sag-rewind-turn', String(turnNum));
+          rwBtn = null;
         }
+      } else {
+        rwBtn.setAttribute('data-ag-sag-rewind-turn', String(turnNum));
+      }
+      if (rwBtn) {
         if (actionSlot) rwBtn.setAttribute('data-inline-action', '1');
         else rwBtn.removeAttribute?.('data-inline-action');
+      }
 
+      if (btnMounted) {
         decoratedBubbles.add(bubble);
         bubbleMeta.set(bubble, { btn, rbBtn, rwBtn, host, turnNum, starred, rollbackEnabled, lang });
+      }
+      return { mounted: btnMounted, wasNew: true };
+    }
+
+    function decorateUserTurns() {
+      const bubbles = getUserBubbles();
+      if (bubbles.length === 0) {
+        clearIdleDecorate();
+        renderNativeJumpDock(bubbles);
+        return 0;
+      }
+      const ctx = getDecorationContext();
+      let newDecorated = 0;
+      let hasUndecoratedRemaining = false;
+
+      // Process newest turns first and cap new mounts per pass to avoid blocking 3,000-step sessions
+      for (let idx = bubbles.length - 1; idx >= 0; idx -= 1) {
+        const bubble = bubbles[idx];
+        if (!bubble) continue;
+        const turnNum = idx + 1;
+
+        if (!decoratedBubbles.has(bubble)) {
+          if (newDecorated >= MAX_DECORATE_PER_SYNC) {
+            hasUndecoratedRemaining = true;
+            continue;
+          }
+          newDecorated += 1;
+        } else {
+          const meta = bubbleMeta.get(bubble);
+          const expectedHost = resolveTurnActionSlot(bubble) || bubble;
+          const needsRemount =
+            !meta ||
+            meta.host !== expectedHost ||
+            !meta.btn ||
+            meta.btn.isConnected === false ||
+            !meta.host ||
+            meta.host.isConnected === false ||
+            meta.btn.parentElement !== meta.host ||
+            meta.rollbackEnabled !== ctx.rollbackEnabled;
+          if (needsRemount) {
+            if (newDecorated >= MAX_DECORATE_PER_SYNC) {
+              hasUndecoratedRemaining = true;
+              continue;
+            }
+            newDecorated += 1;
+          }
+        }
+
+        ensureBubbleDecorated(bubble, turnNum, ctx);
+      }
+      if (hasUndecoratedRemaining) {
+        scheduleIdleDecorate();
+      } else {
+        clearIdleDecorate();
       }
       renderNativeJumpDock(bubbles);
       return bubbles.length;
@@ -753,12 +882,17 @@
             onlyBookmarkedFilter = !onlyBookmarkedFilter;
             sync();
           });
-          safeAppend(head, filterBtn);
-          ownedNodes.add(filterBtn);
+          if (safeAppend(head, filterBtn)) {
+            ownedNodes.add(filterBtn);
+          } else {
+            filterBtn = null;
+          }
         }
-        filterBtn.setAttribute('aria-pressed', String(onlyBookmarkedFilter));
-        filterBtn.textContent = `★ ${bookmarks.size}`;
-        filterBtn.title = strings.bmFilterTitle;
+        if (filterBtn) {
+          filterBtn.setAttribute('aria-pressed', String(onlyBookmarkedFilter));
+          filterBtn.textContent = `★ ${bookmarks.size}`;
+          filterBtn.title = strings.bmFilterTitle;
+        }
       }
 
       const rows = Array.from(pop.querySelectorAll?.('.ag-cs-nav-outline-item') || []);
@@ -777,18 +911,21 @@
             ev?.stopPropagation?.();
             toggleBookmark(turnNum);
           });
-          safeAppend(row, star);
-          ownedNodes.add(star);
+          if (safeAppend(row, star)) {
+            ownedNodes.add(star);
+          } else {
+            star = null;
+          }
         }
-        star.setAttribute('data-starred', starred ? '1' : '0');
-        star.textContent = starred ? '★' : '☆';
+        if (star) {
+          star.setAttribute('data-starred', starred ? '1' : '0');
+          star.textContent = starred ? '★' : '☆';
+        }
 
         if (onlyBookmarkedFilter && !starred) {
-          row.hidden = true;
-          row.setAttribute('data-ag-sg-bm-hidden', '1');
-        } else if (row.getAttribute?.('data-ag-sg-bm-hidden') === '1') {
-          row.hidden = false;
-          row.removeAttribute?.('data-ag-sg-bm-hidden');
+          row.setAttribute('data-ag-sg-outline-hidden', '1');
+        } else if (row.getAttribute?.('data-ag-sg-outline-hidden') === '1') {
+          row.removeAttribute?.('data-ag-sg-outline-hidden');
         }
       }
     }
@@ -848,10 +985,72 @@
       listeners.push(() => doc.removeEventListener?.('focusin', onPaneFocus, true));
       listeners.push(() => doc.removeEventListener?.('click', onOutsideRewindDismiss, true));
       listeners.push(() => doc.removeEventListener?.('keydown', onRewindEscape, true));
+
+      const onVisibilityWake = () => {
+        if (!doc.hidden) handleWakeup(false);
+      };
+      doc.addEventListener('visibilitychange', onVisibilityWake);
+      listeners.push(() => doc.removeEventListener?.('visibilitychange', onVisibilityWake));
+    }
+    if (win && typeof win.addEventListener === 'function') {
+      const onFocusWake = () => handleWakeup(false);
+      win.addEventListener('focus', onFocusWake);
+      listeners.push(() => win.removeEventListener?.('focus', onFocusWake));
+    }
+
+    function handleWakeup(forceSync = true) {
+      if (destroyed || !enabled) return;
+      if (coexist?.isWindowHibernated?.(doc, win, false)) return;
+      if (vaultSyncDirty && vault && bookmarks.size > 0) {
+        syncVaultMetaNow(getUserBubbles().length);
+      }
+      if (forceSync) sync();
+    }
+
+    function scheduleObserverSync() {
+      clearObserverTimer();
+      observerTimer = setTimeout(() => {
+        observerTimer = null;
+        if (!destroyed && enabled && !coexist?.isWindowHibernated?.(doc, win, false)) sync();
+      }, OBSERVER_DEBOUNCE_MS);
+      observerTimer?.unref?.();
+    }
+
+    function stopObserver() {
+      clearObserverTimer();
+      if (domBusUnsub) {
+        try { domBusUnsub(); } catch {}
+        domBusUnsub = null;
+      }
+      if (observer) {
+        try { observer.disconnect(); } catch {}
+        observer = null;
+      }
     }
 
     function startObserver() {
-      if (observer || !doc || typeof win?.MutationObserver !== 'function') return;
+      if (observer || domBusUnsub || !doc) return;
+      const bus = coexist?.getDomMutationBus?.(doc, win);
+      if (bus && typeof bus.subscribe === 'function') {
+        try {
+          domBusUnsub = bus.subscribe(
+            'outline-bookmarks',
+            (_muts, meta) => {
+              if (destroyed || !enabled) return;
+              if (meta?.woken) {
+                handleWakeup(true);
+                return;
+              }
+              scheduleObserverSync();
+            },
+            { wakeOnResume: true }
+          );
+          return;
+        } catch {
+          domBusUnsub = null;
+        }
+      }
+      if (typeof win?.MutationObserver !== 'function') return;
       try {
         observer = new win.MutationObserver((muts) => {
           if (destroyed || !enabled) return;
@@ -872,12 +1071,7 @@
             });
             if (!relevant) return;
           }
-          clearObserverTimer();
-          observerTimer = setTimeout(() => {
-            observerTimer = null;
-            if (!destroyed && enabled && !coexist?.isWindowHibernated?.(doc, win, false)) sync();
-          }, OBSERVER_DEBOUNCE_MS);
-          observerTimer?.unref?.();
+          scheduleObserverSync();
         });
         const rootNode = doc.body || doc.documentElement;
         if (rootNode) observer.observe(rootNode, { childList: true, subtree: true });
@@ -888,12 +1082,14 @@
       if (destroyed) return;
       enabled = Boolean(v);
       if (!enabled) {
-        clearObserverTimer();
+        stopObserver();
+        clearIdleDecorate();
         clearVaultSyncTimer();
+        vaultSyncDirty = false;
         clearOwned();
       } else {
         sync();
-        startObserver();
+        if (options.autoObserve !== false) startObserver();
       }
     }
 
@@ -906,14 +1102,14 @@
       if (destroyed) return;
       destroyed = true;
       enabled = false;
-      clearObserverTimer();
+      stopObserver();
+      clearIdleDecorate();
       clearVaultSyncTimer();
+      vaultSyncDirty = false;
       closeRewindMenu();
       while (listeners.length) {
         try { listeners.pop()(); } catch {}
       }
-      try { observer?.disconnect?.(); } catch {}
-      observer = null;
       activePaneEl = null;
       clearOwned();
       bookmarks.clear();

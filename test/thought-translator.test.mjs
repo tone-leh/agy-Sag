@@ -354,11 +354,11 @@ test('4. thought-translator.js: strict opt-in, streaming guard, bilingual/transl
   assert.ok(box, 'Translated box injected');
   assert.ok(box.textContent.includes('正在检查跨平台符号链接行为。'));
 
-  // Translated-only mode hides original paragraph cleanly
+  // Translated-only mode hides original paragraph cleanly via parent attribute (zero host child style mutation)
   ctrl.configure({ viewMode: 'translated' });
   await new Promise((r) => setTimeout(r, 10));
-  assert.equal(origP.getAttribute('data-ag-sag-thought-hidden'), '1');
-  assert.equal(origP.style.display, 'none');
+  assert.equal(panel.getAttribute('data-ag-sag-thought-hide-src'), '1');
+  assert.ok(!origP.style.display, 'Must not mutate host child inline style.display');
 
   // Obsidian Prism yield check
   doc.documentElement.setAttribute('data-ag-prism-thought-owner', 'obsidian-prism-thought');
@@ -366,7 +366,8 @@ test('4. thought-translator.js: strict opt-in, streaming guard, bilingual/transl
   assert.equal(ctrl.getDebugState().yieldedToPrism, true);
   assert.equal(doc.querySelectorAll('[data-testid="ag-sag-thought-box"]').length, 0);
   assert.equal(titleSpan.textContent, 'Fix Windows 8.3 short paths', 'Yield restores sidebar title losslessly');
-  assert.equal(origP.style.display, '', 'Yield restores hidden original paragraph');
+  assert.equal(panel.getAttribute('data-ag-sag-thought-hide-src'), null, 'Yield removes translated-only hide attribute');
+  assert.ok(!origP.style.display, 'Yield keeps host original paragraph style untouched');
 
   // Destroy cleans everything
   doc.documentElement.removeAttribute('data-ag-prism-thought-owner');

@@ -22,17 +22,38 @@
     return String(Math.round(n));
   }
 
-  const SIDEBAR_AUX_SELECTOR =
-    'aside, [data-testid="sidebar"], [data-testid="conversation-list-sidebar"], [data-side-panel-focus-scope="true"], [data-testid="side-question-panel"], [data-testid*="floating-composer"], [data-testid*="sidebar-composer"]';
+  const EXPLICIT_AUX_SELECTOR =
+    '[data-testid="sidebar"], [data-testid="conversation-list-sidebar"], [data-testid="side-question-panel"], [data-testid*="floating-composer"], [data-testid*="sidebar-composer"], [data-testid*="side-panel-floating"]';
+  const SIDEBAR_AUX_SELECTOR = `aside, ${EXPLICIT_AUX_SELECTOR}`;
 
   function isConnectedNode(el) {
     return Boolean(el && el.isConnected !== false);
   }
 
+  function hasSiblingConversationView(el, stopAt) {
+    let cur = el?.parentElement || null;
+    for (let depth = 0; cur && depth < 6; depth += 1) {
+      if (cur === stopAt || cur.tagName === 'BODY' || cur.tagName === 'HTML') break;
+      if (
+        cur.getAttribute?.('data-testid') === 'conversation-view' ||
+        cur.querySelector?.('[data-testid="conversation-view"]')
+      ) {
+        return true;
+      }
+      cur = cur.parentElement;
+    }
+    return false;
+  }
+
   function isSidebarOrAuxiliaryNode(el) {
     if (!el || el.nodeType !== 1) return false;
     try {
-      if (typeof el.closest === 'function' && el.closest(SIDEBAR_AUX_SELECTOR)) return true;
+      const auxHost = typeof el.closest === 'function' ? el.closest(SIDEBAR_AUX_SELECTOR) : null;
+      if (!auxHost) return false;
+      if (!el.closest(EXPLICIT_AUX_SELECTOR) && hasSiblingConversationView(el, auxHost.parentElement)) {
+        return false;
+      }
+      return true;
     } catch {}
     return false;
   }
@@ -41,10 +62,14 @@
     const pick = (root) => {
       if (!root || typeof root.querySelectorAll !== 'function') return null;
       const list = root.querySelectorAll('[data-testid="agent-input-box"], .surface-composer-card') || [];
+      let fallback = null;
       for (let i = 0; i < list.length; i += 1) {
-        if (!isSidebarOrAuxiliaryNode(list[i])) return list[i];
+        const box = list[i];
+        if (isSidebarOrAuxiliaryNode(box)) continue;
+        if (hasSiblingConversationView(box, root)) return box;
+        if (!fallback) fallback = box;
       }
-      return null;
+      return fallback;
     };
     const root = isConnectedNode(scopeEl) ? scopeEl : doc;
     return pick(root) || (root !== doc ? pick(doc) : null);

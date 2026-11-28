@@ -704,6 +704,383 @@
     return false;
   }
 
+  const domMutationBuses = new WeakMap();
+  const htmlAttrBuses = new WeakMap();
+
+  function resolveMO(doc, win) {
+    return (
+      win?.MutationObserver ||
+      doc?.defaultView?.MutationObserver ||
+      globalRoot?.MutationObserver ||
+      (typeof MutationObserver !== 'undefined' ? MutationObserver : null)
+    );
+  }
+
+  function getDomMutationBus(doc, win) {
+    if (!doc || typeof doc !== 'object') {
+      return {
+        subscribe: () => () => {},
+        getDebugState: () => ({ subscriberCount: 0, observing: false, dirtyWhileHibernated: false, configKey: '' }),
+      };
+    }
+    let bus = domMutationBuses.get(doc);
+    if (bus) {
+      if (win) bus._setWin(win);
+      return bus.api;
+    }
+
+    let winRef = win || doc.defaultView || globalRoot || null;
+    const subscribers = new Map();
+    let observer = null;
+    let observingTarget = null;
+    let observingConfigKey = '';
+    let dirtyWhileHibernated = false;
+    let resumeBound = false;
+    let boundWin = null;
+
+    const flushWake = () => {
+      if (subscribers.size === 0 || !dirtyWhileHibernated) return;
+      if (isWindowHibernated(doc, winRef)) return;
+      dirtyWhileHibernated = false;
+      for (const sub of Array.from(subscribers.values())) {
+        if (sub.wakeOnResume === false) continue;
+        try { sub.handler([], { woken: true }); } catch {}
+      }
+    };
+
+    const onVis = () => {
+      if (doc.hidden) return;
+      flushWake();
+    };
+
+    const onFocus = () => {
+      flushWake();
+    };
+
+    const bindResume = () => {
+      if (resumeBound) return;
+      resumeBound = true;
+      boundWin = winRef;
+      try { doc.addEventListener?.('visibilitychange', onVis); } catch {}
+      try { boundWin?.addEventListener?.('focus', onFocus); } catch {}
+    };
+
+    const unbindResume = () => {
+      if (!resumeBound) return;
+      resumeBound = false;
+      try { doc.removeEventListener?.('visibilitychange', onVis); } catch {}
+      try { boundWin?.removeEventListener?.('focus', onFocus); } catch {}
+      boundWin = null;
+    };
+
+    const teardown = () => {
+      try { observer?.disconnect?.(); } catch {}
+      observer = null;
+      observingTarget = null;
+      observingConfigKey = '';
+      dirtyWhileHibernated = false;
+      unbindResume();
+    };
+
+    const computeObserveConfig = () => {
+      let needAttrs = false;
+      let unfiltered = false;
+      const filterSet = new Set();
+      for (const sub of subscribers.values()) {
+        if (!sub.attributes) continue;
+        needAttrs = true;
+        if (!sub.attributeFilter) {
+          unfiltered = true;
+        } else {
+          for (let i = 0; i < sub.attributeFilter.length; i += 1) {
+            filterSet.add(sub.attributeFilter[i]);
+          }
+        }
+      }
+      if (!needAttrs) {
+        return { key: 'c', opts: { childList: true, subtree: true } };
+      }
+      if (unfiltered || filterSet.size === 0) {
+        return { key: 'a:*', opts: { childList: true, subtree: true, attributes: true } };
+      }
+      const list = Array.from(filterSet).sort();
+      return { key: `a:${list.join(',')}`, opts: { childList: true, subtree: true, attributes: true, attributeFilter: list } };
+    };
+
+    const ensureStarted = () => {
+      if (subscribers.size === 0) {
+        teardown();
+        return;
+      }
+      bindResume();
+      const target = doc.body || doc.documentElement;
+      if (!target) return;
+      const MO = resolveMO(doc, winRef);
+      if (typeof MO !== 'function') return;
+      const cfg = computeObserveConfig();
+      if (observer && observingTarget === target && observingConfigKey === cfg.key) return;
+      if (!observer) {
+        observer = new MO((records) => {
+          if (subscribers.size === 0) return;
+          if (isWindowHibernated(doc, winRef)) {
+            dirtyWhileHibernated = true;
+            return;
+          }
+          if (isMutationOwnedOnly(records)) return;
+          for (const sub of Array.from(subscribers.values())) {
+            try { sub.handler(records, { woken: false }); } catch {}
+          }
+        });
+      } else {
+        try { observer.disconnect(); } catch {}
+      }
+      try {
+        observer.observe(target, cfg.opts);
+        observingTarget = target;
+        observingConfigKey = cfg.key;
+      } catch {}
+    };
+
+    const api = {
+      subscribe(id, handler, opts = {}) {
+        if (typeof handler !== 'function') return () => {};
+        const key = String(id || `sub-${subscribers.size + 1}`);
+        const filter =
+          Array.isArray(opts?.attributeFilter) && opts.attributeFilter.length > 0
+            ? opts.attributeFilter.map(String).filter(Boolean)
+            : null;
+        const entry = {
+          id: key,
+          handler,
+          attributes: Boolean(opts?.attributes),
+          attributeFilter: filter,
+          wakeOnResume: opts?.wakeOnResume !== false,
+        };
+        subscribers.set(key, entry);
+        ensureStarted();
+        let active = true;
+        return () => {
+          if (!active) return;
+          active = false;
+          if (subscribers.get(key) === entry) {
+            subscribers.delete(key);
+            if (subscribers.size === 0) teardown();
+            else ensureStarted();
+          }
+        };
+      },
+      getDebugState: () => ({
+        subscriberCount: subscribers.size,
+        observing: Boolean(observer),
+        dirtyWhileHibernated,
+        configKey: observingConfigKey,
+      }),
+    };
+
+    bus = {
+      api,
+      _setWin(nextWin) {
+        if (!nextWin || nextWin === winRef) return;
+        const wasBound = resumeBound;
+        if (wasBound) unbindResume();
+        winRef = nextWin;
+        if (wasBound && subscribers.size > 0) bindResume();
+      },
+    };
+    domMutationBuses.set(doc, bus);
+    return api;
+  }
+
+  function getHtmlAttrBus(doc, win) {
+    if (!doc || typeof doc !== 'object') {
+      return {
+        subscribe: () => () => {},
+        getDebugState: () => ({ subscriberCount: 0, observing: false, pendingAttrCount: 0, configKey: '' }),
+      };
+    }
+    let bus = htmlAttrBuses.get(doc);
+    if (bus) {
+      if (win) bus._setWin(win);
+      return bus.api;
+    }
+
+    let winRef = win || doc.defaultView || globalRoot || null;
+    const subscribers = new Map();
+    const pendingAttrs = new Set();
+    let observer = null;
+    let observingConfigKey = '';
+    let resumeBound = false;
+    let boundWin = null;
+
+    const dispatchAttrs = (attrSet, woken) => {
+      const wildcard = attrSet.has('*');
+      for (const sub of Array.from(subscribers.values())) {
+        if (woken && sub.wakeOnResume === false) continue;
+        let matched;
+        if (!sub.filterSet) {
+          matched = new Set(attrSet);
+        } else if (wildcard) {
+          matched = new Set(sub.filterSet);
+        } else {
+          matched = new Set();
+          for (const a of attrSet) {
+            if (sub.filterSet.has(a)) matched.add(a);
+          }
+        }
+        if (matched.size === 0) continue;
+        try { sub.handler(matched, { woken }); } catch {}
+      }
+    };
+
+    const flushWake = () => {
+      if (subscribers.size === 0 || pendingAttrs.size === 0) return;
+      if (isWindowHibernated(doc, winRef)) return;
+      const toReplay = new Set(pendingAttrs);
+      pendingAttrs.clear();
+      dispatchAttrs(toReplay, true);
+    };
+
+    const onVis = () => {
+      if (doc.hidden) return;
+      flushWake();
+    };
+
+    const onFocus = () => {
+      flushWake();
+    };
+
+    const bindResume = () => {
+      if (resumeBound) return;
+      resumeBound = true;
+      boundWin = winRef;
+      try { doc.addEventListener?.('visibilitychange', onVis); } catch {}
+      try { boundWin?.addEventListener?.('focus', onFocus); } catch {}
+    };
+
+    const unbindResume = () => {
+      if (!resumeBound) return;
+      resumeBound = false;
+      try { doc.removeEventListener?.('visibilitychange', onVis); } catch {}
+      try { boundWin?.removeEventListener?.('focus', onFocus); } catch {}
+      boundWin = null;
+    };
+
+    const teardown = () => {
+      try { observer?.disconnect?.(); } catch {}
+      observer = null;
+      observingConfigKey = '';
+      pendingAttrs.clear();
+      unbindResume();
+    };
+
+    const computeObserveConfig = () => {
+      let unfiltered = false;
+      const filterSet = new Set();
+      for (const sub of subscribers.values()) {
+        if (!sub.filterSet) {
+          unfiltered = true;
+        } else {
+          for (const a of sub.filterSet) filterSet.add(a);
+        }
+      }
+      if (unfiltered || filterSet.size === 0) {
+        return { key: '*', opts: { attributes: true } };
+      }
+      const list = Array.from(filterSet).sort();
+      return { key: list.join(','), opts: { attributes: true, attributeFilter: list } };
+    };
+
+    const ensureStarted = () => {
+      if (subscribers.size === 0) {
+        teardown();
+        return;
+      }
+      bindResume();
+      const target = doc.documentElement;
+      if (!target) return;
+      const MO = resolveMO(doc, winRef);
+      if (typeof MO !== 'function') return;
+      const cfg = computeObserveConfig();
+      if (observer && observingConfigKey === cfg.key) return;
+      if (!observer) {
+        observer = new MO((records) => {
+          if (subscribers.size === 0) return;
+          const changedAttrs = new Set();
+          if (Array.isArray(records) && records.length > 0) {
+            for (let i = 0; i < records.length; i += 1) {
+              const name = records[i]?.attributeName;
+              if (name) changedAttrs.add(String(name));
+            }
+          }
+          if (changedAttrs.size === 0) changedAttrs.add('*');
+          if (isWindowHibernated(doc, winRef)) {
+            for (const a of changedAttrs) pendingAttrs.add(a);
+            return;
+          }
+          if (pendingAttrs.size > 0) {
+            for (const a of pendingAttrs) changedAttrs.add(a);
+            pendingAttrs.clear();
+          }
+          dispatchAttrs(changedAttrs, false);
+        });
+      } else {
+        try { observer.disconnect(); } catch {}
+      }
+      try {
+        observer.observe(target, cfg.opts);
+        observingConfigKey = cfg.key;
+      } catch {}
+    };
+
+    const api = {
+      subscribe(id, handler, opts = {}) {
+        if (typeof handler !== 'function') return () => {};
+        const key = String(id || `attr-${subscribers.size + 1}`);
+        const filterList =
+          Array.isArray(opts?.attributeFilter) && opts.attributeFilter.length > 0
+            ? opts.attributeFilter.map(String).filter(Boolean)
+            : null;
+        const entry = {
+          id: key,
+          handler,
+          filterSet: filterList ? new Set(filterList) : null,
+          wakeOnResume: opts?.wakeOnResume !== false,
+        };
+        subscribers.set(key, entry);
+        ensureStarted();
+        let active = true;
+        return () => {
+          if (!active) return;
+          active = false;
+          if (subscribers.get(key) === entry) {
+            subscribers.delete(key);
+            if (subscribers.size === 0) teardown();
+            else ensureStarted();
+          }
+        };
+      },
+      getDebugState: () => ({
+        subscriberCount: subscribers.size,
+        observing: Boolean(observer),
+        pendingAttrCount: pendingAttrs.size,
+        configKey: observingConfigKey,
+      }),
+    };
+
+    bus = {
+      api,
+      _setWin(nextWin) {
+        if (!nextWin || nextWin === winRef) return;
+        const wasBound = resumeBound;
+        if (wasBound) unbindResume();
+        winRef = nextWin;
+        if (wasBound && subscribers.size > 0) bindResume();
+      },
+    };
+    htmlAttrBuses.set(doc, bus);
+    return api;
+  }
+
   function writeComposerTextSafely(doc, win, ed, text, { replace = true } = {}) {
     if (!ed) return false;
     try {
@@ -714,6 +1091,9 @@
         ed.dispatchEvent?.(new (win?.Event || Event)('input', { bubbles: true }));
         return true;
       }
+      const isLexical =
+        ed?.getAttribute?.('data-lexical-editor') === 'true' ||
+        Boolean(ed?.closest?.('[data-lexical-editor="true"]'));
       if (replace) {
         let selected = false;
         if (typeof win?.getSelection === 'function' && typeof doc?.createRange === 'function') {
@@ -730,9 +1110,25 @@
           try { doc.execCommand('selectAll', false); } catch {}
         }
       }
+      const InputEv = win?.InputEvent || (typeof InputEvent === 'function' ? InputEvent : null);
       if (text === '') {
+        let deleted = false;
         if (typeof doc?.execCommand === 'function') {
-          try { doc.execCommand('delete', false); } catch {}
+          try { deleted = Boolean(doc.execCommand('delete', false)); } catch {}
+        }
+        if (isLexical) {
+          if (deleted || !String(ed.textContent || '').replace(/\u200B/g, '').trim()) {
+            return true;
+          }
+          if (InputEv) {
+            try {
+              const ev = new InputEv('beforeinput', { bubbles: true, cancelable: true, inputType: 'deleteContentBackward' });
+              const notCanceled = ed.dispatchEvent?.(ev);
+              if (notCanceled === false) return true;
+              ed.dispatchEvent?.(new InputEv('input', { bubbles: true, inputType: 'deleteContentBackward' }));
+            } catch {}
+          }
+          return !String(ed.textContent || '').replace(/\u200B/g, '').trim();
         }
         if (String(ed.textContent || '').replace(/\u200B/g, '').trim()) {
           ed.textContent = '';
@@ -742,6 +1138,16 @@
       }
       if (typeof doc?.execCommand === 'function' && doc.execCommand('insertText', false, text)) {
         return true;
+      }
+      if (isLexical) {
+        if (InputEv) {
+          try {
+            const ev = new InputEv('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: text });
+            const notCanceled = ed.dispatchEvent?.(ev);
+            if (notCanceled === false) return true;
+          } catch {}
+        }
+        return false;
       }
       ed.textContent = text;
       ed.dispatchEvent?.(new (win?.Event || Event)('input', { bubbles: true }));
@@ -789,6 +1195,8 @@
     safeInsertBefore,
     safeAppendChild,
     safeRemoveNode,
+    getDomMutationBus,
+    getHtmlAttrBus,
     writeComposerTextSafely,
     readStoredConfig,
     writeStoredConfig,

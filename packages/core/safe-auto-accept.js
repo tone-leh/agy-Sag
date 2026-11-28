@@ -1347,6 +1347,7 @@
     let totalDeniedHard = 0;
     let totalSkippedPolicy = 0;
     let observer = null;
+    let domBusUnsub = null;
     let observeTimer = null;
 
     const clickedButtons = new WeakSet();
@@ -1373,14 +1374,46 @@
         clearTimeout(observeTimer);
         observeTimer = null;
       }
+      if (domBusUnsub) {
+        try { domBusUnsub(); } catch {}
+        domBusUnsub = null;
+      }
       if (observer) {
         try { observer.disconnect(); } catch {}
         observer = null;
       }
     }
 
+    function scheduleObserverScan() {
+      if (observeTimer) clearTimeout(observeTimer);
+      observeTimer = setTimeout(() => {
+        observeTimer = null;
+        if (!destroyed && enabled && !paused && !isHibernated()) {
+          scanNow();
+        }
+      }, observeDebounceMs);
+      observeTimer?.unref?.();
+    }
+
     function startObserver() {
-      if (destroyed || !enabled || !autoObserve || !doc || observer) return;
+      if (destroyed || !enabled || !autoObserve || !doc || observer || domBusUnsub) return;
+      const bus = coexist?.getDomMutationBus?.(doc, win);
+      if (bus && typeof bus.subscribe === 'function') {
+        try {
+          domBusUnsub = bus.subscribe(
+            'safe-auto-accept',
+            (_records, meta) => {
+              if (destroyed || !enabled || paused) return;
+              if (!meta?.woken && isHibernated()) return;
+              scheduleObserverScan();
+            },
+            { attributes: true, attributeFilter: ['hidden', 'disabled', 'aria-disabled'], wakeOnResume: true }
+          );
+          return;
+        } catch {
+          domBusUnsub = null;
+        }
+      }
       const MO = win?.MutationObserver || globalThis.MutationObserver;
       const target = doc.body || doc.documentElement;
       if (typeof MO !== 'function' || !target) return;
@@ -1394,14 +1427,7 @@
             : true;
           if (!hasExternal) return;
         }
-        if (observeTimer) clearTimeout(observeTimer);
-        observeTimer = setTimeout(() => {
-          observeTimer = null;
-          if (!destroyed && enabled && !paused && !isHibernated()) {
-            scanNow();
-          }
-        }, observeDebounceMs);
-        observeTimer?.unref?.();
+        scheduleObserverScan();
       });
       try {
         observer.observe(target, {
@@ -1572,7 +1598,7 @@
         totalDeniedHard,
         totalSkippedPolicy,
         lastClickAtMs: Number.isFinite(lastClickAtMs) ? lastClickAtMs : null,
-        observing: Boolean(observer),
+        observing: Boolean(observer || domBusUnsub),
       };
     }
 

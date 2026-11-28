@@ -154,7 +154,7 @@ export function validateEndpointUrl(rawUrl, { allowPrivateHttp = false } = {}) {
     !host ||
     BLOCKED_METADATA_HOSTS.has(host) ||
     host.startsWith('169.254.') ||
-    host.startsWith('fe80:') ||
+    /^fe[89ab][0-9a-f]:/i.test(host) ||
     host.startsWith('::ffff:169.254.') ||
     host.startsWith('::ffff:a9fe:') ||
     host === '::ffff:100.100.100.200' ||
@@ -471,9 +471,14 @@ async function translateViaMt(text, targetLang, providerCfg, fetchFn, timeoutMs)
     return out.trim();
   }
 
+  const deadline = Date.now() + Math.max(1, Number(timeoutMs) || DEFAULT_TIMEOUT_MS);
   const chunks = splitTextForMt(text, 1800);
   const translatedChunks = [];
   for (const chunk of chunks) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      throw new Error('Request timed out');
+    }
     const qs = new URLSearchParams({
       client: 'gtx',
       sl: 'auto',
@@ -489,7 +494,7 @@ async function translateViaMt(text, targetLang, providerCfg, fetchFn, timeoutMs)
         method: 'GET',
         headers: { Accept: 'application/json' },
       },
-      timeoutMs
+      remainingMs
     );
     const segs = Array.isArray(data?.[0]) ? data[0] : [];
     const merged = segs.map((item) => (Array.isArray(item) && typeof item[0] === 'string' ? item[0] : '')).join('');
@@ -668,19 +673,54 @@ export class TranslatorService {
   }
 
   async _withSlot(fn) {
-    if (this.inFlight >= MAX_CONCURRENT_REQUESTS) {
+    if (this.inFlight < MAX_CONCURRENT_REQUESTS) {
+      this.inFlight += 1;
+    } else {
       if (this.waitQueue.length >= MAX_WAIT_QUEUE_SIZE) {
         throw new Error('Translator queue busy');
       }
-      await new Promise((resolve) => this.waitQueue.push(resolve));
+      const waitTimeoutMs = Math.max(1, Math.min(this.timeoutMs, 30000));
+      await new Promise((resolve, reject) => {
+        const entry = {
+          settled: false,
+          timer: null,
+          grant: () => {
+            if (entry.settled) return false;
+            entry.settled = true;
+            if (entry.timer !== null) {
+              clearTimeout(entry.timer);
+              entry.timer = null;
+            }
+            resolve();
+            return true;
+          },
+        };
+        entry.timer = setTimeout(() => {
+          if (entry.settled) return;
+          entry.settled = true;
+          entry.timer = null;
+          const idx = this.waitQueue.indexOf(entry);
+          if (idx >= 0) this.waitQueue.splice(idx, 1);
+          reject(new Error('Translator queue wait timed out'));
+        }, waitTimeoutMs);
+        entry.timer?.unref?.();
+        this.waitQueue.push(entry);
+      });
     }
-    this.inFlight += 1;
     try {
       return await fn();
     } finally {
-      this.inFlight -= 1;
-      const next = this.waitQueue.shift();
-      if (next) next();
+      let handedOff = false;
+      while (this.waitQueue.length > 0) {
+        const next = this.waitQueue.shift();
+        if (next && next.grant()) {
+          handedOff = true;
+          break;
+        }
+      }
+      if (!handedOff) {
+        this.inFlight = Math.max(0, this.inFlight - 1);
+      }
     }
   }
 

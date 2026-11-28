@@ -494,8 +494,16 @@ test('PromptQueue triple safety interlocks: streaming, composer draft (textarea 
   assert.equal(ctrl.getDebugState().lastSkipReason, null);
   ctrl.destroy();
 
-  // Part B: Lexical editor draft protection + auto-fill fallback
+  // Part B: Lexical editor draft protection + execCommand safe fill (never tears down Lexical via textContent)
   const lexDom = createQueueDom({ lexical: true });
+  lexDom.doc.execCommand = (cmd, _ui, val) => {
+    if (cmd === 'insertText') {
+      lexDom.editor.textContent = String(val || '');
+      return true;
+    }
+    if (cmd === 'selectAll' || cmd === 'delete') return true;
+    return false;
+  };
   const lexWin = { document: lexDom.doc, localStorage: createMockStorage(), Event };
   const lexCtrl = pqMod.createPromptQueueController({
     win: lexWin,
@@ -803,30 +811,30 @@ test('PromptQueue disabled initial state attaches zero MutationObservers and tog
   assert.equal(dom.doc.querySelector('[data-testid="ag-sag-queue-bar"]'), null);
   assert.equal(dom.doc.querySelectorAll('[data-ag-sag-owned="1"]').length, 0);
 
-  // 2. Enabling starts observer on demand and mounts owned DOM
+  // 2. Enabling subscribes to shared DomMutationBus + HtmlAttrBus (2 underlying observers) and mounts owned DOM
   ctrl.setEnabled(true);
-  assert.equal(observeCount, 1);
+  assert.equal(observeCount, 2);
   assert.equal(ctrl.getDebugState().observing, true);
   assert.ok(dom.doc.querySelector('[data-testid="ag-sag-queue-bar"]'));
 
-  // Enqueue item to create a pending timer, then disable -> disconnects observer, clears timer & removes owned DOM
+  // Enqueue item to create a pending timer, then disable -> disconnects shared observers, clears timer & removes owned DOM
   ctrl.enqueue('Pending task');
   assert.equal(ctrl.getDebugState().pendingTimer, true);
   ctrl.setEnabled(false);
-  assert.equal(disconnectCount, 1);
+  assert.equal(disconnectCount, 2);
   assert.equal(ctrl.getDebugState().observing, false);
   assert.equal(ctrl.getDebugState().pendingTimer, false);
   assert.equal(dom.doc.querySelector('[data-testid="ag-sag-queue-bar"]'), null);
   assert.equal(dom.doc.querySelector('#ag-sag-queue-css'), null);
   assert.equal(dom.doc.querySelectorAll('[data-ag-sag-owned="1"]').length, 0);
 
-  // Re-enabling starts observer again and preserves queued item
+  // Re-enabling starts shared observers again and preserves queued item
   ctrl.setEnabled(true);
-  assert.equal(observeCount, 2);
+  assert.equal(observeCount, 4);
   assert.equal(ctrl.getDebugState().observing, true);
   assert.deepEqual(ctrl.getItems().map((x) => x.text), ['Pending task']);
   ctrl.destroy();
-  assert.equal(disconnectCount, 2);
+  assert.equal(disconnectCount, 4);
 
   // 3. autoObserve: false never starts MutationObserver even after setEnabled(true)
   const beforeObs = observeCount;

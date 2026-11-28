@@ -294,7 +294,18 @@ const ATOMIC_COPY_CHUNK_BYTES = 256 * 1024;
  * Refuses destination symlinks/hardlinks and verifies parent realpath containment
  * immediately before temp creation and rename to narrow TOCTOU windows and avoid OOM on large files.
  */
-export function copyFileSafeAtomic(srcPath, destPath, realDestRoot, { platform = process.platform } = {}) {
+export function copyFileSafeAtomic(
+  srcPath,
+  destPath,
+  realDestRoot,
+  { platform = process.platform, maxBytes = null } = {}
+) {
+  const hasMaxBytes = maxBytes !== null && maxBytes !== undefined;
+  const byteLimit = hasMaxBytes ? Number(maxBytes) : Infinity;
+  if (hasMaxBytes && (!Number.isFinite(byteLimit) || byteLimit < 0)) {
+    throw new Error(`Invalid maxBytes limit (${maxBytes})`);
+  }
+
   const destDir = path.dirname(destPath);
   const realParent = canonicalRealpathSync(destDir);
   if (!isPathWithinBase(realParent, realDestRoot, platform)) {
@@ -321,8 +332,24 @@ export function copyFileSafeAtomic(srcPath, destPath, realDestRoot, { platform =
   let srcFd = null;
   let tmpFd = null;
   let createdTmp = false;
+  let totalCopied = 0;
   try {
-    srcFd = fs.openSync(srcPath, 'r');
+    let srcFlags = fs.constants.O_RDONLY;
+    if (platform !== 'win32') {
+      if (typeof fs.constants?.O_NOFOLLOW === 'number') srcFlags |= fs.constants.O_NOFOLLOW;
+      if (typeof fs.constants?.O_NONBLOCK === 'number') srcFlags |= fs.constants.O_NONBLOCK;
+    }
+    srcFd = fs.openSync(srcPath, srcFlags);
+    const srcStat = fs.fstatSync(srcFd);
+    if (!srcStat.isFile()) {
+      throw new Error(`Security violation: refusing to copy non-regular file (${srcPath})`);
+    }
+    if (hasMaxBytes && srcStat.size > byteLimit) {
+      const err = new Error(`Copy aborted: source exceeds maxBytes limit (${srcStat.size} > ${byteLimit} bytes)`);
+      err.code = 'EFBIG';
+      throw err;
+    }
+
     tmpFd = fs.openSync(
       tmpPath,
       fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL,
@@ -334,6 +361,12 @@ export function copyFileSafeAtomic(srcPath, destPath, realDestRoot, { platform =
     while (true) {
       const bytesRead = fs.readSync(srcFd, chunkBuf, 0, chunkBuf.length, null);
       if (bytesRead <= 0) break;
+      totalCopied += bytesRead;
+      if (totalCopied > byteLimit) {
+        const err = new Error(`Copy aborted: exceeded maxBytes limit (${totalCopied} > ${byteLimit} bytes)`);
+        err.code = 'EFBIG';
+        throw err;
+      }
       let offset = 0;
       while (offset < bytesRead) {
         const written = fs.writeSync(tmpFd, chunkBuf, offset, bytesRead - offset);
@@ -362,6 +395,7 @@ export function copyFileSafeAtomic(srcPath, destPath, realDestRoot, { platform =
       if (err?.code !== 'ENOENT') throw err;
     }
     atomicRenameWithRetry(tmpPath, destPath, { platform });
+    return totalCopied;
   } catch (err) {
     if (tmpFd !== null) {
       try {

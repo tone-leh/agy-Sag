@@ -767,7 +767,9 @@
     const blocks = [];
     const H = 'html[data-ag-sag-theme="1"]';
     const HC = `${H}[data-ag-sag-theme-colors="active"]`;
-    const mi = (p, s = '') => `${p} [data-testid="conversation-view"] [data-testid="agent-input-box"]:not([data-testid*="floating"])${s},${p} main [data-testid="agent-input-box"]:not([data-testid*="floating"])${s}`;
+    const mi = (p, s = '') => `${p} [data-testid="agent-input-box"]:not([data-testid*="floating"]):not([data-testid*="sidebar"])${s}`;
+    const miEx = (p, s = '') =>
+      `${p} aside [data-testid="agent-input-box"]${s},${p} [data-testid="sidebar"] [data-testid="agent-input-box"]${s},${p} [data-testid="conversation-list-sidebar"] [data-testid="agent-input-box"]${s}`;
 
     // 1. Color tokens + Browser Hole transparency guard
     if (applyColors) {
@@ -792,6 +794,7 @@
       `${H}{--ag-sag-r-sm:${cornerSpec.sm};--ag-sag-r-md:${cornerSpec.md};--ag-sag-r-lg:${cornerSpec.lg};--ag-sag-r-bubble:${cornerSpec.bubble};--ag-sag-r-input:${cornerSpec.input};}` +
         `${H} [data-testid="user-message-bubble"]{border-radius:var(--ag-sag-r-bubble);}` +
         `${mi(H)}{border-radius:var(--ag-sag-r-input);}` +
+        `${miEx(H)}{border-radius:revert;}` +
         `${H} [data-testid="conversation-view"] pre,${H} [data-testid="auxiliary-pane"] pre,${H} [data-testid="terminal-panel"] pre{border-radius:var(--ag-sag-r-md);}`
     );
 
@@ -808,6 +811,8 @@
         `${S} [data-testid="user-message-bubble"]{background-color:${bubbleBg};border:1px solid var(--card-border,var(--border));box-shadow:${cardSh};padding:10px 15px;}` +
           `${mi(S)}{background-color:var(--card);border:1px solid var(--card-border,var(--border));box-shadow:inset 0 1px 0 ${specHi},${cardSh};transition:border-color 140ms ease,box-shadow 140ms ease;}` +
           `${mi(S, ':focus-within')}{border-color:color-mix(in srgb,var(--primary) 54%,var(--border));box-shadow:0 0 0 2px color-mix(in srgb,var(--primary) 18%,transparent),${cardSh};}` +
+          `${miEx(S)}{background-color:revert;border:revert;box-shadow:revert;transition:revert;}` +
+          `${miEx(S, ':focus-within')}{border-color:revert;box-shadow:revert;}` +
           `${S} [data-testid="thinking-collapsible-trigger"]{background:transparent;border:0;border-left:2px solid color-mix(in srgb,var(--primary) 42%,transparent);padding-left:8px;color:var(--muted-foreground);}` +
           `${S} [data-testid="changed-files-card"],${S} [data-testid="artifact-view"]{border:1px solid var(--card-border,var(--border));border-radius:var(--ag-sag-r-lg);box-shadow:${cardSh};}` +
           `${S} [data-testid="auxiliary-pane"],${S} [data-testid="terminal-panel"]{border-left:1px solid var(--card-border,var(--border));}` +
@@ -818,13 +823,15 @@
       blocks.push(
         `${S} [data-testid="user-message-bubble"]{background-color:var(--card);border:1.5px solid var(--card-border,var(--border));box-shadow:2px 2px 0 color-mix(in srgb,var(--foreground) 12%,transparent);padding:10px 15px;}` +
           `${mi(S)}{background-color:var(--card);border:1.5px solid var(--card-border,var(--border));box-shadow:0 2px 0 color-mix(in srgb,var(--foreground) 10%,transparent);}` +
+          `${miEx(S)}{background-color:revert;border:revert;box-shadow:revert;}` +
           `${S} [data-testid="thinking-collapsible-trigger"]{border-left:2px dashed color-mix(in srgb,var(--primary) 55%,transparent);padding-left:8px;}`
       );
     } else if (settings.surface === 'glass' && !colorsYielded) {
       const S = `${H}[data-ag-sag-theme-surface="glass"]`;
       blocks.push(
         `${S} [data-testid="user-message-bubble"]{background:linear-gradient(145deg,color-mix(in srgb,var(--card) 82%,var(--primary) 18%),color-mix(in srgb,var(--card) 92%,transparent));border:1px solid color-mix(in srgb,var(--primary) 34%,var(--border));box-shadow:inset 0 1px 0 rgba(255,255,255,0.22),0 10px 28px -12px color-mix(in srgb,var(--primary) 32%,rgba(0,0,0,0.45));padding:10px 15px;}` +
-          `${mi(S)}{background:color-mix(in srgb,var(--card) 88%,transparent);border:1px solid color-mix(in srgb,var(--primary) 36%,var(--border));box-shadow:inset 0 1px 0 rgba(255,255,255,0.20),0 12px 32px -12px color-mix(in srgb,var(--primary) 26%,rgba(0,0,0,0.4));}`
+          `${mi(S)}{background:color-mix(in srgb,var(--card) 88%,transparent);border:1px solid color-mix(in srgb,var(--primary) 36%,var(--border));box-shadow:inset 0 1px 0 rgba(255,255,255,0.20),0 12px 32px -12px color-mix(in srgb,var(--primary) 26%,rgba(0,0,0,0.4));}` +
+          `${miEx(S)}{background:revert;border:revert;box-shadow:revert;}`
       );
     }
 
@@ -881,11 +888,11 @@
       );
     }
 
-    // 8. FastDOM Smooth Caret
+    // 8. FastDOM Smooth Caret (body-mounted fixed overlay, zero host DOM intrusion)
     if (settings.smoothCaret && !colorsYielded) {
       blocks.push(
-        `[data-ag-sag-caret-host="1"]{position:relative;}[data-ag-sag-smooth-caret="1"]{caret-color:transparent!important;}` +
-          `.ag-sag-smooth-caret{position:absolute;top:0;left:0;width:2px;border-radius:999px;pointer-events:none;z-index:8;background:var(--primary,#38bdf8);box-shadow:0 0 8px color-mix(in srgb,var(--primary,#38bdf8) 55%,transparent);opacity:0;transition:transform 75ms cubic-bezier(0.22,1,0.36,1),height 75ms ease,opacity 110ms ease;}` +
+        `[data-ag-sag-smooth-caret="1"]{caret-color:transparent!important;}` +
+          `.ag-sag-smooth-caret{position:fixed;top:0;left:0;width:2px;border-radius:999px;pointer-events:none;z-index:2147483040;background:var(--primary,#38bdf8);box-shadow:0 0 8px color-mix(in srgb,var(--primary,#38bdf8) 55%,transparent);opacity:0;transition:transform 75ms cubic-bezier(0.22,1,0.36,1),height 75ms ease,opacity 110ms ease;}` +
           `.ag-sag-smooth-caret[data-visible="1"]{opacity:1;will-change:transform,height,opacity;}@media (prefers-reduced-motion:reduce){.ag-sag-smooth-caret{transition:none;}}`
       );
     }
@@ -915,7 +922,8 @@
   }
 
   const resolveDep = (k, p) => (globalRoot?.[k] || (typeof require === 'function' ? (() => { try { return require(p); } catch { return null; } })() : null));
-  const AUX_SEL = 'aside,[data-testid="sidebar"],[data-testid="conversation-list-sidebar"],[data-testid*="floating-composer"]';
+  const AUX_SEL =
+    '[data-testid="sidebar"],[data-testid="conversation-list-sidebar"],[data-testid="side-question-panel"],[data-testid*="floating-composer"],[data-testid*="sidebar-composer"],[data-testid*="side-panel-floating"]';
 
   function createThemeStudioController(options = {}) {
     const win = options.win || globalRoot || null;
@@ -926,6 +934,7 @@
     let enabled = Boolean(options.enabled === true);
     let destroyed = false;
     let winBlurred = false;
+    let winFocusOff = null;
     let settings = normalizeSettings(options, DEFAULT_SETTINGS);
 
     const isHibernated = () =>
@@ -939,7 +948,8 @@
       return el;
     };
     const safeAppend = (p, n) => (coexist?.safeAppendChild ? coexist.safeAppendChild(p, n) : Boolean(p?.appendChild && (() => { try { p.appendChild(n); return true; } catch { return false; } })()));
-    const isAuxEditor = (el) => Boolean(el && (ctxSrc?.isSidebarOrAuxiliaryNode?.(el) || el.closest?.(AUX_SEL)));
+    const safeRemove = (n) => (coexist?.safeRemoveNode ? coexist.safeRemoveNode(n) : Boolean(n?.remove && (() => { try { n.remove(); return true; } catch { return false; } })()));
+    const isAuxEditor = (el) => Boolean(el && (ctxSrc?.isSidebarOrAuxiliaryNode ? ctxSrc.isSidebarOrAuxiliaryNode(el) : el.closest?.(AUX_SEL)));
     let styleEl = null;
     let lastCss = '';
     let lastPrismDetected = false;
@@ -952,23 +962,23 @@
 
     // Standalone throttled fallback conv-state detector (active only when compactGuard is off)
     let convObserver = null;
+    let convBusOff = null;
     let convThrottleTimer = null;
     const convThrottleMs = Math.max(20, Number(options.convStateThrottleMs) || 160);
 
     // Velvet Stream Feathering state (CSS.highlights)
     let streamObserver = null;
-    let streamVisOff = null;
     let hlBuckets = null;
     let fadeTimer = null;
     const fadeItems = [];
     const textLenMap = new WeakMap();
 
-    // FastDOM Smooth Caret state
+    // FastDOM Smooth Caret state (body-mounted fixed overlay)
     let caretActive = false;
     let caretRaf = 0;
     let caretComposing = false;
     let caretListenersOff = [];
-    const caretNodes = new WeakMap();
+    let caretEl = null;
 
     // Dedicated ambient glow node
     let glowEl = null;
@@ -977,12 +987,54 @@
     const frameLoadCleanups = new Map(); // iframe -> cleanup fn
     let lastFramePayload = null;
 
-    // Host color-scheme watcher (matchMedia + DOM attribute observer)
+    // Host color-scheme watcher (matchMedia + HtmlAttrBus)
     let mediaQuery = null;
     let mediaListener = null;
     let schemeObserver = null;
+    let schemeAttrOff = null;
     let schemeRaf = 0;
     let lastObservedHostScheme = null;
+
+    function bindWindowFocusWatcher() {
+      if (winFocusOff) return;
+      const offs = [];
+      const onBlur = () => {
+        winBlurred = true;
+        clearStreamFade();
+        if (caretActive) scheduleCaretUpdate();
+      };
+      const onFocus = () => {
+        winBlurred = false;
+        if (caretActive) scheduleCaretUpdate();
+      };
+      const onVis = () => {
+        if (isHibernated()) clearStreamFade();
+        if (caretActive) scheduleCaretUpdate();
+      };
+      if (typeof doc?.addEventListener === 'function') {
+        doc.addEventListener('visibilitychange', onVis);
+        offs.push(() => doc.removeEventListener?.('visibilitychange', onVis));
+      }
+      if (typeof win?.addEventListener === 'function') {
+        win.addEventListener('blur', onBlur);
+        win.addEventListener('focus', onFocus);
+        offs.push(() => win.removeEventListener?.('blur', onBlur));
+        offs.push(() => win.removeEventListener?.('focus', onFocus));
+      }
+      winFocusOff = () => {
+        while (offs.length) {
+          try { offs.pop()(); } catch {}
+        }
+      };
+    }
+
+    function unbindWindowFocusWatcher() {
+      if (winFocusOff) {
+        try { winFocusOff(); } catch {}
+        winFocusOff = null;
+      }
+      winBlurred = false;
+    }
 
     function prefersReducedMotion() {
       try {
@@ -1028,10 +1080,6 @@
 
     function teardownStreamFade() {
       clearStreamFade();
-      if (streamVisOff) {
-        try { streamVisOff(); } catch {}
-        streamVisOff = null;
-      }
       if (streamObserver) {
         try { streamObserver.disconnect(); } catch {}
         streamObserver = null;
@@ -1155,37 +1203,10 @@
         teardownStreamFade();
         return;
       }
-      if (!streamVisOff) {
-        const offs = [];
-        const onVis = () => {
-          if (isHibernated()) clearStreamFade();
-        };
-        const onBlur = () => {
-          winBlurred = true;
-          clearStreamFade();
-        };
-        const onFocus = () => {
-          winBlurred = false;
-        };
-        if (typeof doc.addEventListener === 'function') {
-          doc.addEventListener('visibilitychange', onVis);
-          offs.push(() => doc.removeEventListener('visibilitychange', onVis));
-        }
-        if (typeof win?.addEventListener === 'function') {
-          win.addEventListener('blur', onBlur);
-          win.addEventListener('focus', onFocus);
-          offs.push(() => win.removeEventListener?.('blur', onBlur));
-          offs.push(() => win.removeEventListener?.('focus', onFocus));
-        }
-        streamVisOff = () => {
-          while (offs.length) {
-            try { offs.pop()(); } catch {}
-          }
-        };
-      }
       if (streamObserver || typeof win?.MutationObserver !== 'function') return;
       streamObserver = new win.MutationObserver((records) => {
         if (destroyed || !enabled || !settings.streamFade || lastSurfaceYielded || isHibernated()) return;
+        if (coexist?.isMutationOwnedOnly?.(records)) return;
         const pending = [];
         let batchChars = 0;
         for (const rec of records || []) {
@@ -1228,10 +1249,10 @@
 
     // --- Dedicated 0fps Ambient Glow Node ---
     function removeAmbientGlow() {
-      try { glowEl?.remove?.(); } catch {}
+      safeRemove(glowEl);
       glowEl = null;
       if (doc && typeof doc.querySelectorAll === 'function') {
-        try { doc.querySelectorAll('.ag-sag-ambient-glow').forEach((n) => n.remove?.()); } catch {}
+        try { doc.querySelectorAll('.ag-sag-ambient-glow').forEach((n) => safeRemove(n)); } catch {}
       }
     }
 
@@ -1256,7 +1277,7 @@
       glowEl = el;
     }
 
-    // --- FastDOM Smooth Typing Caret ---
+    // --- FastDOM Smooth Typing Caret (body-mounted fixed overlay, zero host intrusion) ---
     function teardownSmoothCaret() {
       caretActive = false;
       caretComposing = false;
@@ -1267,9 +1288,11 @@
       while (caretListenersOff.length) {
         try { caretListenersOff.pop()(); } catch {}
       }
+      safeRemove(caretEl);
+      caretEl = null;
       if (!doc || typeof doc.querySelectorAll !== 'function') return;
       try {
-        doc.querySelectorAll('.ag-sag-smooth-caret').forEach((n) => n.remove?.());
+        doc.querySelectorAll('.ag-sag-smooth-caret').forEach((n) => safeRemove(n));
         doc.querySelectorAll('[data-ag-sag-smooth-caret]').forEach((n) => n.removeAttribute?.('data-ag-sag-smooth-caret'));
         doc.querySelectorAll('[data-ag-sag-caret-host]').forEach((n) => n.removeAttribute?.('data-ag-sag-caret-host'));
       } catch {}
@@ -1344,34 +1367,25 @@
       const editors = Array.from(
         doc.querySelectorAll?.('[data-testid="agent-input-box"] [contenteditable="true"]') || []
       ).filter((ed) => !isAuxEditor(ed));
-      if (!editors.length) return;
+      if (!editors.length) {
+        if (caretEl) caretEl.removeAttribute?.('data-visible');
+        return;
+      }
       const windowFocused = !isHibernated() && (typeof doc.hasFocus !== 'function' || doc.hasFocus() !== false);
       const activeEl = doc.activeElement;
       const sel = typeof doc.getSelection === 'function' ? doc.getSelection() : null;
       const dpr = Math.max(1, Math.min(4, Number(win?.devicePixelRatio) || 1));
       const snap = (v) => Math.round((Number(v) || 0) * dpr) / dpr;
 
-      // Measure phase (batch reads)
-      const plan = [];
+      // Measure phase (batch reads, viewport coordinates for body-mounted fixed overlay)
+      let activePlan = null;
       for (const ed of editors) {
-        const host = ed.parentElement;
-        if (!host) continue;
         const focused = windowFocused && (activeEl === ed || Boolean(activeEl && ed.contains?.(activeEl)));
-        if (caretComposing || !focused || !sel || sel.rangeCount <= 0) {
-          plan.push({ ed, host, visible: false });
-          continue;
-        }
+        if (caretComposing || !focused || !sel || sel.rangeCount <= 0) continue;
         const range = typeof sel.getRangeAt === 'function' ? sel.getRangeAt(0) : null;
-        if (!range || !range.collapsed || (ed.contains && !ed.contains(range.startContainer))) {
-          plan.push({ ed, host, visible: false });
-          continue;
-        }
+        if (!range || !range.collapsed || (ed.contains && !ed.contains(range.startContainer))) continue;
         const edRect = ed.getBoundingClientRect?.();
-        const hostRect = host.getBoundingClientRect?.();
-        if (!hostRect || !edRect) {
-          plan.push({ ed, host, visible: false });
-          continue;
-        }
+        if (!edRect) continue;
         const box = measureCollapsedRangeRect(range, ed, edRect);
         const height = Math.max(14, Math.min(28, Number(box.height) || 18));
         const outOfView =
@@ -1379,47 +1393,44 @@
           box.top + height > edRect.bottom + 6 ||
           box.left < edRect.left - 4 ||
           box.left > edRect.right + 4;
-        if (outOfView) {
-          plan.push({ ed, host, visible: false });
-          continue;
-        }
-        plan.push({
+        if (outOfView) continue;
+        activePlan = {
           ed,
-          host,
-          visible: true,
-          x: snap(box.left - hostRect.left + (host.scrollLeft || 0) - (host.clientLeft || 0)),
-          y: snap(box.top - hostRect.top + (host.scrollTop || 0) - (host.clientTop || 0)),
+          x: snap(box.left),
+          y: snap(box.top),
           h: snap(height),
-        });
+        };
+        break;
       }
 
-      // Mutate phase (batch writes)
-      for (const item of plan) {
-        let caret = caretNodes.get(item.host);
-        if (!caret || caret.parentElement !== item.host) {
-          caret = item.host.querySelector?.('.ag-sag-smooth-caret') || null;
+      // Mutate phase (batch writes, zero intrusion into editor parentElement)
+      for (const ed of editors) {
+        if (!activePlan || ed !== activePlan.ed) {
+          ed.removeAttribute?.('data-ag-sag-smooth-caret');
         }
-        if (!item.visible) {
-          if (caret) caret.removeAttribute?.('data-visible');
-          item.ed.removeAttribute?.('data-ag-sag-smooth-caret');
-          continue;
+      }
+      if (!activePlan) {
+        if (caretEl) caretEl.removeAttribute?.('data-visible');
+        return;
+      }
+      const mountHost = doc.body || doc.documentElement;
+      if (!mountHost) return;
+      if (!caretEl || caretEl.parentElement !== mountHost) {
+        caretEl = mountHost.querySelector?.('.ag-sag-smooth-caret') || null;
+        if (!caretEl && typeof doc.createElement === 'function') {
+          caretEl = doc.createElement('div');
+          caretEl.className = 'ag-sag-smooth-caret';
+          caretEl.setAttribute('aria-hidden', 'true');
+          markOwned(caretEl);
+          safeAppend(mountHost, caretEl);
         }
-        item.host.setAttribute?.('data-ag-sag-caret-host', '1');
-        if (!caret && typeof doc.createElement === 'function') {
-          caret = doc.createElement('div');
-          caret.className = 'ag-sag-smooth-caret';
-          caret.setAttribute('aria-hidden', 'true');
-          markOwned(caret);
-          safeAppend(item.host, caret);
-        }
-        if (!caret) continue;
-        caretNodes.set(item.host, caret);
-        item.ed.setAttribute?.('data-ag-sag-smooth-caret', '1');
-        caret.setAttribute?.('data-visible', '1');
-        if (caret.style) {
-          caret.style.transform = `translate3d(${item.x}px, ${item.y}px, 0)`;
-          caret.style.height = `${item.h}px`;
-        }
+      }
+      if (!caretEl) return;
+      activePlan.ed.setAttribute?.('data-ag-sag-smooth-caret', '1');
+      caretEl.setAttribute?.('data-visible', '1');
+      if (caretEl.style) {
+        caretEl.style.transform = `translate3d(${activePlan.x}px, ${activePlan.y}px, 0)`;
+        caretEl.style.height = `${activePlan.h}px`;
       }
     }
 
@@ -1459,14 +1470,6 @@
       const onScroll = () => {
         if (isFocusInControlledEditor()) scheduleCaretUpdate();
       };
-      const onWinBlur = () => {
-        winBlurred = true;
-        scheduleCaretUpdate();
-      };
-      const onWinFocus = () => {
-        winBlurred = false;
-        scheduleCaretUpdate();
-      };
       bind(doc, 'selectionchange', scheduleCaretUpdate, false);
       bind(doc, 'input', scheduleCaretUpdate, true);
       bind(doc, 'keyup', scheduleCaretUpdate, true);
@@ -1475,9 +1478,6 @@
       bind(doc, 'focusout', scheduleCaretUpdate, true);
       bind(doc, 'compositionstart', onCompStart, true);
       bind(doc, 'compositionend', onCompEnd, true);
-      bind(doc, 'visibilitychange', scheduleCaretUpdate, false);
-      bind(win, 'blur', onWinBlur, false);
-      bind(win, 'focus', onWinFocus, false);
       bind(win, 'resize', scheduleCaretUpdate, false);
       if (win?.visualViewport) bind(win.visualViewport, 'resize', scheduleCaretUpdate, false);
       scheduleCaretUpdate();
@@ -1579,12 +1579,12 @@
     }
 
     function removeStyleElement() {
-      try { styleEl?.remove?.(); } catch {}
+      safeRemove(styleEl);
       styleEl = null;
       if (doc && typeof doc.getElementById === 'function') {
         try {
           const existing = doc.getElementById(STYLE_ID);
-          if (existing && typeof existing.remove === 'function') existing.remove();
+          if (existing) safeRemove(existing);
         } catch {}
       }
       lastCss = '';
@@ -1621,7 +1621,7 @@
           mediaQuery.addEventListener?.('change', mediaListener);
         } catch {}
       }
-      if (!schemeObserver && typeof win?.MutationObserver === 'function' && doc?.documentElement) {
+      if (!schemeAttrOff && !schemeObserver && doc?.documentElement) {
         try {
           lastObservedHostScheme = detectHostColorScheme(doc, win);
           let schemeInFlight = false;
@@ -1670,15 +1670,17 @@
             }
             runSchemeCheck();
           };
-          schemeObserver = new win.MutationObserver(onSchemeMut);
-          schemeObserver.observe(doc.documentElement, {
-            attributes: true,
-            attributeFilter: ['data-theme', 'data-color-scheme', 'class', 'data-ag-cs-style', 'data-ag-cs-win-blur'],
-          });
-          if (doc.body) {
-            schemeObserver.observe(doc.body, {
+          const schemeFilter = ['data-theme', 'data-color-scheme', 'class', 'data-ag-cs-style', 'data-ag-cs-win-blur'];
+          if (typeof coexist?.getHtmlAttrBus === 'function') {
+            schemeAttrOff = coexist.getHtmlAttrBus(doc, win).subscribe('themeStudio:scheme', onSchemeMut, {
+              attributeFilter: schemeFilter,
+              wakeOnResume: true,
+            });
+          } else if (typeof win?.MutationObserver === 'function') {
+            schemeObserver = new win.MutationObserver(onSchemeMut);
+            schemeObserver.observe(doc.documentElement, {
               attributes: true,
-              attributeFilter: ['class'],
+              attributeFilter: schemeFilter,
             });
           }
         } catch {}
@@ -1695,6 +1697,10 @@
       }
       mediaQuery = null;
       mediaListener = null;
+      if (schemeAttrOff) {
+        try { schemeAttrOff(); } catch {}
+        schemeAttrOff = null;
+      }
       if (schemeObserver) {
         try { schemeObserver.disconnect(); } catch {}
         schemeObserver = null;
@@ -1721,6 +1727,10 @@
         clearTimeout(convThrottleTimer);
         convThrottleTimer = null;
       }
+      if (convBusOff) {
+        try { convBusOff(); } catch {}
+        convBusOff = null;
+      }
       if (convObserver) {
         try { convObserver.disconnect(); } catch {}
         convObserver = null;
@@ -1741,7 +1751,7 @@
         return;
       }
       refreshConvStateFromDom();
-      if (convObserver || typeof win?.MutationObserver !== 'function') return;
+      if (convBusOff || convObserver) return;
       const schedule = () => {
         if (destroyed || !enabled || externalConvStateSource || convThrottleTimer || isHibernated()) return;
         convThrottleTimer = setTimeout(() => {
@@ -1752,6 +1762,19 @@
         }, convThrottleMs);
         convThrottleTimer?.unref?.();
       };
+      const convAttrFilter = ['hidden', 'data-error', 'data-testid', 'role', 'aria-hidden'];
+      if (typeof coexist?.getDomMutationBus === 'function') {
+        convBusOff = coexist.getDomMutationBus(doc, win).subscribe(
+          'themeStudio:convState',
+          () => {
+            if (destroyed || !enabled || externalConvStateSource || isHibernated()) return;
+            schedule();
+          },
+          { attributes: true, attributeFilter: convAttrFilter, wakeOnResume: true }
+        );
+        return;
+      }
+      if (typeof win?.MutationObserver !== 'function') return;
       convObserver = new win.MutationObserver((records) => {
         if (destroyed || !enabled || externalConvStateSource || isHibernated()) return;
         if (coexist?.isMutationOwnedOnly) {
@@ -1766,7 +1789,7 @@
           childList: true,
           subtree: true,
           attributes: true,
-          attributeFilter: ['hidden', 'data-error', 'data-testid', 'role', 'aria-hidden'],
+          attributeFilter: convAttrFilter,
         });
       } catch {}
     }
@@ -1791,6 +1814,7 @@
         teardownSmoothCaret();
         removeAmbientGlow();
         unbindSchemeWatcher();
+        unbindWindowFocusWatcher();
         removeStyleElement();
         clearHtmlAttributes();
         lastPrismDetected = detectPrismTheme(doc);
@@ -1809,6 +1833,7 @@
         };
       }
 
+      bindWindowFocusWatcher();
       bindSchemeWatcher();
       const prismDetected = detectPrismTheme(doc);
       const hostScheme = detectHostColorScheme(doc, win);
@@ -1905,7 +1930,7 @@
         resolvedPreset: lastResolvedPreset,
         convState: lastConvState,
         externalConvStateSource,
-        convStateWatcherActive: Boolean(convObserver),
+        convStateWatcherActive: Boolean(convBusOff || convObserver),
         convThrottlePending: Boolean(convThrottleTimer),
         streamFadeActive: Boolean(streamObserver),
         smoothCaretActive: caretActive,
@@ -1925,6 +1950,7 @@
       teardownSmoothCaret();
       removeAmbientGlow();
       unbindSchemeWatcher();
+      unbindWindowFocusWatcher();
       removeStyleElement();
       clearHtmlAttributes();
       syncExtensionFrames(THEME_PRESETS.native, 'disabled', null);

@@ -99,6 +99,7 @@
   const DEFAULT_MAX_CACHE_SIZE = 8000;
   const MAX_MISSING_PHRASES = 500;
   const MIN_LOWERCASE_LOOKUP_LEN = 4;
+  const MAX_NODES_PER_FLUSH = 600;
   const SWEEP_FLUSH_INTERVAL = 100;
   const SWEEP_REF_THRESHOLD = 500;
 
@@ -412,6 +413,7 @@
     // MutationObserver & batched scheduling state
     const observers = [];
     const shadowObservers = []; // { root, host, observer }
+    let htmlAttrBusUnsub = null;
     let shadowPruneTimer = null;
     const shadowPruneIntervalMs = Math.max(
       100,
@@ -419,13 +421,44 @@
     );
     let observedRoots = new WeakSet();
     let observersStarted = false;
-    const pendingNodes = new Set();
+    let pendingQueue = [];
+    let pendingCursor = 0;
+    const pendingSet = new Set();
     let pendingFullScan = false;
+    let flushGen = 0;
     let flushScheduled = false;
     let flushHandle = null;
-    let flushHandleType = 'none'; // 'none' | 'raf' | 'microtask'
+    let flushHandleType = 'none'; // 'none' | 'raf' | 'timeout' | 'microtask'
     let hibernatedDirty = false;
     const eventCleanups = [];
+
+    function clearPendingQueue() {
+      pendingQueue = [];
+      pendingCursor = 0;
+      pendingSet.clear();
+      pendingFullScan = false;
+    }
+
+    function enqueuePendingNode(node) {
+      if (!node || pendingSet.has(node)) return false;
+      pendingSet.add(node);
+      pendingQueue.push(node);
+      return true;
+    }
+
+    function hasPendingNodes() {
+      return pendingCursor < pendingQueue.length;
+    }
+
+    function compactPendingQueue() {
+      if (pendingCursor >= pendingQueue.length) {
+        pendingQueue = [];
+        pendingCursor = 0;
+      } else if (pendingCursor > 512 && pendingCursor * 2 >= pendingQueue.length) {
+        pendingQueue = pendingQueue.slice(pendingCursor);
+        pendingCursor = 0;
+      }
+    }
 
     function emitStateChange() {
       if (typeof options.onStateChange === 'function') {
@@ -708,6 +741,8 @@
     }
 
     function restoreAll() {
+      cancelScheduledFlush();
+      clearPendingQueue();
       const prevApplying = isApplying;
       isApplying = true;
       try {
@@ -919,6 +954,9 @@
           restoreAll();
           currentLocale = nextAuto;
           compileActivePack();
+          if (enabled && currentLocale !== 'en') {
+            pendingFullScan = true;
+          }
           emitStateChange();
         }
       }
@@ -975,17 +1013,70 @@
       return true;
     }
 
+    function scanSliced(rootNode) {
+      if (destroyed) return false;
+      cancelScheduledFlush();
+      clearPendingQueue();
+      if (!evaluateConflictAndActivation()) return false;
+      pendingFullScan = false;
+      const target = rootNode || doc?.body || doc?.documentElement;
+      if (!target) return false;
+
+      const budget = { remaining: MAX_NODES_PER_FLUSH, overflow: [] };
+      const prevApplying = isApplying;
+      isApplying = true;
+      try {
+        if (target.nodeType === 1 && hasSkippedAncestor(target, true)) {
+          // Target is already inside a skipped container
+        } else if (target.nodeType === 3) {
+          if (!hasSkippedAncestor(target, true)) processTextNode(target);
+        } else {
+          walkSubtree(target, false, budget);
+        }
+        syncHostMarkers(true);
+      } finally {
+        isApplying = prevApplying;
+      }
+      if (budget.overflow.length > 0) {
+        for (let i = 0; i < budget.overflow.length; i += 1) {
+          enqueuePendingNode(budget.overflow[i]);
+        }
+        scheduleFlush();
+      }
+      sweepDeadRefs();
+      return true;
+    }
+
+    function scheduleScan(rootNode) {
+      return scanSliced(rootNode);
+    }
+
     function cancelScheduledFlush() {
+      flushGen += 1;
       if (!flushScheduled) return;
       if (flushHandleType === 'raf' && flushHandle !== null && typeof win?.cancelAnimationFrame === 'function') {
         try { win.cancelAnimationFrame(flushHandle); } catch {}
+      } else if (flushHandleType === 'timeout' && flushHandle !== null) {
+        try { clearTimeout(flushHandle); } catch {}
       }
       flushScheduled = false;
       flushHandle = null;
       flushHandleType = 'none';
     }
 
-    function flushPending() {
+    function maybeSweepAfterFlush() {
+      flushesSinceSweep += 1;
+      if (
+        flushesSinceSweep >= SWEEP_FLUSH_INTERVAL ||
+        trackedTextRefs.size > SWEEP_REF_THRESHOLD ||
+        trackedAttrRefs.size > SWEEP_REF_THRESHOLD
+      ) {
+        sweepDeadRefs();
+      }
+    }
+
+    function flushPending(expectedGen = flushGen) {
+      if (expectedGen !== flushGen) return;
       flushScheduled = false;
       flushHandle = null;
       flushHandleType = 'none';
@@ -999,17 +1090,15 @@
       hibernatedDirty = false;
 
       if (!evaluateConflictAndActivation()) {
-        pendingNodes.clear();
-        pendingFullScan = false;
+        clearPendingQueue();
         return;
       }
 
       if (pendingFullScan) {
-        pendingFullScan = false;
-        pendingNodes.clear();
+        clearPendingQueue();
         const rootEl = doc?.body || doc?.documentElement || doc;
         if (rootEl) {
-          const budget = { remaining: 600, overflow: [] };
+          const budget = { remaining: MAX_NODES_PER_FLUSH, overflow: [] };
           const prevApplying = isApplying;
           isApplying = true;
           try {
@@ -1019,30 +1108,29 @@
             isApplying = prevApplying;
           }
           if (budget.overflow.length > 0) {
-            for (let i = 0; i < budget.overflow.length && pendingNodes.size < 2000; i += 1) {
-              pendingNodes.add(budget.overflow[i]);
+            for (let i = 0; i < budget.overflow.length; i += 1) {
+              enqueuePendingNode(budget.overflow[i]);
             }
             scheduleFlush();
           }
         }
+        maybeSweepAfterFlush();
         return;
       }
 
-      const batch = Array.from(pendingNodes);
-      pendingNodes.clear();
-      if (batch.length === 0) return;
+      if (!hasPendingNodes()) return;
 
-      const budget = { remaining: 600, overflow: [] };
+      const budget = { remaining: MAX_NODES_PER_FLUSH, overflow: [] };
       const prevApplying = isApplying;
       isApplying = true;
       try {
-        for (let i = 0; i < batch.length; i++) {
-          const n = batch[i];
-          if (!n || n.isConnected === false) continue;
-          if (budget.remaining <= 0) {
-            budget.overflow.push(n);
-            continue;
-          }
+        while (pendingCursor < pendingQueue.length && budget.remaining > 0) {
+          const n = pendingQueue[pendingCursor];
+          pendingQueue[pendingCursor] = null;
+          pendingCursor += 1;
+          if (!n) continue;
+          pendingSet.delete(n);
+          if (n.isConnected === false) continue;
           if (n.nodeType === 3) {
             if (!hasSkippedAncestor(n, true)) {
               budget.remaining -= 1;
@@ -1061,34 +1149,34 @@
         isApplying = prevApplying;
       }
       if (budget.overflow.length > 0) {
-        for (let i = 0; i < budget.overflow.length && pendingNodes.size < 2000; i += 1) {
-          pendingNodes.add(budget.overflow[i]);
+        for (let i = 0; i < budget.overflow.length; i += 1) {
+          enqueuePendingNode(budget.overflow[i]);
         }
+      }
+      compactPendingQueue();
+      if (hasPendingNodes()) {
         scheduleFlush();
       }
-
-      flushesSinceSweep += 1;
-      if (
-        flushesSinceSweep >= SWEEP_FLUSH_INTERVAL ||
-        trackedTextRefs.size > SWEEP_REF_THRESHOLD ||
-        trackedAttrRefs.size > SWEEP_REF_THRESHOLD
-      ) {
-        sweepDeadRefs();
-      }
+      maybeSweepAfterFlush();
     }
 
     function scheduleFlush() {
       if (flushScheduled || destroyed || !enabled) return;
       flushScheduled = true;
+      const myGen = flushGen;
       if (typeof win?.requestAnimationFrame === 'function') {
         flushHandleType = 'raf';
-        flushHandle = win.requestAnimationFrame(() => flushPending());
+        flushHandle = win.requestAnimationFrame(() => {
+          if (myGen !== flushGen) return;
+          flushPending(myGen);
+        });
       } else {
         flushHandleType = 'microtask';
         flushHandle = null;
         Promise.resolve().then(() => {
+          if (myGen !== flushGen) return;
           if (flushScheduled && flushHandleType === 'microtask') {
-            flushPending();
+            flushPending(myGen);
           }
         });
       }
@@ -1096,18 +1184,20 @@
 
     function handleMutations(records) {
       if (destroyed || !enabled || isApplying || !Array.isArray(records) || records.length === 0) return;
+      if (isHibernated()) {
+        hibernatedDirty = true;
+        return;
+      }
       let queued = false;
       for (let i = 0; i < records.length; i++) {
         const rec = records[i];
         if (!rec) continue;
         if (rec.type === 'characterData' && rec.target) {
           if (hasSkippedAncestor(rec.target, true)) continue;
-          pendingNodes.add(rec.target);
-          queued = true;
+          if (enqueuePendingNode(rec.target)) queued = true;
         } else if (rec.type === 'attributes' && rec.target) {
           if (hasSkippedAncestor(rec.target, true)) continue;
-          pendingNodes.add(rec.target);
-          queued = true;
+          if (enqueuePendingNode(rec.target)) queued = true;
         } else if (rec.type === 'childList') {
           if (shadowObservers.length > 0 && rec.removedNodes && rec.removedNodes.length > 0) {
             pruneDetachedShadowObservers();
@@ -1118,14 +1208,13 @@
             for (let j = 0; j < added.length; j++) {
               const an = added[j];
               if (!an || (an.nodeType === 1 && isHardSkipAllElement(an))) continue;
-              pendingNodes.add(an);
-              queued = true;
+              if (enqueuePendingNode(an)) queued = true;
             }
           }
         }
-        if (pendingNodes.size > 400) {
+        if (pendingSet.size > 400) {
+          clearPendingQueue();
           pendingFullScan = true;
-          pendingNodes.clear();
           queued = true;
           break;
         }
@@ -1133,10 +1222,18 @@
       if (queued) scheduleFlush();
     }
 
-    function handleHtmlAttrMutations(records) {
-      if (destroyed || !enabled || isApplying || !Array.isArray(records)) return;
-      for (let i = 0; i < records.length; i++) {
-        const attr = records[i]?.attributeName;
+    const HTML_ATTR_FILTER = ['data-ag-prism-host-i18n', 'data-ag-cs-win-blur', 'data-ag-cs-lang', 'lang'];
+
+    function handleHtmlAttrNames(attrNames, meta = null) {
+      if (destroyed || !enabled || isApplying) return;
+      if (meta?.woken && hibernatedDirty) {
+        hibernatedDirty = false;
+        pendingFullScan = true;
+        scheduleFlush();
+        return;
+      }
+      if (!attrNames) return;
+      for (const attr of attrNames) {
         if (attr === 'data-ag-prism-host-i18n') {
           pendingFullScan = true;
           scheduleFlush();
@@ -1150,6 +1247,7 @@
           return;
         }
         if (attr === 'data-ag-cs-win-blur' && !isHibernated() && hibernatedDirty) {
+          hibernatedDirty = false;
           pendingFullScan = true;
           scheduleFlush();
           return;
@@ -1157,10 +1255,23 @@
       }
     }
 
+    function handleHtmlAttrMutations(records) {
+      if (destroyed || !enabled || isApplying || !Array.isArray(records)) return;
+      const names = [];
+      for (let i = 0; i < records.length; i++) {
+        const attr = records[i]?.attributeName;
+        if (attr) names.push(attr);
+      }
+      handleHtmlAttrNames(names, null);
+    }
+
     function handleWakeup() {
       if (destroyed || !enabled || isHibernated()) return;
-      if (hibernatedDirty || pendingFullScan || pendingNodes.size > 0) {
+      if (hibernatedDirty) {
         hibernatedDirty = false;
+        pendingFullScan = true;
+        scheduleFlush();
+      } else if (pendingFullScan || hasPendingNodes()) {
         scheduleFlush();
       }
     }
@@ -1168,10 +1279,13 @@
     function stopObservers() {
       cancelScheduledFlush();
       stopShadowPruneTimer();
-      pendingNodes.clear();
-      pendingFullScan = false;
+      clearPendingQueue();
       hibernatedDirty = false;
 
+      if (htmlAttrBusUnsub) {
+        try { htmlAttrBusUnsub(); } catch {}
+        htmlAttrBusUnsub = null;
+      }
       while (observers.length > 0) {
         const mo = observers.pop();
         try { mo.disconnect(); } catch {}
@@ -1197,16 +1311,32 @@
         attachRootObserver(bodyTarget);
       }
 
-      const MO = win?.MutationObserver || globalRoot?.MutationObserver;
-      if (typeof MO === 'function' && doc.documentElement) {
-        try {
-          const htmlMo = new MO(handleHtmlAttrMutations);
-          htmlMo.observe(doc.documentElement, {
-            attributes: true,
-            attributeFilter: ['data-ag-prism-host-i18n', 'data-ag-cs-win-blur', 'data-ag-cs-lang', 'lang'],
-          });
-          observers.push(htmlMo);
-        } catch {}
+      if (doc.documentElement) {
+        const attrBus = coexist?.getHtmlAttrBus?.(doc, win);
+        if (attrBus && typeof attrBus.subscribe === 'function') {
+          try {
+            htmlAttrBusUnsub = attrBus.subscribe(
+              'host-i18n-html',
+              (changedAttrs, meta) => handleHtmlAttrNames(changedAttrs, meta),
+              { attributeFilter: HTML_ATTR_FILTER, wakeOnResume: true }
+            );
+          } catch {
+            htmlAttrBusUnsub = null;
+          }
+        }
+        if (!htmlAttrBusUnsub) {
+          const MO = win?.MutationObserver || globalRoot?.MutationObserver;
+          if (typeof MO === 'function') {
+            try {
+              const htmlMo = new MO(handleHtmlAttrMutations);
+              htmlMo.observe(doc.documentElement, {
+                attributes: true,
+                attributeFilter: HTML_ATTR_FILTER,
+              });
+              observers.push(htmlMo);
+            } catch {}
+          }
+        }
       }
 
       if (typeof doc.addEventListener === 'function') {
@@ -1225,6 +1355,8 @@
 
     function setLocale(nextLocale) {
       if (destroyed) return currentLocale;
+      cancelScheduledFlush();
+      clearPendingQueue();
       const resolved = resolveLocaleConfig(nextLocale);
       configuredLocale = resolved.configured;
       currentLocale = resolved.resolved;
@@ -1234,7 +1366,7 @@
         restoreAll();
       } else if (enabled) {
         startObservers();
-        scanNow();
+        scanSliced();
         void ensureExtendedPack(currentLocale);
       }
       emitStateChange();
@@ -1251,7 +1383,7 @@
       } else {
         startObservers();
         if (currentLocale !== 'en') {
-          scanNow();
+          scanSliced();
           void ensureExtendedPack(currentLocale);
         } else {
           evaluateConflictAndActivation();
@@ -1395,9 +1527,10 @@
         collectMissing,
         missingCount: missingSet.size,
         extendedPackLoaded: Boolean(packsMod.hasExtendedPack?.(currentLocale)),
-        observerCount: observers.length + shadowObservers.length,
+        observerCount: observers.length + shadowObservers.length + (htmlAttrBusUnsub ? 1 : 0),
         shadowObserverCount: shadowObservers.length,
         hibernatedDirty,
+        flushGen,
       };
     }
 
@@ -1434,6 +1567,7 @@
 
     return {
       scanNow,
+      scheduleScan,
       translateSubtree: scanNow,
       translateText,
       setLocale,

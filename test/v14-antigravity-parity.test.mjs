@@ -521,6 +521,7 @@ test('6. draftGuard records composer attachment count and shows gentle re-attach
     storage,
     enabled: true,
     debounceMs: 0,
+    hydrationGraceMs: 0,
     getLang: () => 'zh-CN',
   });
   const saved = dg.flushNow('cid-media-1');

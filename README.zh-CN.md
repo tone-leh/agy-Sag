@@ -207,7 +207,7 @@ Antigravity 2.0 宿主（Electron 44 + language_server 本地渲染界面）
 ## 本地开发与验证
 
 ```bash
-npm test                 # 运行全量原生 node:test 单测套件（253/253 通过，零外部依赖）
+npm test                 # 运行全量原生 node:test 单测套件（255/255 通过，零外部依赖）
 npm run i18n:validate    # 校验全部 10 国内置 + 9 扩展界面翻译词典与正则模板（0 错误）
 npm run workbench:smoke  # 对离线沙盒执行自动化 HTTP 烟雾校验（22 markers）
 npm run doctor           # 只读本机环境与双星共存诊断

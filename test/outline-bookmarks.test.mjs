@@ -154,16 +154,17 @@ test('OutlineBookmarks: decorates user turns & Prism outline popover, persists p
   assert.deepEqual(ctl.getBookmarks(), [2]);
   assert.equal(star2.getAttribute('data-starred'), '1');
 
-  // Toggle outline bookmarked-only filter
+  // Toggle outline bookmarked-only filter (pure CSS attribute, zero host .hidden mutation)
   const filterBtn = head.querySelector('.ag-sg-outline-bm-filter');
   assert.ok(filterBtn);
   filterBtn.click();
-  assert.equal(row1.hidden, true, 'Unstarred Turn 1 outline item must hide under bookmark filter');
-  assert.equal(row2.hidden, false, 'Starred Turn 2 outline item must remain visible');
+  assert.equal(row1.getAttribute('data-ag-sg-outline-hidden'), '1', 'Unstarred Turn 1 outline item must hide under bookmark filter');
+  assert.equal(row2.getAttribute('data-ag-sg-outline-hidden'), null, 'Starred Turn 2 outline item must remain visible');
+  assert.equal(row1.hidden, false, 'Must not directly mutate host outline row.hidden');
 
   // Teardown must remove all owned stars/buttons and unhide filtered rows
   ctl.destroy();
-  assert.equal(row1.hidden, false, 'destroy() must restore hidden outline rows');
+  assert.equal(row1.getAttribute('data-ag-sg-outline-hidden'), null, 'destroy() must restore hidden outline rows');
   assert.equal(doc.querySelectorAll('[data-ag-sg-owned="1"]').length, 0);
 });
 

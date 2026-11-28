@@ -1,11 +1,9 @@
 // agy-Sag — Zero-Dependency Bundle Builder (ESM)
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-const require = createRequire(import.meta.url);
+import vm from 'node:vm';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CORE_DIR = path.resolve(__dirname, '..', 'packages', 'core');
@@ -511,18 +509,144 @@ export function readExtendedPackFile(locale, repoRoot = path.resolve(__dirname, 
   }
 }
 
+const FREE_SYMBOL_RANGES = [
+  [0x0100, 0x02af], // 2-byte UTF-8 (Latin Extended-A/B + IPA Extensions, 432 slots)
+  [0x0370, 0x03ff], // 2-byte UTF-8 (Greek/Coptic, 144 slots)
+  [0x0500, 0x052f], // 2-byte UTF-8 (Cyrillic Supplement, 48 slots)
+  [0x0531, 0x0556], // 2-byte UTF-8 (Armenian uppercase, 38 slots)
+  [0x0561, 0x0587], // 2-byte UTF-8 (Armenian lowercase, 39 slots)
+  [0xe000, 0xf8ff], // 3-byte UTF-8 fallback (BMP Private Use Area)
+];
+
+function sqEsc(s) {
+  return (
+    "'" +
+    String(s)
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/\0/g, '\\x00')
+      .replace(/\r/g, '\\r')
+      .replace(/\n/g, '\\n')
+      .replace(/\u2028/g, '\\u2028')
+      .replace(/\u2029/g, '\\u2029') +
+    "'"
+  );
+}
+
+function deepEqualAcrossRealms(a, b) {
+  if (Object.is(a, b)) return true;
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+  const aIsArr = Array.isArray(a);
+  const bIsArr = Array.isArray(b);
+  if (aIsArr !== bIsArr) return false;
+  if (aIsArr) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (!deepEqualAcrossRealms(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (let i = 0; i < aKeys.length; i += 1) {
+    const k = aKeys[i];
+    if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+    if (!deepEqualAcrossRealms(a[k], b[k])) return false;
+  }
+  return true;
+}
+
+function evalJsExprInSandbox(exprSrc) {
+  return vm.runInNewContext(`(${exprSrc})`, Object.create(null), { timeout: 2000 });
+}
+
+function evalUmdModuleInSandbox(code) {
+  const sandbox = {
+    module: { exports: {} },
+    exports: null,
+    globalThis: null,
+    window: {},
+  };
+  sandbox.exports = sandbox.module.exports;
+  sandbox.globalThis = sandbox;
+  vm.runInNewContext(code, sandbox, { timeout: 3000 });
+  return sandbox.module.exports;
+}
+
+function createFreeSymbolGenerator(text) {
+  const used = new Set();
+  for (let i = 0; i < text.length; i += 1) {
+    used.add(text.charCodeAt(i));
+  }
+  let rangeIdx = 0;
+  let curCode = FREE_SYMBOL_RANGES[0][0];
+  return function nextFreeSymbol() {
+    while (rangeIdx < FREE_SYMBOL_RANGES.length) {
+      const [, end] = FREE_SYMBOL_RANGES[rangeIdx];
+      while (curCode <= end) {
+        const code = curCode;
+        curCode += 1;
+        if (!used.has(code)) {
+          used.add(code);
+          return String.fromCharCode(code);
+        }
+      }
+      rangeIdx += 1;
+      if (rangeIdx < FREE_SYMBOL_RANGES.length) {
+        curCode = FREE_SYMBOL_RANGES[rangeIdx][0];
+      }
+    }
+    return null;
+  };
+}
+
+function compressWithFreeSymbols(rawText, candidates, { minOccurrences = 3, entryOverhead = 8 } = {}) {
+  const nextSym = createFreeSymbolGenerator(rawText);
+  let packed = rawText;
+  const dict = [];
+  const syms = [];
+  let pendingSym = null;
+
+  for (const { tok } of candidates) {
+    const sym = pendingSym || nextSym();
+    if (!sym) break;
+    pendingSym = sym;
+    const symBytes = Buffer.byteLength(sym, 'utf8');
+    const tokBytes = Buffer.byteLength(tok, 'utf8');
+    if (tokBytes <= symBytes) continue;
+    const parts = packed.split(tok);
+    const occurrences = parts.length - 1;
+    if (
+      occurrences >= minOccurrences &&
+      occurrences * (tokBytes - symBytes) > tokBytes + symBytes + entryOverhead
+    ) {
+      packed = parts.join(sym);
+      dict.push(tok);
+      syms.push(sym);
+      pendingSym = null;
+    }
+  }
+
+  if (!dict.length) return null;
+  let check = packed;
+  for (let i = dict.length - 1; i >= 0; i -= 1) {
+    check = check.split(syms[i]).join(dict[i]);
+  }
+  if (check !== rawText) return null;
+  return { k: syms.join(''), d: dict, s: packed };
+}
+
 function minifyStaticCss(css) {
-  const s = String(css ?? '')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/^[ \t]+|[ \t]+$/gm, '')
-    .replace(/\n+/g, '');
+  const s = String(css ?? '');
   let out = '';
   let quote = '';
-  for (let i = 0; i < s.length; i += 1) {
+  const len = s.length;
+  for (let i = 0; i < len; i += 1) {
     const ch = s[i];
     if (quote) {
       out += ch;
-      if (ch === '\\' && i + 1 < s.length) {
+      if (ch === '\\' && i + 1 < len) {
         out += s[i + 1];
         i += 1;
       } else if (ch === quote) {
@@ -535,12 +659,37 @@ function minifyStaticCss(css) {
       out += ch;
       continue;
     }
-    if (ch === ' ' || ch === '\t') {
+    if (
+      ch === ' ' ||
+      ch === '\t' ||
+      ch === '\n' ||
+      ch === '\r' ||
+      (ch === '/' && i + 1 < len && s[i + 1] === '*')
+    ) {
+      let j = i;
+      while (j < len) {
+        const c = s[j];
+        if (c === ' ' || c === '\t' || c === '\n' || c === '\r') {
+          j += 1;
+        } else if (c === '/' && j + 1 < len && s[j + 1] === '*') {
+          j += 2;
+          while (j < len && !(s[j] === '*' && j + 1 < len && s[j + 1] === '/')) {
+            j += 1;
+          }
+          j += 2;
+        } else {
+          break;
+        }
+      }
       const prev = out.length > 0 ? out[out.length - 1] : '';
-      let j = i + 1;
-      while (j < s.length && (s[j] === ' ' || s[j] === '\t')) j += 1;
-      const next = j < s.length ? s[j] : '';
+      const next = j < len ? s[j] : '';
       i = j - 1;
+      if (!prev || !next) continue;
+      // Preserve valid empty custom property declarations such as `--x: ;`
+      if (prev === ':' && (next === ';' || next === '}')) {
+        out += ' ';
+        continue;
+      }
       if ('{};,>~:'.includes(prev) || '{};,>~'.includes(next)) {
         continue;
       }
@@ -552,184 +701,78 @@ function minifyStaticCss(css) {
   return out;
 }
 
-function minifyThemeCssTemplates(code) {
-  // Compact leading indentation and newlines strictly inside multiline CSS template literal segments in theme-studio.js,
-  // skipping ${...} JS expressions intact so calc(...) spacing and JS tokens are preserved verbatim.
-  let out = '';
-  let i = 0;
-  const len = code.length;
-  while (i < len) {
-    const ch = code[i];
-    if (ch === "'" || ch === '"') {
-      const q = ch;
-      out += ch;
-      i += 1;
-      while (i < len) {
-        const c = code[i];
-        out += c;
-        i += 1;
-        if (c === '\\' && i < len) {
-          out += code[i];
-          i += 1;
-        } else if (c === q) {
-          break;
-        }
-      }
+function findTemplateConstRange(code, constName) {
+  const marker = `const ${constName}=`;
+  const start = code.indexOf(marker);
+  if (start < 0) return null;
+  let exprStart = start + marker.length;
+  while (exprStart < code.length && (code[exprStart] === ' ' || code[exprStart] === '\t')) {
+    exprStart += 1;
+  }
+  if (code[exprStart] !== '`') return null;
+  let i = exprStart + 1;
+  while (i < code.length) {
+    const c = code[i];
+    if (c === '\\' && i + 1 < code.length) {
+      i += 2;
       continue;
     }
-    if (ch !== '`') {
-      out += ch;
-      i += 1;
-      continue;
+    if (c === '$' && code[i + 1] === '{') {
+      // Dynamic template literal: refuse static CSS compaction
+      return null;
     }
-    // Scan template literal from opening ` to matching `
-    let tplRaw = '`';
+    if (c === '`') {
+      let exprEnd = i + 1;
+      if (code.startsWith('.trim()', exprEnd)) {
+        exprEnd += '.trim()'.length;
+      }
+      return { exprStart, exprEnd };
+    }
     i += 1;
-    let seg = '';
-    const flushSeg = () => {
-      if (!seg) return;
-      if (seg.includes('\n')) {
-        tplRaw += minifyStaticCss(seg);
-      } else {
-        tplRaw += seg;
-      }
-      seg = '';
-    };
-    while (i < len) {
-      const c = code[i];
-      if (c === '\\' && i + 1 < len) {
-        seg += c + code[i + 1];
-        i += 2;
-        continue;
-      }
-      if (c === '$' && code[i + 1] === '{') {
-        flushSeg();
-        tplRaw += '${';
-        i += 2;
-        let depth = 1;
-        while (i < len && depth > 0) {
-          const ec = code[i];
-          if (ec === "'" || ec === '"' || ec === '`') {
-            const q = ec;
-            tplRaw += ec;
-            i += 1;
-            while (i < len) {
-              const sc = code[i];
-              tplRaw += sc;
-              i += 1;
-              if (sc === '\\' && i < len) {
-                tplRaw += code[i];
-                i += 1;
-              } else if (sc === q) {
-                break;
-              }
-            }
-            continue;
-          }
-          if (ec === '{') depth += 1;
-          else if (ec === '}') depth -= 1;
-          tplRaw += ec;
-          i += 1;
-        }
-        continue;
-      }
-      if (c === '`') {
-        flushSeg();
-        tplRaw += '`';
-        i += 1;
-        break;
-      }
-      seg += c;
-      i += 1;
-    }
-    out += tplRaw;
-  }
-  return out;
-}
-
-function packExtExactLossless(exactObj) {
-  const rawJson = JSON.stringify(exactObj || {});
-  // Frequency-driven lossless dictionary substitution using Private Use Area codepoints (U+E000..U+E0BF).
-  // Verified round-trip identical at bundle time; falls back to plain JSON if any collision occurs.
-  const freq = new Map();
-  const wordRe = /[A-Za-zА-Яа-яЁё0-9_-]{6,28}/g;
-  let m;
-  while ((m = wordRe.exec(rawJson)) !== null) {
-    const tok = m[0];
-    freq.set(tok, (freq.get(tok) || 0) + 1);
-  }
-  const candidates = Array.from(freq.entries())
-    .map(([tok, cnt]) => ({ tok, cnt, gain: (cnt - 1) * (Buffer.byteLength(tok, 'utf8') - 3) - 6 }))
-    .filter((x) => x.gain > 36)
-    .sort((a, b) => b.gain - a.gain)
-    .slice(0, 192);
-
-  let packed = rawJson;
-  const dict = [];
-  for (const { tok } of candidates) {
-    const ch = String.fromCharCode(0xe000 + dict.length);
-    if (rawJson.includes(ch)) continue;
-    const parts = packed.split(tok);
-    if (parts.length > 3 && (parts.length - 1) * (Buffer.byteLength(tok, 'utf8') - 3) > Buffer.byteLength(tok, 'utf8') + 12) {
-      packed = parts.join(ch);
-      dict.push(tok);
-    }
-  }
-  if (!dict.length) return null;
-  let check = packed;
-  for (let i = dict.length - 1; i >= 0; i -= 1) {
-    check = check.split(String.fromCharCode(0xe000 + i)).join(dict[i]);
-  }
-  if (check !== rawJson) return null;
-  return { d: dict, s: packed };
-}
-
-function parsePureString2DArray(arrSrc) {
-  const rows = [];
-  let i = 0;
-  const n = arrSrc.length;
-  const skipWs = () => { while (i < n && (arrSrc[i] === ' ' || arrSrc[i] === '\n' || arrSrc[i] === '\t' || arrSrc[i] === '\r')) i += 1; };
-  skipWs();
-  if (arrSrc[i] !== '[') return null;
-  i += 1;
-  while (i < n) {
-    skipWs();
-    if (arrSrc[i] === ']') { i += 1; return rows; }
-    if (arrSrc[i] !== '[') return null;
-    i += 1;
-    const row = [];
-    while (i < n) {
-      skipWs();
-      if (arrSrc[i] === ']') { i += 1; break; }
-      const q = arrSrc[i];
-      if (q !== "'" && q !== '"') return null;
-      i += 1;
-      let val = '';
-      while (i < n && arrSrc[i] !== q) {
-        if (arrSrc[i] === '\\' && i + 1 < n) {
-          const esc = arrSrc[i + 1];
-          val += esc === 'n' ? '\n' : esc === 'r' ? '\r' : esc === 't' ? '\t' : esc;
-          i += 2;
-        } else {
-          val += arrSrc[i];
-          i += 1;
-        }
-      }
-      if (arrSrc[i] !== q) return null;
-      i += 1;
-      row.push(val);
-      skipWs();
-      if (arrSrc[i] === ',') i += 1;
-    }
-    rows.push(row);
-    skipWs();
-    if (arrSrc[i] === ',') i += 1;
   }
   return null;
 }
 
-function packHostI18nExactRows(code) {
-  const marker = 'const EXACT_ROWS=';
+function collectPatternCandidates(text, patterns, { minGain = 8, maxCount = 512, symBytes = 2 } = {}) {
+  const freq = new Map();
+  for (const re of patterns) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const tok = m[0];
+      if (!tok) {
+        re.lastIndex += 1;
+        continue;
+      }
+      freq.set(tok, (freq.get(tok) || 0) + 1);
+    }
+  }
+  return Array.from(freq.entries())
+    .map(([tok, cnt]) => ({ tok, cnt, gain: (cnt - 1) * (Buffer.byteLength(tok, 'utf8') - symBytes) - 6 }))
+    .filter((x) => x.gain > minGain)
+    .sort((a, b) => b.gain - a.gain || b.tok.length - a.tok.length)
+    .slice(0, maxCount);
+}
+
+function packExtExactLossless(exactObj) {
+  const rawJson = JSON.stringify(exactObj || {});
+  const candidates = collectPatternCandidates(
+    rawJson,
+    [
+      /":"[A-Za-zА-Яа-яЁё0-9_-]{3,20}/g,
+      /","[A-Za-z0-9_-]{3,20}/g,
+      /[A-Za-zА-Яа-яЁё0-9_-]{4,28}/g,
+      /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]{2,6}/g,
+      /[A-Za-zА-Яа-яЁё]{3,16} [A-Za-zА-Яа-яЁё]{3,16}/g,
+    ],
+    { minGain: 18, maxCount: 600 }
+  );
+
+  return compressWithFreeSymbols(rawJson, candidates, { minOccurrences: 3, entryOverhead: 8 });
+}
+
+function packStringArrayConst(code, constName, { allow2D = true } = {}) {
+  const marker = `const ${constName}=`;
   const start = code.indexOf(marker);
   if (start < 0) return code;
   const arrStart = start + marker.length;
@@ -752,46 +795,67 @@ function packHostI18nExactRows(code) {
     }
   }
   if (arrEnd < 0) return code;
-  const parsed = parsePureString2DArray(code.slice(arrStart, arrEnd));
-  if (!parsed || !parsed.length) return code;
-  // Pick two 1-byte unescaped ASCII separators guaranteed absent from parsed cells (fallback to 2-byte ¦/§)
-  const sepCandidates = ['~', '^', '`', '|', '¦', '§'];
+
+  let parsed;
+  try {
+    parsed = evalJsExprInSandbox(code.slice(arrStart, arrEnd));
+  } catch {
+    return code;
+  }
+  if (
+    !allow2D ||
+    !Array.isArray(parsed) ||
+    !parsed.length ||
+    !parsed.every((row) => Array.isArray(row) && row.every((cell) => typeof cell === 'string'))
+  ) {
+    return code;
+  }
+
+  // Pick two separators guaranteed absent from parsed cells (prefer 1-byte ASCII, fallback to 2-byte ¦/§/¤/¬)
+  const sepCandidates = ['~', '^', '`', '|', '¦', '§', '¤', '¬', '¶', '¿', '\u001e', '\u001f'];
   const allText = parsed.map((r) => r.join('')).join('');
   const freeSeps = sepCandidates.filter((ch) => !allText.includes(ch));
   if (freeSeps.length < 2) return code;
   const colSep = freeSeps[0];
   const rowSep = freeSeps[1];
   const flat = parsed.map((row) => row.join(colSep)).join(rowSep);
-  const freq = new Map();
-  const wordRe = /[\u4e00-\u9fff]{2,5}|[A-Za-zА-Яа-яЁёÀ-ÿ0-9_-]{5,24}/g;
-  let m;
-  while ((m = wordRe.exec(flat)) !== null) {
-    freq.set(m[0], (freq.get(m[0]) || 0) + 1);
+
+  const candidates = collectPatternCandidates(
+    flat,
+    [
+      /[\u4e00-\u9fff]{2,6}/g,
+      /[\u3040-\u30ff\u4e00-\u9fff]{2,6}/g,
+      /[\uac00-\ud7af]{2,6}/g,
+      /[A-Za-zА-Яа-яЁёÀ-ÿ0-9_-]{4,28}/g,
+      /[A-Za-zÀ-ÿА-Яа-яЁё]{3,14} [A-Za-zÀ-ÿА-Яа-яЁё]{3,14}/g,
+    ],
+    { minGain: 8, maxCount: 600 }
+  );
+
+  const compressed = compressWithFreeSymbols(flat, candidates, { minOccurrences: 3, entryOverhead: 6 });
+  let replacement;
+  if (compressed) {
+    const dictSrc = `[${compressed.d.map(sqEsc).join(',')}]`;
+    replacement = `(()=>{const _k=${sqEsc(compressed.k)},_d=${dictSrc};let _s=${sqEsc(compressed.s)};for(let i=_d.length-1;i>=0;i--)_s=_s.split(_k[i]).join(_d[i]);return _s.split(${sqEsc(rowSep)}).map(r=>r.split(${sqEsc(colSep)}));})()`;
+  } else {
+    replacement = `${sqEsc(flat)}.split(${sqEsc(rowSep)}).map(r=>r.split(${sqEsc(colSep)}))`;
   }
-  const candidates = Array.from(freq.entries())
-    .map(([tok, cnt]) => ({ tok, cnt, gain: (cnt - 1) * (Buffer.byteLength(tok, 'utf8') - 3) - 6 }))
-    .filter((x) => x.gain > 16)
-    .sort((a, b) => b.gain - a.gain)
-    .slice(0, 224);
-  let packed = flat;
-  const dict = [];
-  for (const { tok } of candidates) {
-    const ch = String.fromCharCode(0xe000 + dict.length);
-    if (flat.includes(ch)) continue;
-    const parts = packed.split(tok);
-    if (parts.length > 3 && (parts.length - 1) * (Buffer.byteLength(tok, 'utf8') - 3) > Buffer.byteLength(tok, 'utf8') + 10) {
-      packed = parts.join(ch);
-      dict.push(tok);
-    }
+
+  try {
+    const restored = evalJsExprInSandbox(replacement);
+    if (!deepEqualAcrossRealms(restored, parsed)) return code;
+  } catch {
+    return code;
   }
-  let check = packed;
-  for (let i = dict.length - 1; i >= 0; i -= 1) {
-    check = check.split(String.fromCharCode(0xe000 + i)).join(dict[i]);
-  }
-  if (check !== flat) return code;
-  const replacement = `(()=>{const _d=${JSON.stringify(dict)};let _s=${JSON.stringify(packed)};for(let i=_d.length-1;i>=0;i--)_s=_s.split(String.fromCharCode(0xe000+i)).join(_d[i]);return _s.split(${JSON.stringify(rowSep)}).map(r=>r.split(${JSON.stringify(colSep)}));})()`;
+
   if (Buffer.byteLength(replacement, 'utf8') >= Buffer.byteLength(code.slice(arrStart, arrEnd), 'utf8')) return code;
   return code.slice(0, arrStart) + replacement + code.slice(arrEnd);
+}
+
+function packHostI18nExactRows(code) {
+  let out = packStringArrayConst(code, 'EXACT_ROWS');
+  out = packStringArrayConst(out, 'PATTERN_ROWS');
+  return out;
 }
 
 function packStaticJsonConst(code, constName, obj) {
@@ -819,107 +883,182 @@ function packStaticJsonConst(code, constName, obj) {
     }
   }
   if (objEnd < 0) return code;
+
   const rawJson = JSON.stringify(obj);
-  const freq = new Map();
-  const wordRe = /"[A-Za-z0-9_]{4,30}":|[\u4e00-\u9fff]{2,6}|[A-Za-zÀ-ÿ0-9_-]{4,28}/g;
-  let m;
-  while ((m = wordRe.exec(rawJson)) !== null) {
-    freq.set(m[0], (freq.get(m[0]) || 0) + 1);
+  const candidates = collectPatternCandidates(
+    rawJson,
+    [
+      /","[A-Za-z0-9_]{3,32}":"/g,
+      /"[A-Za-z0-9_]{4,32}":/g,
+      /[\u4e00-\u9fff]{2,6}/g,
+      /[\u3040-\u30ff\u4e00-\u9fff]{2,6}/g,
+      /[\uac00-\ud7af]{2,6}/g,
+      /[A-Za-zÀ-ÿА-Яа-яЁё0-9_-]{4,28}/g,
+      /[A-Za-zÀ-ÿ]{3,14} [A-Za-zÀ-ÿ]{3,14}/g,
+    ],
+    { minGain: 6, maxCount: 640 }
+  );
+
+  const compressed = compressWithFreeSymbols(rawJson, candidates, { minOccurrences: 3, entryOverhead: 6 });
+  if (!compressed) return code;
+
+  const dictSrc = `[${compressed.d.map(sqEsc).join(',')}]`;
+  const replacement = `(()=>{const _k=${sqEsc(compressed.k)},_d=${dictSrc};let _s=${sqEsc(compressed.s)};for(let i=_d.length-1;i>=0;i--)_s=_s.split(_k[i]).join(_d[i]);return JSON.parse(_s);})()`;
+
+  try {
+    const restored = evalJsExprInSandbox(replacement);
+    if (!deepEqualAcrossRealms(restored, obj)) return code;
+  } catch {
+    return code;
   }
-  const candidates = Array.from(freq.entries())
-    .map(([tok, cnt]) => ({ tok, cnt, gain: (cnt - 1) * (Buffer.byteLength(tok, 'utf8') - 3) - 6 }))
-    .filter((x) => x.gain > 10)
-    .sort((a, b) => b.gain - a.gain)
-    .slice(0, 384);
-  let packed = rawJson;
-  const dict = [];
-  for (const { tok } of candidates) {
-    const ch = String.fromCharCode(0xe000 + dict.length);
-    if (rawJson.includes(ch)) continue;
-    const parts = packed.split(tok);
-    if (parts.length > 3 && (parts.length - 1) * (Buffer.byteLength(tok, 'utf8') - 3) > Buffer.byteLength(tok, 'utf8') + 8) {
-      packed = parts.join(ch);
-      dict.push(tok);
-    }
-  }
-  if (!dict.length) return code;
-  let check = packed;
-  for (let i = dict.length - 1; i >= 0; i -= 1) {
-    check = check.split(String.fromCharCode(0xe000 + i)).join(dict[i]);
-  }
-  if (check !== rawJson) return code;
-  // Single-quoted JS string literal avoids double-escaping all JSON double quotes (saves ~8 KB per pack)
-  const sqEsc = (s) =>
-    "'" +
-    s
-      .replace(/\\/g, '\\\\')
-      .replace(/'/g, "\\'")
-      .replace(/\n/g, '\\n')
-      .replace(/\r/g, '\\r')
-      .replace(/\u2028/g, '\\u2028')
-      .replace(/\u2029/g, '\\u2029') +
-    "'";
-  const dictSrc = `[${dict.map(sqEsc).join(',')}]`;
-  const replacement = `(()=>{const _d=${dictSrc};let _s=${sqEsc(packed)};for(let i=_d.length-1;i>=0;i--)_s=_s.split(String.fromCharCode(0xe000+i)).join(_d[i]);return JSON.parse(_s);})()`;
+
   if (Buffer.byteLength(replacement, 'utf8') >= Buffer.byteLength(code.slice(objStart, objEnd), 'utf8')) return code;
   return code.slice(0, objStart) + replacement + code.slice(objEnd);
 }
 
-function packStaticCssConst(css) {
-  const min = minifyStaticCss(css);
-  const freq = new Map();
-  const tokRe = /color-mix\(in srgb,var\(--[a-z-]+|var\(--[a-z0-9-]{4,32}|rgba\(\d+,\d+,\d+,|[a-z-]{6,28}:/g;
-  let m;
-  while ((m = tokRe.exec(min)) !== null) {
-    freq.set(m[0], (freq.get(m[0]) || 0) + 1);
-  }
-  const candidates = Array.from(freq.entries())
-    .map(([tok, cnt]) => ({ tok, cnt, gain: (cnt - 1) * (Buffer.byteLength(tok, 'utf8') - 3) - 6 }))
-    .filter((x) => x.gain > 12)
-    .sort((a, b) => b.gain - a.gain)
-    .slice(0, 256);
-  let packed = min;
-  const dict = [];
-  for (const { tok } of candidates) {
-    const ch = String.fromCharCode(0xe000 + dict.length);
-    if (min.includes(ch)) continue;
-    const parts = packed.split(tok);
-    if (parts.length > 3 && (parts.length - 1) * (Buffer.byteLength(tok, 'utf8') - 3) > Buffer.byteLength(tok, 'utf8') + 10) {
-      packed = parts.join(ch);
-      dict.push(tok);
+function packStaticCssConstInCode(code, constName, { useDict = false, runtimeCss = null } = {}) {
+  const range = findTemplateConstRange(code, constName);
+  if (!range) return code;
+  let origCss = runtimeCss;
+  if (typeof origCss !== 'string') {
+    try {
+      const evaluated = evalJsExprInSandbox(code.slice(range.exprStart, range.exprEnd));
+      if (typeof evaluated !== 'string') return code;
+      origCss = evaluated;
+    } catch {
+      return code;
     }
   }
-  if (!dict.length) return `\`${min}\`.trim()`;
-  let check = packed;
-  for (let i = dict.length - 1; i >= 0; i -= 1) {
-    check = check.split(String.fromCharCode(0xe000 + i)).join(dict[i]);
+  const min = minifyStaticCss(origCss);
+  let replacement = sqEsc(min);
+
+  if (useDict) {
+    const candidates = collectPatternCandidates(
+      min,
+      [
+        /[a-z-]{4,24}:[^;{}]{4,40};/g,
+        /color-mix\(in srgb,var\(--[a-z0-9-]{3,28}[^)]{0,32}\)/g,
+        /var\(--[a-z0-9-]{3,32}(?:,[^)]{1,28})?\)/g,
+        /\.ag-(?:sag|sg)-[a-z0-9-]+/g,
+        /rgba\(\d+,\d+,\d+,[^)]+\)/g,
+        /[a-z-]{5,28}:/g,
+        /!important;/g,
+      ],
+      { minGain: 6, maxCount: 512 }
+    );
+
+    const compressed = compressWithFreeSymbols(min, candidates, { minOccurrences: 3, entryOverhead: 6 });
+    if (compressed) {
+      const dictSrc = `[${compressed.d.map(sqEsc).join(',')}]`;
+      const dictExpr = `(()=>{const _k=${sqEsc(compressed.k)},_d=${dictSrc};let _s=${sqEsc(compressed.s)};for(let i=_d.length-1;i>=0;i--)_s=_s.split(_k[i]).join(_d[i]);return _s;})()`;
+      if (Buffer.byteLength(dictExpr, 'utf8') < Buffer.byteLength(replacement, 'utf8')) {
+        replacement = dictExpr;
+      }
+    }
   }
-  if (check !== min) return `\`${min}\`.trim()`;
-  const expr = `(()=>{const _d=${JSON.stringify(dict)};let _s=${JSON.stringify(packed)};for(let i=_d.length-1;i>=0;i--)_s=_s.split(String.fromCharCode(0xe000+i)).join(_d[i]);return _s;})()`;
-  return Buffer.byteLength(expr, 'utf8') < Buffer.byteLength(min, 'utf8') ? expr : `\`${min}\`.trim()`;
+
+  try {
+    const restored = evalJsExprInSandbox(replacement);
+    if (restored !== min) return code;
+  } catch {
+    return code;
+  }
+
+  if (Buffer.byteLength(replacement, 'utf8') >= Buffer.byteLength(code.slice(range.exprStart, range.exprEnd), 'utf8')) {
+    return code;
+  }
+  return code.slice(0, range.exprStart) + replacement + code.slice(range.exprEnd);
+}
+
+function packFrozenArrayConst(code, constName) {
+  const marker = `const ${constName}=Object.freeze([`;
+  const start = code.indexOf(marker);
+  if (start < 0) return code;
+  const exprStart = start + `const ${constName}=`.length;
+  const callOpen = exprStart + 'Object.freeze'.length;
+  let depth = 0;
+  let quote = '';
+  let exprEnd = -1;
+  for (let i = callOpen; i < code.length; i += 1) {
+    const c = code[i];
+    if (quote) {
+      if (c === '\\') { i += 1; continue; }
+      if (c === quote) quote = '';
+      continue;
+    }
+    if (c === "'" || c === '"') { quote = c; continue; }
+    if (c === '(') depth += 1;
+    else if (c === ')') {
+      depth -= 1;
+      if (depth === 0) { exprEnd = i + 1; break; }
+    }
+  }
+  if (exprEnd < 0) return code;
+
+  let origArr;
+  try {
+    origArr = evalJsExprInSandbox(code.slice(exprStart, exprEnd));
+  } catch {
+    return code;
+  }
+  if (!Array.isArray(origArr) || !origArr.length) return code;
+  const rawJson = JSON.stringify(origArr);
+  try {
+    if (!deepEqualAcrossRealms(JSON.parse(rawJson), origArr)) return code;
+  } catch {
+    return code;
+  }
+
+  const candidates = collectPatternCandidates(
+    rawJson,
+    [
+      /","[A-Za-z0-9_]{3,24}":"/g,
+      /"[A-Za-z0-9_]{3,24}":/g,
+      /[\u4e00-\u9fff]{2,6}/g,
+      /[A-Za-z0-9_-]{4,28}/g,
+      /[A-Za-z]{3,14} [A-Za-z]{3,14}/g,
+    ],
+    { minGain: 6, maxCount: 384 }
+  );
+  const compressed = compressWithFreeSymbols(rawJson, candidates, { minOccurrences: 3, entryOverhead: 6 });
+  if (!compressed) return code;
+
+  const dictSrc = `[${compressed.d.map(sqEsc).join(',')}]`;
+  const replacement = `Object.freeze((()=>{const _k=${sqEsc(compressed.k)},_d=${dictSrc};let _s=${sqEsc(compressed.s)};for(let i=_d.length-1;i>=0;i--)_s=_s.split(_k[i]).join(_d[i]);return JSON.parse(_s).map(Object.freeze);})())`;
+
+  try {
+    const restored = evalJsExprInSandbox(replacement);
+    if (!deepEqualAcrossRealms(restored, origArr)) return code;
+  } catch {
+    return code;
+  }
+
+  if (Buffer.byteLength(replacement, 'utf8') >= Buffer.byteLength(code.slice(exprStart, exprEnd), 'utf8')) return code;
+  return code.slice(0, exprStart) + replacement + code.slice(exprEnd);
 }
 
 function compactCorePart(part) {
   let code = compactCoreSource(part.code);
   if (part.file === 'styles.js') {
-    code = code.replace(/const CORE_CSS\s*=\s*`([\s\S]*?)`\.trim\(\)/, (_m, css) => {
-      return `const CORE_CSS=${packStaticCssConst(css)}`;
-    });
+    let runtimeCss = null;
+    try {
+      const stylesMod = evalUmdModuleInSandbox(part.code);
+      if (typeof stylesMod?.CORE_CSS === 'string') runtimeCss = stylesMod.CORE_CSS;
+    } catch {}
+    code = packStaticCssConstInCode(code, 'CORE_CSS', { useDict: true, runtimeCss });
   } else if (part.file === 'prompt-queue.js') {
-    code = code.replace(/const QUEUE_CSS\s*=\s*`([\s\S]*?)`\.trim\(\)/, (_m, css) => {
-      return `const QUEUE_CSS=\`${minifyStaticCss(css)}\`.trim()`;
-    });
+    code = packStaticCssConstInCode(code, 'QUEUE_CSS', { useDict: true });
   } else if (part.file === 'status-pill.js') {
-    code = code.replace(/const PRISM_SHADOW_CSS\s*=\s*`([\s\S]*?)`\.trim\(\)/, (_m, css) => {
-      return `const PRISM_SHADOW_CSS=\`${minifyStaticCss(css)}\`.trim()`;
-    });
-  } else if (part.file === 'theme-studio.js') {
-    code = minifyThemeCssTemplates(code);
+    code = packStaticCssConstInCode(code, 'PRISM_SHADOW_CSS', { useDict: true });
+  } else if (part.file === 'prompt-library.js') {
+    code = packFrozenArrayConst(code, 'BUILTIN_SLASH_ITEMS');
+    code = packFrozenArrayConst(code, 'NOV_PLAYBOOK_ITEMS');
+    code = packFrozenArrayConst(code, 'BUILTIN_TEMPLATES');
   } else if (part.file === 'host-i18n-packs.js') {
     code = packHostI18nExactRows(code);
   } else if (part.file === 'i18n.js') {
     try {
-      const i18nMod = require('../packages/core/i18n.js');
+      const i18nMod = evalUmdModuleInSandbox(part.code);
       code = packStaticJsonConst(code, 'PACKS', i18nMod?.PACKS);
       code = packStaticJsonConst(code, 'SAG_UI_PACKS', i18nMod?.SAG_UI_PACKS);
     } catch {}
@@ -940,7 +1079,7 @@ export function computeCoreHash(parts = readCoreSources(), opts = {}) {
 }
 
 export function buildInjectExpression(config = null, opts = {}) {
-  const parts = readCoreSources();
+  const parts = Array.isArray(opts.parts) ? opts.parts : readCoreSources();
   const useCompact = opts.compact !== false;
   const combined = combineCoreParts(parts, useCompact);
   const codeHash = crypto.createHash('sha256').update(combined).digest('hex').slice(0, 16);
@@ -959,19 +1098,28 @@ export function buildInjectExpression(config = null, opts = {}) {
     const compactPatterns = Array.isArray(extPack.patterns)
       ? extPack.patterns.map((p) => (p?.flags && p.flags !== 'i' ? [p.source, p.replace, p.flags] : [p?.source || '', p?.replace || '']))
       : [];
-    const packedExact = packExtExactLossless(extPack.exact || {});
+    const exactObj = extPack.exact && typeof extPack.exact === 'object' ? extPack.exact : {};
+    const packedExact = packExtExactLossless(exactObj);
+    let packedPrelude = '';
     if (packedExact) {
-      const wirePack = {
-        meta: { locale: extPack.meta?.locale || resolvedExtLoc },
-        d: packedExact.d,
-        s: packedExact.s,
-        p: compactPatterns,
-      };
-      extPrelude = `(()=>{const _w=${JSON.stringify(wirePack)};let _s=_w.s;for(let i=_w.d.length-1;i>=0;i--)_s=_s.split(String.fromCharCode(0xe000+i)).join(_w.d[i]);window.__agSagExtPacks=window.__agSagExtPacks||{};window.__agSagExtPacks[${JSON.stringify(resolvedExtLoc)}]={meta:_w.meta,exact:JSON.parse(_s),patterns:_w.p.map(x=>({source:x[0],flags:x[2]||'i',replace:x[1]}))};})();`;
+      const metaJson = JSON.stringify({ locale: extPack.meta?.locale || resolvedExtLoc });
+      const dictSrc = `[${packedExact.d.map(sqEsc).join(',')}]`;
+      const patSrc = JSON.stringify(compactPatterns);
+      const candidatePrelude = `(()=>{const _k=${sqEsc(packedExact.k)},_d=${dictSrc},_p=${patSrc};let _s=${sqEsc(packedExact.s)};for(let i=_d.length-1;i>=0;i--)_s=_s.split(_k[i]).join(_d[i]);window.__agSagExtPacks=window.__agSagExtPacks||{};window.__agSagExtPacks[${JSON.stringify(resolvedExtLoc)}]={meta:${metaJson},exact:JSON.parse(_s),patterns:_p.map(x=>({source:x[0],flags:x[2]||'i',replace:x[1]}))};})();`;
+      try {
+        const probeBox = { window: {} };
+        vm.runInNewContext(candidatePrelude, probeBox, { timeout: 2000 });
+        if (deepEqualAcrossRealms(probeBox.window.__agSagExtPacks?.[resolvedExtLoc]?.exact, exactObj)) {
+          packedPrelude = candidatePrelude;
+        }
+      } catch {}
+    }
+    if (packedPrelude) {
+      extPrelude = packedPrelude;
     } else {
       const wirePack = {
         meta: { locale: extPack.meta?.locale || resolvedExtLoc },
-        exact: extPack.exact || {},
+        exact: exactObj,
         p: compactPatterns,
       };
       extPrelude = `(()=>{const _w=${JSON.stringify(wirePack)};window.__agSagExtPacks=window.__agSagExtPacks||{};window.__agSagExtPacks[${JSON.stringify(resolvedExtLoc)}]={meta:_w.meta,exact:_w.exact,patterns:_w.p.map(x=>({source:x[0],flags:x[2]||'i',replace:x[1]}))};})();`;

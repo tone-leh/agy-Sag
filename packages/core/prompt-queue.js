@@ -356,6 +356,10 @@
         return true;
       } catch { return false; }
     };
+    const safeRemove = (node) => {
+      if (typeof coexist?.safeRemoveNode === 'function') return coexist.safeRemoveNode(node);
+      try { node?.remove?.(); return true; } catch { return false; }
+    };
     const isSidebarAux = (el) => Boolean(ctxSrc?.isSidebarOrAuxiliaryNode?.(el));
     const isSendNowBtn = (el) => {
       if (!el) return false;
@@ -382,6 +386,8 @@
     let dispatchTimer = null;
     let observeTimer = null;
     let observer = null;
+    let domBusUnsub = null;
+    let htmlBusUnsub = null;
     let barEl = null;
     let triggerBtn = null;
     let panelEl = null;
@@ -639,36 +645,44 @@
     function writeAndSubmitComposer(text, scope) {
       const ed = findComposerEditor(scope);
       if (!ed) return { ok: false, reason: 'no-editor' };
-      try {
+      if (typeof coexist?.writeComposerTextSafely === 'function') {
+        const wrote = coexist.writeComposerTextSafely(doc, win, ed, text, { replace: true });
+        if (!wrote) return { ok: false, reason: 'insert-failed' };
+      } else {
         try {
-          ed.focus?.({ preventScroll: true });
-        } catch {
-          ed.focus?.();
-        }
-        const tag = String(ed.tagName || '').toUpperCase();
-        if (tag === 'TEXTAREA' || tag === 'INPUT') {
-          ed.value = text;
-          dispatchInputEvent(ed);
-        } else {
           try {
-            const sel = win?.getSelection?.() || doc?.getSelection?.();
-            if (sel?.removeAllRanges && doc?.createRange) {
-              const range = doc.createRange();
-              range.selectNodeContents(ed);
-              range.collapse(false);
-              sel.removeAllRanges();
-              sel.addRange(range);
-            }
-          } catch {}
-          if (typeof doc?.execCommand === 'function' && doc.execCommand('insertText', false, text)) {
-            // inserted via execCommand
-          } else {
-            ed.textContent = text;
-            dispatchInputEvent(ed);
+            ed.focus?.({ preventScroll: true });
+          } catch {
+            ed.focus?.();
           }
+          const tag = String(ed.tagName || '').toUpperCase();
+          if (tag === 'TEXTAREA' || tag === 'INPUT') {
+            ed.value = text;
+            dispatchInputEvent(ed);
+          } else {
+            const isLexical = ed.getAttribute?.('data-lexical-editor') === 'true';
+            try {
+              const sel = win?.getSelection?.() || doc?.getSelection?.();
+              if (sel?.removeAllRanges && doc?.createRange) {
+                const range = doc.createRange();
+                range.selectNodeContents(ed);
+                range.collapse(false);
+                sel.removeAllRanges();
+                sel.addRange(range);
+              }
+            } catch {}
+            if (typeof doc?.execCommand === 'function' && doc.execCommand('insertText', false, text)) {
+              // inserted via execCommand
+            } else if (isLexical) {
+              return { ok: false, reason: 'insert-failed' };
+            } else {
+              ed.textContent = text;
+              dispatchInputEvent(ed);
+            }
+          }
+        } catch {
+          return { ok: false, reason: 'insert-failed' };
         }
-      } catch {
-        return { ok: false, reason: 'insert-failed' };
       }
 
       const box = ed.closest?.('[data-testid="agent-input-box"], .surface-composer-card') || findComposerBox(scope);
@@ -1297,17 +1311,25 @@
 
     function removeOwnedDom() {
       for (const node of ownedNodes) {
-        try { node?.remove?.(); } catch {}
+        safeRemove(node);
       }
       ownedNodes.clear();
-      try { barEl?.remove?.(); } catch {}
-      try { createdStyleEl?.remove?.(); } catch {}
+      safeRemove(barEl);
+      safeRemove(createdStyleEl);
       barEl = triggerBtn = panelEl = titleTextEl = statusEl = null;
       pauseBtn = clearBtn = collapseBtn = listEl = inputEl = addBtn = createdStyleEl = null;
     }
 
     function stopObserver() {
       clearObserveTimer();
+      if (domBusUnsub) {
+        try { domBusUnsub(); } catch {}
+        domBusUnsub = null;
+      }
+      if (htmlBusUnsub) {
+        try { htmlBusUnsub(); } catch {}
+        htmlBusUnsub = null;
+      }
       if (observer) {
         try { observer.disconnect(); } catch {}
         observer = null;
@@ -1367,8 +1389,65 @@
       if (switched) emitQueueChange();
     }
 
+    function scheduleObserveSync() {
+      if (observeTimer || destroyed || !enabled) return;
+      observeTimer = setTimeout(() => {
+        observeTimer = null;
+        if (destroyed || !enabled || coexist?.isWindowHibernated?.(doc, win, false)) return;
+        sync();
+      }, observeThrottleMs);
+      observeTimer?.unref?.();
+    }
+
+    function shouldSkipEmptyQueueMutation(meta) {
+      if (meta?.woken) return false;
+      if (items.length !== 0) return false;
+      if (!barEl || barEl.isConnected === false) return false;
+      return detectCascadeId() === currentCid;
+    }
+
     function startObserver() {
-      if (destroyed || !enabled || !autoObserve || !doc || observer) return;
+      if (destroyed || !enabled || !autoObserve || !doc || observer || domBusUnsub) return;
+      const DOM_ATTR_FILTER = ['hidden', 'aria-hidden', 'disabled', 'data-cascade-id'];
+      const LANG_ATTR_FILTER = ['data-ag-sag-lang', 'data-ag-cs-lang', 'lang'];
+
+      const domBus = coexist?.getDomMutationBus?.(doc, win);
+      if (domBus && typeof domBus.subscribe === 'function') {
+        try {
+          domBusUnsub = domBus.subscribe(
+            'prompt-queue',
+            (_records, meta) => {
+              if (destroyed || !enabled) return;
+              if (!meta?.woken && coexist?.isWindowHibernated?.(doc, win, false)) return;
+              if (shouldSkipEmptyQueueMutation(meta)) return;
+              scheduleObserveSync();
+            },
+            { attributes: true, attributeFilter: DOM_ATTR_FILTER, wakeOnResume: true }
+          );
+        } catch {
+          domBusUnsub = null;
+        }
+      }
+
+      const attrBus = doc.documentElement ? coexist?.getHtmlAttrBus?.(doc, win) : null;
+      if (attrBus && typeof attrBus.subscribe === 'function') {
+        try {
+          htmlBusUnsub = attrBus.subscribe(
+            'prompt-queue-lang',
+            (_changedAttrs, meta) => {
+              if (destroyed || !enabled) return;
+              if (!meta?.woken && coexist?.isWindowHibernated?.(doc, win, false)) return;
+              scheduleObserveSync();
+            },
+            { attributeFilter: LANG_ATTR_FILTER, wakeOnResume: true }
+          );
+        } catch {
+          htmlBusUnsub = null;
+        }
+      }
+
+      if (domBusUnsub) return;
+
       const MO = win?.MutationObserver || globalThis.MutationObserver;
       const target = doc.body || doc.documentElement;
       if (typeof MO !== 'function' || !target) return;
@@ -1383,20 +1462,15 @@
             : true;
           if (!hasExternal) return;
         }
-        if (observeTimer) return;
-        observeTimer = setTimeout(() => {
-          observeTimer = null;
-          if (destroyed || !enabled || coexist?.isWindowHibernated?.(doc, win, false)) return;
-          sync();
-        }, observeThrottleMs);
-        observeTimer?.unref?.();
+        if (shouldSkipEmptyQueueMutation(null)) return;
+        scheduleObserveSync();
       });
       try {
         observer.observe(target, {
           childList: true,
           subtree: true,
           attributes: true,
-          attributeFilter: ['hidden', 'aria-hidden', 'disabled', 'data-cascade-id', 'data-ag-sag-lang'],
+          attributeFilter: DOM_ATTR_FILTER,
         });
       } catch {
         observer = null;
@@ -1444,7 +1518,7 @@
         barMounted: Boolean(barEl && barEl.isConnected !== false),
         barVisible: Boolean(barEl && !barEl.hidden),
         pendingTimer: Boolean(dispatchTimer),
-        observing: Boolean(observer),
+        observing: Boolean(observer || domBusUnsub),
       };
     }
 

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import vm from 'node:vm';
 import { createRequire } from 'node:module';
 
 import {
@@ -13,6 +14,9 @@ import {
 import { copyFileSafeAtomic } from '../cli/platform-utils.mjs';
 import { evalViaCdp } from '../cli/cdp-attach.mjs';
 import { SagWatchDaemon } from '../cli/watch-daemon.mjs';
+import { buildInjectExpression, readCoreSources } from '../cli/bundle.mjs';
+import { TranslatorService, validateEndpointUrl } from '../cli/translator-service.mjs';
+import { executeLaunchPlan } from '../cli/launcher.mjs';
 
 const require = createRequire(import.meta.url);
 const coexist = require('../packages/core/coexist.js');
@@ -722,4 +726,355 @@ test('4. Corrupt/large storage read-only resilience, chunked copyFileSafeAtomic 
   const r1 = await daemon.reconcileOnce();
   const r2 = await daemon.reconcileOnce();
   assert.ok(r2.nextDelayMs > r1.nextDelayMs, `Expected exponential backoff on target-skipped, got ${r1.nextDelayMs} -> ${r2.nextDelayMs}`);
+});
+
+test('5. Round-2 Core hardening: side-panel-focus-scope main composer, sibling Theme CSS, thought recovery/epoch, draft hydration grace, host-i18n flushGen & shared MutationBus', async () => {
+  const { doc, win, makeEl, moInstances } = createMockDom({ withMO: true });
+  const storage = createMemoryStorage();
+
+  // 5a. [P0-1] data-side-panel-focus-scope="true" wrapping main composer (Agent side panel / workbench) must NOT be misclassified as sidebar
+  const agentPane = makeEl('div');
+  agentPane.setAttribute('data-testid', 'split-pane');
+  const conv = makeEl('div');
+  conv.setAttribute('data-testid', 'conversation-view');
+  conv.setAttribute('data-cascade-id', 'cid-r2-a');
+  const focusScope = makeEl('div');
+  focusScope.setAttribute('data-side-panel-focus-scope', 'true');
+  const mainBox = makeEl('div');
+  mainBox.setAttribute('data-testid', 'agent-input-box');
+  const mainEd = makeEl('div');
+  mainEd.setAttribute('data-lexical-editor', 'true');
+  mainEd.setAttribute('contenteditable', 'true');
+  mainEd.textContent = 'existing lexical text';
+  mainBox.appendChild(mainEd);
+  focusScope.appendChild(mainBox);
+  agentPane.appendChild(conv);
+  agentPane.appendChild(focusScope);
+  doc.body.appendChild(agentPane);
+
+  assert.equal(ctxSrc.isSidebarOrAuxiliaryNode(mainBox), false, 'Main composer inside data-side-panel-focus-scope must not be treated as sidebar');
+  assert.equal(ctxSrc.findMainComposerBox(doc), mainBox);
+  assert.equal(ctxSrc.findComposerEditor(doc), mainEd);
+
+  // Lexical protection: without execCommand/InputEvent support, writeComposerTextSafely must NOT clobber Lexical DOM via textContent
+  const lexRes = coexist.writeComposerTextSafely(doc, win, mainEd, 'overwrite attempt', { replace: true });
+  assert.equal(lexRes, false, 'Lexical editor without execCommand must refuse raw textContent overwrite');
+  assert.equal(mainEd.textContent, 'existing lexical text');
+
+  // 5b. [P0-2] ThemeStudio CSS targets sibling [data-testid="agent-input-box"] without requiring <main> ancestor, and explicitly resets sidebar boxes (zero :has())
+  const ts = themeStudioMod.createThemeStudioController({
+    win,
+    doc,
+    enabled: true,
+    preset: 'obsidian-prism',
+    surface: 'smoked',
+    corners: 'soft',
+  });
+  const themeStyleEl = doc.getElementById('ag-sag-theme-css');
+  assert.ok(themeStyleEl && themeStyleEl.textContent.length > 0);
+  assert.equal(themeStyleEl.textContent.includes(':has('), false, 'ThemeStudio CSS must keep zero :has()');
+  assert.ok(
+    themeStyleEl.textContent.includes('[data-testid="agent-input-box"]:not([data-testid*="floating"]):not([data-testid*="sidebar"])'),
+    'ThemeStudio CSS must hit sibling agent-input-box directly without <main> requirement'
+  );
+  assert.ok(
+    themeStyleEl.textContent.includes('[data-testid="conversation-list-sidebar"] [data-testid="agent-input-box"]'),
+    'ThemeStudio CSS must explicitly reset sidebar floating composer boxes'
+  );
+  ts.destroy();
+
+  // 5c. [P0-3] ThoughtTranslator: cleanupDom resets panelState so Prism yield recovery works, and stale runEpoch blocks late async writeback
+  const thoughtWrap = makeEl('div');
+  const thoughtBtn = makeEl('button');
+  thoughtBtn.setAttribute('data-testid', 'thinking-collapsible-trigger');
+  thoughtBtn.setAttribute('aria-expanded', 'true');
+  thoughtBtn.textContent = 'Thought for 3s';
+  const thoughtPanel = makeEl('div');
+  thoughtPanel.setAttribute('data-testid', 'thinking-content');
+  const thoughtP = makeEl('p');
+  thoughtP.textContent = 'Inspecting concurrent queue handoff and validating state transitions.';
+  thoughtPanel.appendChild(thoughtP);
+  thoughtWrap.appendChild(thoughtBtn);
+  thoughtWrap.appendChild(thoughtPanel);
+  conv.appendChild(thoughtWrap);
+
+  let releaseFirst = null;
+  let reqCount = 0;
+  const tt = thoughtMod.createThoughtTranslatorController({
+    win,
+    doc,
+    enabled: true,
+    triggerMode: 'auto',
+    viewMode: 'translated',
+    autoObserve: false,
+    onRequestTranslate: ({ text }) => {
+      reqCount += 1;
+      if (reqCount === 1) {
+        return new Promise((resolve) => {
+          releaseFirst = () => resolve({ ok: true, data: { translated: 'STALE WRITEBACK', engine: 'mt' } });
+        });
+      }
+      return Promise.resolve({ ok: true, data: { translated: `译文:${text}`, engine: 'mt' } });
+    },
+  });
+  tt.scanNow();
+  assert.equal(reqCount, 1);
+  // Prism takes over while request #1 is in flight -> increments runEpoch and cleans DOM
+  doc.documentElement.setAttribute('data-ag-prism-thought-owner', 'obsidian-prism-thought');
+  tt.scanNow();
+  assert.equal(tt.getDebugState().yieldedToPrism, true);
+  // Late response #1 arrives while yielded -> must NOT inject or hide source
+  releaseFirst();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(thoughtPanel.querySelector('[data-testid="ag-sag-thought-box"]'), null, 'Stale in-flight response must not write back during Prism yield');
+  assert.equal(thoughtPanel.getAttribute('data-ag-sag-thought-hide-src'), null);
+
+  // Prism yields back -> panelState was reset so thought translates cleanly on recovery
+  doc.documentElement.removeAttribute('data-ag-prism-thought-owner');
+  tt.scanNow();
+  await new Promise((r) => setTimeout(r, 20));
+  const recoveredBox = thoughtPanel.querySelector('[data-testid="ag-sag-thought-box"]');
+  assert.ok(recoveredBox && recoveredBox.textContent.includes('译文:Inspecting concurrent queue handoff'), 'Must recover cleanly after Prism yield');
+  assert.equal(thoughtPanel.getAttribute('data-ag-sag-thought-hide-src'), '1');
+  assert.ok(!thoughtP.style.display, 'Must keep host thought paragraph inline style untouched');
+  tt.destroy();
+
+  // 5d. [P1-1] DraftGuard 350ms hydration grace prevents flicker & accidental clear on tab switch + isolates sidebar send click
+  const taDom = createMockDom();
+  const taWrap = taDom.makeEl('div');
+  const taBox = taDom.makeEl('div');
+  taBox.setAttribute('data-testid', 'agent-input-box');
+  const ta = taDom.makeEl('textarea');
+  ta.value = 'Unsent draft for session B';
+  taBox.appendChild(ta);
+  taWrap.appendChild(taBox);
+  const CID_A = 'aaaaaaaa-1111-4111-8111-111111111111';
+  const CID_B = 'bbbbbbbb-2222-4222-8222-222222222222';
+  const taConv = taDom.makeEl('div');
+  taConv.setAttribute('data-testid', 'conversation-view');
+  taConv.setAttribute('data-cascade-id', CID_B);
+  taDom.doc.body.appendChild(taConv);
+  taDom.doc.body.appendChild(taWrap);
+
+  const sidebarAside = taDom.makeEl('aside');
+  const sidebarSendBtn = taDom.makeEl('button');
+  sidebarSendBtn.setAttribute('data-testid', 'send-button');
+  sidebarAside.appendChild(sidebarSendBtn);
+  taDom.doc.body.appendChild(sidebarAside);
+
+  const dg = draftMod.createDraftGuardController({
+    win: taDom.win,
+    doc: taDom.doc,
+    storage,
+    enabled: true,
+    debounceMs: 0,
+    hydrationGraceMs: 80,
+  });
+  dg.flushNow();
+  assert.ok(draftMod.loadDraft(storage, CID_B)?.text === 'Unsent draft for session B');
+
+  // Clicking send inside sidebar must NOT wipe main session draft
+  taDom.doc.dispatchEvent({ type: 'click', target: sidebarSendBtn });
+  assert.equal(draftMod.loadDraft(storage, CID_B)?.text, 'Unsent draft for session B', 'Sidebar send click must not clear main draft');
+
+  // Switch CID_B -> CID_A -> back to CID_B with empty composer (simulating v2.36 async native hydration)
+  taConv.setAttribute('data-cascade-id', CID_A);
+  ta.value = '';
+  dg.sync();
+  taConv.setAttribute('data-cascade-id', CID_B);
+  dg.sync();
+  // Immediately after switching back (inside hydration grace): restore bar stays hidden and flushNow must NOT delete stored draft
+  dg.flushNow();
+  assert.equal(draftMod.loadDraft(storage, CID_B)?.text, 'Unsent draft for session B', 'Hydration grace must prevent accidental clearDraft');
+  const barDuringGrace = taDom.doc.querySelector('[data-testid="ag-sg-draft-bar"]');
+  assert.equal(Boolean(barDuringGrace && !barDuringGrace.hidden), false, 'Restore bar must stay hidden during hydration grace');
+  await new Promise((r) => setTimeout(r, 110));
+  const barAfterGrace = taDom.doc.querySelector('[data-testid="ag-sg-draft-bar"]');
+  assert.ok(barAfterGrace && !barAfterGrace.hidden, 'Restore bar should appear smoothly after hydration grace if still empty');
+  dg.destroy();
+
+  // 5e. [P1-2] HostI18n flushGen prevents ghost writeback after restoreAll()
+  const i18nDom = createMockDom({ withMO: true });
+  const btns = [];
+  for (let i = 0; i < 700; i += 1) {
+    const b = i18nDom.makeEl('button');
+    b.textContent = 'Settings';
+    i18nDom.doc.body.appendChild(b);
+    btns.push(b);
+  }
+  const i18nCtrl = hostI18nMod.createHostI18nController({
+    win: i18nDom.win,
+    doc: i18nDom.doc,
+    coexist,
+    enabled: true,
+    locale: 'zh-CN',
+    autoObserve: false,
+  });
+  i18nCtrl.scheduleScan();
+  // Restore immediately while remaining slice (>600 nodes) is pending
+  i18nCtrl.restoreAll();
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(btns[0].textContent, 'Settings');
+  assert.equal(btns[699].textContent, 'Settings', 'Pending slice after restoreAll() must not ghost-translate');
+  i18nCtrl.destroy();
+
+  // 5f. Shared DomMutationBus & HtmlAttrBus: multiple subscribers share 1 underlying MO and wake on resume
+  const busDom = createMockDom({ withMO: true });
+  const domBus = coexist.getDomMutationBus(busDom.doc, busDom.win);
+  const attrBus = coexist.getHtmlAttrBus(busDom.doc, busDom.win);
+  let wokeCount = 0;
+  let attrHits = 0;
+  const unsub1 = domBus.subscribe('m1', (_recs, meta) => { if (meta?.woken) wokeCount += 1; }, { wakeOnResume: true });
+  const unsub2 = domBus.subscribe('m2', (_recs, meta) => { if (meta?.woken) wokeCount += 1; }, { wakeOnResume: true });
+  const unsubA1 = attrBus.subscribe('a1', (set) => { if (set.has('data-ag-sag-lang')) attrHits += 1; }, { attributeFilter: ['data-ag-sag-lang'] });
+  const unsubA2 = attrBus.subscribe('a2', (set) => { if (set.has('lang')) attrHits += 1; }, { attributeFilter: ['lang'] });
+  assert.equal(busDom.moInstances.length, 2, '4 subscribers across 2 buses must allocate only 2 underlying MutationObservers');
+
+  // Hibernated mutation queues wake-up replay on focus
+  busDom.doc.hidden = true;
+  const hostMutEl = busDom.makeEl('div');
+  busDom.moInstances[0].trigger([{ type: 'childList', target: busDom.doc.body, addedNodes: [hostMutEl], removedNodes: [] }]);
+  assert.equal(wokeCount, 0);
+  busDom.doc.hidden = false;
+  busDom.doc.dispatchEvent({ type: 'visibilitychange' });
+  assert.equal(wokeCount, 2, 'Wake-up must replay to both subscribers');
+
+  // HtmlAttrBus routes matching attributeFilter subsets
+  busDom.moInstances[1].trigger([{ type: 'attributes', target: busDom.doc.documentElement, attributeName: 'data-ag-sag-lang' }]);
+  assert.equal(attrHits, 1);
+
+  unsub1();
+  unsub2();
+  unsubA1();
+  unsubA2();
+  assert.equal(domBus.getDebugState().observing, false, 'DomMutationBus must disconnect when last subscriber leaves');
+  assert.equal(domBus.getDebugState().subscriberCount, 0);
+  assert.equal(attrBus.getDebugState().observing, false, 'HtmlAttrBus must disconnect when last subscriber leaves');
+  assert.equal(attrBus.getDebugState().subscriberCount, 0);
+  void moInstances;
+});
+
+test('6. Round-2 CLI & Bundle hardening: fail-closed truncation orphans, backup live WAL/maxBytes, sandbox bundle lossless VM parity, translator slot handoff & launcher check', async () => {
+  // 6a. [P0] storage-doctor: maxFiles/maxDurationMs truncation skips orphan classification fail-closed; copyFileSafeAtomic enforces maxBytes
+  withTempDir((tmp) => {
+    const dataDir = path.join(tmp, 'ag-data');
+    const outDir = path.join(tmp, 'backup');
+    fs.mkdirSync(path.join(dataDir, 'conversations'), { recursive: true });
+    fs.mkdirSync(path.join(dataDir, 'brain', 'sess-active', 'sub'), { recursive: true });
+    fs.writeFileSync(path.join(dataDir, 'conversations', 'sess-active.pb'), Buffer.alloc(64, 1));
+    fs.writeFileSync(path.join(dataDir, 'brain', 'sess-active', 'sub', 'transcript.jsonl'), '{"step":1}\n');
+    // Active SQLite DB with non-empty WAL companion
+    fs.writeFileSync(path.join(dataDir, 'live.sqlite'), Buffer.from('SQLite format 3\0' + 'x'.repeat(200)));
+    fs.writeFileSync(path.join(dataDir, 'live.sqlite-wal'), Buffer.alloc(64, 7));
+
+    // Truncated audit (maxFiles: 1) must fail-closed: orphans === [] and warning recorded
+    const truncAudit = auditAntigravityStorage({ dataDir, maxFiles: 1 });
+    assert.equal(truncAudit.truncated, true);
+    assert.deepEqual(truncAudit.orphans, [], 'Truncated audit must not misclassify unscanned sessions as orphans');
+    assert.ok(truncAudit.warnings.some((w) => /orphan/i.test(w)));
+
+    // Full audit confirms sess-active is NOT orphan
+    const fullAudit = auditAntigravityStorage({ dataDir });
+    assert.equal(fullAudit.truncated, false);
+    assert.deepEqual(fullAudit.orphans, []);
+
+    // Backup skips active WAL-locked sqlite via direct live check
+    const bak = createStorageBackup({ dataDir, outDir });
+    assert.equal(bak.ok, true);
+    assert.ok(bak.skipped.some((s) => s.relPath === 'live.sqlite' && /sqlite-wal-active/i.test(s.reason)));
+
+    // copyFileSafeAtomic enforces maxBytes hard ceiling and leaves no temp file behind
+    const bigSrc = path.join(tmp, 'over.bin');
+    const bigDst = path.join(tmp, 'over-copy.bin');
+    fs.writeFileSync(bigSrc, Buffer.alloc(1024, 0x41));
+    assert.throws(
+      () => copyFileSafeAtomic(bigSrc, bigDst, fs.realpathSync.native(tmp), { maxBytes: 256 }),
+      /maxBytes|exceeds|limit/i
+    );
+    assert.equal(fs.existsSync(bigDst), false, 'Aborted copyFileSafeAtomic must not leave destination file');
+  });
+
+  // 6b. [P0/P1] bundle.mjs: VM lossless parity + safe handling of \uE000 / unicode escapes / CSS backslashes + budget bounds
+  const ruSyncExpr = buildInjectExpression({ hostI18nLocale: 'ru' }, { deferExtPack: false });
+  const ruDeferExpr = buildInjectExpression({ hostI18nLocale: 'ru' }, { deferExtPack: true });
+  const ruSyncBytes = Buffer.byteLength(ruSyncExpr, 'utf8');
+  const ruDeferBytes = Buffer.byteLength(ruDeferExpr, 'utf8');
+  assert.ok(ruSyncBytes <= 1_540_000, `ruSync bundle exceeds 1.54MB budget: ${ruSyncBytes}`);
+  assert.ok(ruDeferBytes < 960_000, `ruDefer bundle exceeds 960KB budget: ${ruDeferBytes}`);
+
+  // Custom parts containing \uE000 PUA char, \u2026 escape, and CSS backslash \2022 must survive round-trip losslessly
+  const customParts = readCoreSources().map((p) => {
+    if (p.file === 'styles.js') {
+      return {
+        ...p,
+        code: p.code.replace(
+          'const CORE_CSS = `',
+          'const CORE_CSS = `/* keep-in-str */ .x::before{content:"\\\\2022 \\uE000";--empty-v: ;}\n'
+        ),
+      };
+    }
+    return p;
+  });
+  const packedCustom = buildInjectExpression(null, { parts: customParts, deferExtPack: true });
+  const { doc: sbDoc } = createMockDom();
+  const sandboxWin = {
+    document: sbDoc,
+    console,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    Event,
+    navigator: { language: 'en-US' },
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  sandboxWin.window = sandboxWin;
+  sandboxWin.globalThis = sandboxWin;
+  vm.runInNewContext(packedCustom, sandboxWin, { timeout: 2000 });
+  const cssRuntime = sandboxWin.__agSgStyles?.CORE_CSS || '';
+  sandboxWin.__agSag?.destroy?.();
+  assert.ok(cssRuntime.includes('content:"\\2022 \uE000"'), 'Packer must preserve CSS backslash escapes and existing PUA chars losslessly');
+  assert.ok(cssRuntime.includes('--empty-v: ;'), 'CSS minifier must preserve empty custom property value');
+
+  // 6c. [P1] TranslatorService strict concurrency cap (<= 3, no microtask race) & full fe80::/10 IPv6 SSRF block
+  assert.equal(validateEndpointUrl('http://[febf::1]/v1/chat').ok, false, 'fe80::/10 range (febf::1) must be blocked');
+  assert.equal(validateEndpointUrl('http://[fe90::1]/v1/chat').ok, false, 'fe80::/10 range (fe90::1) must be blocked');
+
+  let live = 0;
+  let peak = 0;
+  const svc = new TranslatorService({
+    fetchFn: async () => {
+      live += 1;
+      peak = Math.max(peak, live);
+      await new Promise((r) => setTimeout(r, 12));
+      live -= 1;
+      return {
+        ok: true,
+        status: 200,
+        headers: new Map(),
+        body: null,
+        text: async () => JSON.stringify([[['ok', 'src']]]),
+      };
+    },
+  });
+  const results = await Promise.all(
+    Array.from({ length: 10 }, (_, idx) =>
+      svc.translate({ engine: 'mt', text: `sample text ${idx}`, targetLang: 'zh-CN' })
+    )
+  );
+  assert.equal(results.every((r) => r.ok), true);
+  assert.ok(peak <= 3, `TranslatorService peak concurrency must never exceed 3, got ${peak}`);
+
+  // 6d. [P2] Launcher rejects explicit missing executable path fail-closed
+  const missingPlan = {
+    ok: true,
+    platform: 'linux',
+    executableFound: false,
+    executablePath: '/nonexistent/path/to/antigravity-bin',
+    launchSpec: { command: '/nonexistent/path/to/antigravity-bin', args: ['--remote-debugging-port=9222'] },
+  };
+  const launchRes = await executeLaunchPlan(missingPlan, { execute: true });
+  assert.equal(launchRes.ok, false);
+  assert.equal(launchRes.code, 'EXECUTABLE_NOT_FOUND');
 });

@@ -72,3 +72,32 @@
 3. **3,000+ 步超长对话切换与滚动流畅度核验**：切入 2,800+ 步历史大对话并连续上下快速滚动、切换 2–3 个后台 `RUNNING` 会话，确认无米白屏、无 Console `NotFoundError`、CPU 迅速回落、思考翻译仅处理最近块且折叠代码块无跳屏。
 4. **LaTeX 公式、纯文本复制与悬停 Archive 核验**：开启 `hostI18n`（`zh-CN`）查看含内联 LaTeX 的子代理回复确认公式零误翻；对含空行的长代码块点复制确认粘贴保留空行；悬停侧栏会话行确认 Archive 按钮完整可点。
 5. **Auto 模式跨仓审批 fail-closed 核验**：开启 `safeAutoAccept`（`readonly-safe` / `dev-flow`）面对跨项目/工作区外读写审批卡片或 `Always allow` 按钮，确认自动跳过并在审计日志中记录拦截原因，不越权自动点击。
+
+---
+
+## 六、第二轮独立对抗审查与深化加固（2026-11-28）
+
+第一轮加固提交 `8f1bd6f` 落地后，通过双路严格只读 `auditor` 对 `packages/core/`、`cli/`、`sidecars/` 全量开展了第二轮对抗复核，实证定位并全部修补了 **6 项 P0 级缺陷**、**14 项 P1 级竞态与边界漏洞**，同时完成共享 DOM/Attr 总线收敛与 React 零侵入改造：
+
+### 1. Core 渲染层修补与架构升级
+- **`[P0-1]` 解除 `[data-side-panel-focus-scope="true"]` 误伤**：从 `context-source.js` 与 `theme-studio.js` 侧栏排除规则中移除该属性，结合与 `[data-testid="conversation-view"]` 同 pane 校验，恢复 Agent 侧面板主布局与离线工作台主输入框及 Smooth Caret 定位。
+- **`[P0-2]` 修复 `theme-studio.js` 兄弟布局样式脱靶**：主输入框样式直接命中 `[data-testid="agent-input-box"]:not([data-testid*="floating"]):not([data-testid*="sidebar"])`，并对 `aside`、`[data-testid="sidebar"]`、`[data-testid="conversation-list-sidebar"]` 下的浮动输入框显式复原默认值（严格零 `:has()`、零 `.ag-cs-`）；同步修复 `styles.js` `warm-paper` 死选择器。
+- **`[P0-3]` 修复 `thought-translator.js` 重开/让位恢复失灵与异步越界回写**：`cleanupDom()` 重置 `panelState` 并引入递增 `runEpoch` 代际令牌、30s 请求超时释放 `autoInFlight`、`scanTitles()` 单批 15 条上限与 `<= 2` 并发池、`hiddenSrcPanels` 精确清理。
+- **共享 `DomMutationBus` 与 `HtmlAttrBus`（`packages/core/coexist.js`）**：将 8 个分散的 `doc.body` 观察器与 3 个 `doc.documentElement` 属性观察器收敛为按文档单例缓存的共享总线，统一执行休眠拦截、`isMutationOwnedOnly` 预过滤、窗口唤醒脏回放，并在最后一个订阅者退出时自动 `disconnect()` 归零。
+- **React 托管 DOM 零侵入深化**：
+  - `writeComposerTextSafely` 与 `clean-slate.js`、`draft-guard.js`、`prompt-queue.js` 对 `[data-lexical-editor="true"]` 严禁降级写 `ed.textContent`；
+  - `theme-studio.js` Smooth Caret 迁至 `doc.body` 顶层 `position: fixed` 浮层，彻底零侵入 `editorHost`；
+  - `thought-translator.js`、`session-radar.js`、`outline-bookmarks.js` 的行/原文隐藏全部改为纯 CSS 属性规则（`data-ag-sag-thought-hide-src`、`data-ag-sg-radar-hidden`、`data-ag-sg-outline-hidden`），零修改宿主受控 `style.display` / `.hidden`。
+- **其余 P1 竞态修复**：`draft-guard.js` 增 `350ms` 跨 Tab 原生水合宽限期防闪烁与防误删备份、补齐侧栏发送隔离；`host-i18n.js` 增 `flushGen` 代际令牌防 `restoreAll`/`setLocale` 幽灵回写、去除 2,000 节点静默截断、休眠入口前置短路；`outline-bookmarks.js` 增超 120 气泡空闲续批、`jumpToTurn` 按需装饰、唤醒补 Vault 同步与晚到子容器迁移；`reading-nav.js` 改 200ms/350ms 防抖；`prompt-queue.js` 空队列短路且语言监听迁至 `HtmlAttrBus`；`index.js` 修复 `getStarredTurns` 读取 `st?.bookmarks`。
+
+### 2. CLI、存储体检与打包压缩器加固
+- **`[P0]` `cli/storage-doctor.mjs` 与 `cli/platform-utils.mjs`**：审计命中 `max-files` / `max-duration` 截断时 fail-closed 跳过孤儿判定，命中 `truncatedDirs` 禁止判为 `empty-session-dir`，`brain/` 子树深度基准放宽 `+2`；`createStorageBackup` 改用实时 `-wal`/`-shm` 锁检测并向 `copyFileSafeAtomic` 透传剩余配额 `maxBytes`；POSIX 只读打开叠加 `O_NOFOLLOW | O_NONBLOCK` 与 `fstatSync(fd).isFile()`。
+- **`[P0]` `cli/bundle.mjs` 沙箱无损重构**：移除脆弱的 `minifyThemeCssTemplates` 与 `require('../packages/core/i18n.js')`，统一在隔离 `vm` 沙箱求值当前 `part.code` 真实运行时值并做跨 Realm 深等往返校验（彻底修复 `\uXXXX`/`\xXX`/CSS 反斜杠双重转义与自定义 `parts` 读旧缓存）；修复原文含 `\uE000` 时词典压缩卡死缺陷并启用 2 字节安全空闲码点池与 `extPrelude` 单引号编码，将 `ruSync` 降至 **`1,418,898 B`**（余量 121.1 KB），`ruDefer` 保持 **`954,621 B`**（`< 960,000 B`）。
+- **`[P1/P2]` `cli/watch-daemon.mjs` / `cli/translator-service.mjs` / `cli/launcher.mjs`**：`_defaultInjectCache` 纳入 `config`/`deferExtPack`/源码 stat 签名；`_pruneExecutionContexts` 首轮优先淘汰非默认上下文保护主文档；僵尸桥自动重试绑定并在连续失败后重建；`syncNovStateToBridges` 增 `config.json` stat 快路径；`TranslatorService._withSlot` 改为严格槽位移交杜绝微任务并发超发、增加排队超时与多片 MT 共享总 `deadline`、覆盖完整 `fe80::/10` IPv6 SSRF；`launcher` 对显式缺失路径返回 `EXECUTABLE_NOT_FOUND`。
+
+### 3. 第二轮验证结果（隔离单测与门禁实测）
+- `npm test`：**255 / 255 通过**（含 `test/v236-resilience-hardening.test.mjs` 新增 Test 5 / Test 6 全套第二轮回归用例）；
+- `npm run i18n:validate`：10 内置包（493 核心词条）+ 9 扩展包，0 错误；
+- `npm run workbench:smoke`：HTTP 200，`1,416,802 B`，22 项核心标记全验证；
+- `npm run doctor`：`plugin.json v1.4.0 + sidecar.json compliant` 通过（检测到本机已升级至 `Obsidian Prism v1.0.8-beta.5`）。
+- 未测项：上述结果均为离线单测、隔离沙箱与静态门禁实测，真实 Antigravity Desktop `v2.36.0` + `Obsidian Prism v1.0.8-beta.5` 桌面渲染态仍按第五节清单实机冒烟核验。

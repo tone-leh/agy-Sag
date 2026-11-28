@@ -95,6 +95,7 @@
     let keydownOff = null;
     let paneTrackOff = null;
     let domObserver = null;
+    let domBusUnsub = null;
     let observerTimer = null;
     let pulseTimer = null;
     let pulsedEl = null;
@@ -116,6 +117,10 @@
         else parent?.appendChild?.(node);
         return true;
       } catch { return false; }
+    };
+    const safeRemove = (node) => {
+      if (typeof coexist?.safeRemoveNode === 'function') return coexist.safeRemoveNode(node);
+      try { node?.remove?.(); return true; } catch { return false; }
     };
 
     const pruneDetachedDetails = () => {
@@ -290,7 +295,7 @@
     function cleanupEnhancedCodeBlocks() {
       for (const pre of Array.from(enhancedPres)) {
         const bar = codeBars.get(pre);
-        try { bar?.remove?.(); } catch {}
+        safeRemove(bar);
         codeBars.delete(pre);
         try { pre.removeAttribute?.(CODE_FOLDED_ATTR); } catch {}
         try { pre.removeAttribute?.(CODE_ENHANCED_ATTR); } catch {}
@@ -299,7 +304,7 @@
       }
       if (doc && typeof doc.querySelectorAll === 'function') {
         try {
-          doc.querySelectorAll(`[${CODE_BAR_ATTR}="1"]`).forEach((n) => n.remove?.());
+          doc.querySelectorAll(`[${CODE_BAR_ATTR}="1"]`).forEach((n) => safeRemove(n));
           doc.querySelectorAll(`[${CODE_FOLDED_ATTR}]`).forEach((n) => n.removeAttribute?.(CODE_FOLDED_ATTR));
           doc.querySelectorAll(`[${CODE_ENHANCED_ATTR}]`).forEach((n) => n.removeAttribute?.(CODE_ENHANCED_ATTR));
           doc.querySelectorAll(`[${CODE_WRAP_ATTR}]`).forEach((n) => n.removeAttribute?.(CODE_WRAP_ATTR));
@@ -358,7 +363,7 @@
       // Prune detached pre elements & modifiedDetails
       for (const pre of Array.from(enhancedPres)) {
         if (pre.isConnected === false) {
-          try { codeBars.get(pre)?.remove?.(); } catch {}
+          safeRemove(codeBars.get(pre));
           codeBars.delete(pre);
           preLineCache.delete(pre);
           enhancedPres.delete(pre);
@@ -395,7 +400,7 @@
 
           if (lines < collapseLines) {
             if (enhancedPres.has(pre)) {
-              try { codeBars.get(pre)?.remove?.(); } catch {}
+              safeRemove(codeBars.get(pre));
               codeBars.delete(pre);
               preLineCache.delete(pre);
               pre.removeAttribute?.(CODE_FOLDED_ATTR);
@@ -528,7 +533,7 @@
     }
 
     function closeMermaidModal() {
-      try { mermaidModalEl?.remove?.(); } catch {}
+      safeRemove(mermaidModalEl);
       mermaidModalEl = null;
       mermaidZoomScale = 1;
     }
@@ -611,7 +616,7 @@
             if (a.style) a.style.display = 'none';
             doc.body.appendChild(a);
             a.click?.();
-            a.remove?.();
+            safeRemove(a);
             const timer = setTimeout(() => { try { UrlApi.revokeObjectURL?.(url); } catch {} }, 1000);
             timer?.unref?.();
           } catch {}
@@ -632,12 +637,12 @@
     function cleanupMermaidButtons() {
       closeMermaidModal();
       for (const [svg, btn] of mermaidBtns.entries()) {
-        try { btn?.remove?.(); } catch {}
+        safeRemove(btn);
         mermaidBtns.delete(svg);
       }
       if (doc && typeof doc.querySelectorAll === 'function') {
         try {
-          doc.querySelectorAll(`[${MERMAID_BTN_ATTR}="1"]`).forEach((n) => n.remove?.());
+          doc.querySelectorAll(`[${MERMAID_BTN_ATTR}="1"]`).forEach((n) => safeRemove(n));
         } catch {}
       }
     }
@@ -648,7 +653,7 @@
       if (!containers.length) return 0;
       for (const [svg, btn] of mermaidBtns.entries()) {
         if (svg.isConnected === false) {
-          try { btn?.remove?.(); } catch {}
+          safeRemove(btn);
           mermaidBtns.delete(svg);
         }
       }
@@ -692,13 +697,13 @@
     }
 
     function removeOutline() {
-      try { outlineEl?.remove?.(); } catch {}
+      safeRemove(outlineEl);
       outlineEl = null;
       outlineOpen = false;
     }
 
     function removeRail() {
-      try { railEl?.remove?.(); } catch {}
+      safeRemove(railEl);
       railEl = null;
       lastRailSig = '';
       removeOutline();
@@ -706,7 +711,7 @@
 
     function renderOutlinePopover(focusInput = false) {
       if (destroyed || !enabled || !outlineOpen || !doc?.body) {
-        try { outlineEl?.remove?.(); } catch {}
+        safeRemove(outlineEl);
         outlineEl = null;
         return;
       }
@@ -1081,7 +1086,12 @@
     }
 
     function scheduleSync() {
-      if (observerTimer || destroyed || !enabled) return;
+      if (destroyed || !enabled) return;
+      if (observerTimer) {
+        clearTimeout(observerTimer);
+        observerTimer = null;
+      }
+      const delayMs = isStreamingNow() ? 350 : 200;
       observerTimer = setTimeout(() => {
         observerTimer = null;
         if (destroyed || !enabled) return;
@@ -1089,7 +1099,7 @@
         scanCodeBlocks();
         scanMermaidDiagrams();
         renderRail();
-      }, 80);
+      }, delayMs);
       observerTimer?.unref?.();
     }
 
@@ -1114,30 +1124,50 @@
         };
       }
 
-      if (options.autoObserve !== false && typeof win?.MutationObserver === 'function' && doc.body) {
-        domObserver = new win.MutationObserver((records) => {
-          if (!enabled || destroyed) return;
-          if (coexist?.isWindowHibernated?.(doc, win, false)) return;
-          if (Array.isArray(records) && records.length > 0) {
-            const hasExternal = records.some((rec) => {
-              if (!isOwnedNode(rec?.target)) {
-                const added = Array.from(rec?.addedNodes || []);
-                const removed = Array.from(rec?.removedNodes || []);
-                const allOwned =
-                  (added.length > 0 || removed.length > 0) &&
-                  added.every(isOwnedNode) &&
-                  removed.every(isOwnedNode);
-                return !allOwned;
-              }
-              return false;
-            });
-            if (!hasExternal) return;
+      if (options.autoObserve !== false && doc.body) {
+        const bus = coexist?.getDomMutationBus?.(doc, win);
+        if (bus && typeof bus.subscribe === 'function') {
+          try {
+            domBusUnsub = bus.subscribe(
+              'reading-nav',
+              (_records, meta) => {
+                if (!enabled || destroyed) return;
+                if (!meta?.woken && coexist?.isWindowHibernated?.(doc, win, false)) return;
+                scheduleSync();
+              },
+              { wakeOnResume: true }
+            );
+          } catch {
+            domBusUnsub = null;
           }
-          scheduleSync();
-        });
-        try {
-          domObserver.observe(doc.body, { childList: true, subtree: true });
-        } catch {}
+        }
+        if (!domBusUnsub && typeof win?.MutationObserver === 'function') {
+          domObserver = new win.MutationObserver((records) => {
+            if (!enabled || destroyed) return;
+            if (coexist?.isWindowHibernated?.(doc, win, false)) return;
+            if (typeof coexist?.isMutationOwnedOnly === 'function') {
+              if (coexist.isMutationOwnedOnly(records)) return;
+            } else if (Array.isArray(records) && records.length > 0) {
+              const hasExternal = records.some((rec) => {
+                if (!isOwnedNode(rec?.target)) {
+                  const added = Array.from(rec?.addedNodes || []);
+                  const removed = Array.from(rec?.removedNodes || []);
+                  const allOwned =
+                    (added.length > 0 || removed.length > 0) &&
+                    added.every(isOwnedNode) &&
+                    removed.every(isOwnedNode);
+                  return !allOwned;
+                }
+                return false;
+              });
+              if (!hasExternal) return;
+            }
+            scheduleSync();
+          });
+          try {
+            domObserver.observe(doc.body, { childList: true, subtree: true });
+          } catch {}
+        }
       }
     }
 
@@ -1153,6 +1183,10 @@
       if (paneTrackOff) {
         try { paneTrackOff(); } catch {}
         paneTrackOff = null;
+      }
+      if (domBusUnsub) {
+        try { domBusUnsub(); } catch {}
+        domBusUnsub = null;
       }
       if (domObserver) {
         try { domObserver.disconnect(); } catch {}
@@ -1228,7 +1262,7 @@
       cleanupEnhancedCodeBlocks();
       cleanupMermaidButtons();
       removeRail();
-      try { createdStyleEl?.remove?.(); } catch {}
+      safeRemove(createdStyleEl);
       createdStyleEl = null;
       activePaneEl = null;
       railYielded = false;

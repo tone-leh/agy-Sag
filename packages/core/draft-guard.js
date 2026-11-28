@@ -15,6 +15,7 @@
   const MIN_DRAFT_CHARS = 2;
   const MAX_HISTORY_ITEMS = 30;
   const MAX_HISTORY_ITEM_CHARS = 4000;
+  const HYDRATION_GRACE_MS = 350;
 
   function resolveDep(globalKey, relPath) {
     if (globalRoot && globalRoot[globalKey]) return globalRoot[globalKey];
@@ -185,6 +186,7 @@
     const styles = options.styles || resolveDep('__agSgStyles', './styles.js');
     const nowFn = typeof options.now === 'function' ? options.now : () => Date.now();
     const debounceMs = Math.max(0, Number(options.debounceMs ?? 450));
+    const hydrationGraceMs = Math.max(0, Number(options.hydrationGraceMs ?? HYDRATION_GRACE_MS));
 
     let enabled = options.enabled !== undefined ? Boolean(options.enabled) : true;
     let destroyed = false;
@@ -194,6 +196,8 @@
     let lastTurnCountByCid = new Map();
     let dismissedCids = new Set();
     let saveTimer = null;
+    let cidSwitchedAtMs = 0;
+    let hydrationTimer = null;
     let boundEditor = null;
     let boundEditorOff = null;
     let barEl = null;
@@ -214,6 +218,40 @@
         return true;
       } catch { return false; }
     };
+    const safeRemove = (node) => {
+      if (typeof coexist?.safeRemoveNode === 'function') return coexist.safeRemoveNode(node);
+      try { node?.remove?.(); return true; } catch { return false; }
+    };
+
+    function clearHydrationTimer() {
+      if (hydrationTimer) {
+        clearTimeout(hydrationTimer);
+        hydrationTimer = null;
+      }
+    }
+
+    function isInHydrationGrace() {
+      return hydrationGraceMs > 0 && cidSwitchedAtMs > 0 && Date.now() - cidSwitchedAtMs < hydrationGraceMs;
+    }
+
+    function enterHydrationGrace(prevCid) {
+      if (prevCid) {
+        lastLiveDraftByCid.delete(prevCid);
+      }
+      if (hydrationGraceMs <= 0) {
+        cidSwitchedAtMs = 0;
+        clearHydrationTimer();
+        return;
+      }
+      cidSwitchedAtMs = Date.now();
+      clearHydrationTimer();
+      hydrationTimer = setTimeout(() => {
+        hydrationTimer = null;
+        cidSwitchedAtMs = 0;
+        if (!destroyed && enabled) sync();
+      }, hydrationGraceMs);
+      hydrationTimer?.unref?.();
+    }
 
     function ensureStyle() {
       if (!doc || !styles) return;
@@ -240,6 +278,10 @@
       }
       const ed = ctxSrc.findComposerEditor(doc, scope);
       if (!ed) return { ok: false, reason: 'no-editor' };
+      if (typeof coexist?.writeComposerTextSafely === 'function') {
+        const ok = coexist.writeComposerTextSafely(doc, win, ed, text, { replace: true });
+        return ok ? { ok: true } : { ok: false, reason: 'insert-failed' };
+      }
       try {
         ed.focus?.();
         const tag = String(ed.tagName || '').toUpperCase();
@@ -247,6 +289,7 @@
           ed.value = text;
           ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
         } else {
+          const isLexical = ed.getAttribute?.('data-lexical-editor') === 'true';
           // Lexical / contenteditable: select editor contents before overwriting to avoid concatenation
           if (allowOverwrite && existing) {
             let scopedSelect = false;
@@ -273,12 +316,14 @@
               } catch {}
             }
             if (!cleared) {
+              if (isLexical) return { ok: false, reason: 'insert-failed' };
               ed.textContent = '';
               ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
             }
           } else if (typeof doc.execCommand === 'function' && doc.execCommand('insertText', false, text)) {
             // inserted/replaced via execCommand
           } else {
+            if (isLexical) return { ok: false, reason: 'insert-failed' };
             ed.textContent = text;
             ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
           }
@@ -392,8 +437,12 @@
       }
       if (destroyed || !enabled) return null;
       const scope = getScope();
+      const prevCid = currentCid;
       const cid = explicitCid || ctxSrc.detectCascadeId(doc, win, scope);
       currentCid = cid;
+      if (prevCid && cid && cid !== prevCid) {
+        enterHydrationGrace(prevCid);
+      }
       const liveText = ctxSrc.readComposerDraft(doc, scope);
       const prevText = lastLiveDraftByCid.get(cid) || '';
       const turnCount = countUserTurns(scope);
@@ -401,6 +450,8 @@
       const streaming = ctxSrc.isTurnStreaming(doc, scope);
 
       if (isSaveableDraft(liveText)) {
+        clearHydrationTimer();
+        cidSwitchedAtMs = 0;
         lastLiveDraftByCid.set(cid, liveText);
         lastTurnCountByCid.set(cid, turnCount);
         dismissedCids.delete(cid);
@@ -409,6 +460,11 @@
         });
         hideBar();
         return saved;
+      }
+
+      if (isInHydrationGrace()) {
+        lastTurnCountByCid.set(cid, turnCount);
+        return null;
       }
 
       // If editor cleared because user sent the message (streaming started or turn count increased), clear stored draft
@@ -446,9 +502,9 @@
         if (capturedCid && activeCid && activeCid !== capturedCid) {
           // Tab switched during debounce: persist captured draft to original cid without clobbering the new tab
           if (isSaveableDraft(capturedText)) {
-            lastLiveDraftByCid.set(capturedCid, capturedText);
             saveDraft(storage, capturedCid, capturedText, nowFn());
           }
+          lastLiveDraftByCid.delete(capturedCid);
           return;
         }
         flushNow(capturedCid);
@@ -554,10 +610,18 @@
       const onInput = () => {
         if (destroyed || !enabled) return;
         if (!suppressHistoryReset) historyCursor = -1;
+        const prevCid = currentCid;
         const cid = ctxSrc.detectCascadeId(doc, win, getScope());
         currentCid = cid;
+        if (prevCid && cid && cid !== prevCid) {
+          enterHydrationGrace(prevCid);
+        }
         const txt = ctxSrc.readComposerDraft(doc, getScope());
-        if (txt) hideBar();
+        if (txt) {
+          clearHydrationTimer();
+          cidSwitchedAtMs = 0;
+          hideBar();
+        }
         scheduleFlush(cid);
       };
       const onKeyDown = (ev) => {
@@ -592,8 +656,16 @@
         return;
       }
       const scope = getScope();
+      const prevCid = currentCid;
       const cid = ctxSrc.detectCascadeId(doc, win, scope);
       currentCid = cid;
+      if (prevCid && cid && cid !== prevCid) {
+        enterHydrationGrace(prevCid);
+      }
+      if (isInHydrationGrace()) {
+        hideBar();
+        return;
+      }
       const liveText = ctxSrc.readComposerDraft(doc, scope);
       if (liveText.length > 0 || dismissedCids.has(cid)) {
         hideBar();
@@ -670,18 +742,28 @@
       const cid = ctxSrc.detectCascadeId(doc, win, scope);
       const prevCid = currentCid;
       currentCid = cid;
+      if (prevCid && cid && cid !== prevCid) {
+        enterHydrationGrace(prevCid);
+      }
       const liveText = ctxSrc.readComposerDraft(doc, scope);
       const turnCount = countUserTurns(scope);
       const prevTurns = lastTurnCountByCid.get(cid);
       const streaming = ctxSrc.isTurnStreaming(doc, scope);
 
       if (isSaveableDraft(liveText)) {
+        clearHydrationTimer();
+        cidSwitchedAtMs = 0;
         lastLiveDraftByCid.set(cid, liveText);
         lastTurnCountByCid.set(cid, turnCount);
         saveDraft(storage, cid, liveText, nowFn(), {
           attachmentCount: countComposerAttachments(scope),
         });
-      } else if (!liveText && cid === prevCid && (streaming || (prevTurns !== undefined && turnCount > prevTurns))) {
+      } else if (
+        !liveText &&
+        !isInHydrationGrace() &&
+        cid === prevCid &&
+        (streaming || (prevTurns !== undefined && turnCount > prevTurns))
+      ) {
         markCurrentSent(cid);
       }
       lastTurnCountByCid.set(cid, turnCount);
@@ -705,12 +787,12 @@
     };
     const onSendClick = (ev) => {
       if (destroyed || !enabled || !ev?.target) return;
+      if (ctxSrc?.isSidebarOrAuxiliaryNode?.(ev.target)) return;
       const btn = ev.target.closest?.(
         '[data-testid="input-send-button"], [data-testid="send-button"], button[type="submit"]'
       );
-      if (btn) {
-        markCurrentSent();
-      }
+      if (!btn || ctxSrc?.isSidebarOrAuxiliaryNode?.(btn)) return;
+      markCurrentSent();
     };
 
     addL(doc, 'pointerdown', onPaneFocus, true);
@@ -728,6 +810,8 @@
       enabled = Boolean(v);
       if (!enabled) {
         if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+        clearHydrationTimer();
+        cidSwitchedAtMs = 0;
         hideBar();
       } else {
         sync();
@@ -738,12 +822,14 @@
       if (destroyed) return;
       destroyed = true;
       if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+      clearHydrationTimer();
+      cidSwitchedAtMs = 0;
       if (boundEditorOff) { try { boundEditorOff(); } catch {} boundEditorOff = null; boundEditor = null; }
       while (listeners.length) {
         try { listeners.pop()(); } catch {}
       }
-      try { barEl?.remove?.(); } catch {}
-      try { createdStyleEl?.remove?.(); } catch {}
+      safeRemove(barEl);
+      safeRemove(createdStyleEl);
       barEl = msgEl = restoreBtn = discardBtn = createdStyleEl = null;
       activePaneEl = null;
       lastLiveDraftByCid.clear();

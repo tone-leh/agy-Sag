@@ -15,7 +15,15 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { EXT_PACK_LOCALES, buildInjectExpression, computeCoreHash, readExtendedPackFile } from './bundle.mjs';
+import { fileURLToPath } from 'node:url';
+import {
+  CORE_FILES,
+  EXT_PACK_LOCALES,
+  buildInjectExpression,
+  computeCoreHash,
+  readExtendedPackFile,
+  resolveInjectExtLocale,
+} from './bundle.mjs';
 import {
   buildConfigPatchFromOpts,
   discoverCdpPort,
@@ -42,6 +50,10 @@ export const HOST_BRIDGE_BINDING_NAME = '__agSagHostBridge';
 const MAX_EXECUTION_CONTEXTS = 1024;
 const HOST_BRIDGE_HANDSHAKE_TIMEOUT_MS = 8000;
 const STORAGE_AUDIT_CACHE_TTL_MS = 15_000;
+const MAX_ZOMBIE_BRIDGE_BIND_FAILURES = 3;
+const WATCH_DAEMON_DIR = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_REPO_ROOT = path.resolve(WATCH_DAEMON_DIR, '..');
+const CORE_SOURCES_DIR = path.join(DEFAULT_REPO_ROOT, 'packages', 'core');
 
 export function serializeInlineJson(value) {
   return (JSON.stringify(value) ?? 'null').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
@@ -144,6 +156,8 @@ export class HostBridgeSession {
     this._handshakeTimer = null;
     this._lastNovStateSig = undefined;
     this._lastNovFeedSig = undefined;
+    this._bindingFailureCount = 0;
+    this._unreadyBindAttempts = 0;
   }
 
   _clearHandshakeTimer() {
@@ -155,12 +169,24 @@ export class HostBridgeSession {
 
   _pruneExecutionContexts() {
     if (this._executionContexts.size <= MAX_EXECUTION_CONTEXTS) return;
+    // Pass 1: evict non-default contexts first (workers/isolated worlds) to protect main-frame default context
     for (const [entryId, entry] of this._executionContexts) {
       if (this._executionContexts.size <= MAX_EXECUTION_CONTEXTS) break;
       if (entryId === this.mainContextId) continue;
-      if (this._authoritativeMainFrameId && entry.frameId === this._authoritativeMainFrameId) continue;
-      this._executionContexts.delete(entryId);
+      if (entry.isDefault === false) {
+        this._executionContexts.delete(entryId);
+      }
     }
+    // Pass 2: evict contexts belonging to non-authoritative frames
+    if (this._executionContexts.size > MAX_EXECUTION_CONTEXTS) {
+      for (const [entryId, entry] of this._executionContexts) {
+        if (this._executionContexts.size <= MAX_EXECUTION_CONTEXTS) break;
+        if (entryId === this.mainContextId) continue;
+        if (this._authoritativeMainFrameId && entry.frameId === this._authoritativeMainFrameId) continue;
+        this._executionContexts.delete(entryId);
+      }
+    }
+    // Pass 3: hard cap fallback
     if (this._executionContexts.size > MAX_EXECUTION_CONTEXTS) {
       for (const entryId of this._executionContexts.keys()) {
         if (this._executionContexts.size <= MAX_EXECUTION_CONTEXTS) break;
@@ -234,6 +260,8 @@ export class HostBridgeSession {
     });
     if (!sent) return false;
     this._boundContextId = ctxId;
+    this._bindingFailureCount = 0;
+    this._unreadyBindAttempts = 0;
     this.onEvent('bridge-ready', {
       targetId: this.targetId,
       mainFrameId: this.mainFrameId,
@@ -350,6 +378,7 @@ export class HostBridgeSession {
           this.mainFrameId = null;
           this.mainContextId = null;
           this._boundContextId = null;
+          this._bindingFailureCount += 1;
           this.onEvent('bridge-frame-tree-failed', {
             targetId: this.targetId,
             error: !urlAllowed
@@ -673,32 +702,36 @@ export class SagWatchDaemon {
     this.storageDataDir = options.storageDataDir || undefined;
     this.translatorService = options.translatorService || new TranslatorService(options.translatorOpts || {});
     this._defaultInjectCache = new Map();
-    this._cachedCoreHash = null;
     this._storageAuditCache = new Map();
+    this._novConfigStatCache = null;
+    this.extPacksRepoRoot = options.extPacksRepoRoot || undefined;
     this.buildInject =
       options.buildInject ||
       (({ extLocale = null } = {}) => {
-        const effectiveLocale = this.deferExtPack ? '' : String(extLocale || this.config?.hostI18nLocale || '');
-        const cached = this._defaultInjectCache.get(effectiveLocale);
+        const deferFlag = Boolean(this.deferExtPack);
+        const rawLocale = deferFlag ? '' : String(extLocale || this.config?.hostI18nLocale || '');
+        const normalizedLocale = deferFlag ? '' : (resolveInjectExtLocale(rawLocale) || '');
+        const cfgKey = JSON.stringify(this.config ?? null);
+        const srcSig = this._computeInjectSourceSignature(normalizedLocale);
+        const cacheKey = `${deferFlag ? '1' : '0'}|${normalizedLocale}|${cfgKey}|${srcSig}`;
+        const cached = this._defaultInjectCache.get(cacheKey);
         if (cached) return cached;
         const expression = buildInjectExpression(this.config, {
           source: 'standalone',
-          extLocale: effectiveLocale || null,
-          deferExtPack: this.deferExtPack,
+          extLocale: normalizedLocale || null,
+          deferExtPack: deferFlag,
           respectManualRemove: true,
         });
         const hashMatch = expression.match(/const targetHash = "([a-f0-9]+)";/);
-        const codeHash = hashMatch ? hashMatch[1] : (this._cachedCoreHash ||= computeCoreHash());
-        this._cachedCoreHash = codeHash;
+        const codeHash = hashMatch ? hashMatch[1] : computeCoreHash();
         const built = { codeHash, expression };
         if (this._defaultInjectCache.size >= 16) {
           const oldestKey = this._defaultInjectCache.keys().next().value;
           if (oldestKey !== undefined) this._defaultInjectCache.delete(oldestKey);
         }
-        this._defaultInjectCache.set(effectiveLocale, built);
+        this._defaultInjectCache.set(cacheKey, built);
         return built;
       });
-    this.extPacksRepoRoot = options.extPacksRepoRoot || undefined;
     this.onEvent = typeof options.onEvent === 'function' ? options.onEvent : () => {};
     this.now = options.now || (() => Date.now());
     this.setTimer = options.setTimer || ((fn, ms) => setTimeout(fn, ms));
@@ -736,6 +769,67 @@ export class SagWatchDaemon {
     return this.currentDelayMs;
   }
 
+  _computeInjectSourceSignature(normalizedExtLocale = '') {
+    const parts = [];
+    for (const file of CORE_FILES) {
+      try {
+        const st = fs.statSync(path.join(CORE_SOURCES_DIR, file));
+        parts.push(`${st.mtimeMs}:${st.size}`);
+      } catch {
+        parts.push('missing');
+      }
+    }
+    if (normalizedExtLocale && EXT_PACK_LOCALES.includes(normalizedExtLocale)) {
+      const repoRoot = this.extPacksRepoRoot ? path.resolve(this.extPacksRepoRoot) : DEFAULT_REPO_ROOT;
+      const extPath = path.join(repoRoot, 'packages', 'core', 'locales', 'ext', `${normalizedExtLocale}.json`);
+      try {
+        const st = fs.statSync(extPath);
+        parts.push(`ext:${st.mtimeMs}:${st.size}`);
+      } catch {
+        parts.push('ext:missing');
+      }
+    }
+    return parts.join(',');
+  }
+
+  _statNovConfigFast(configPath, pluginDir) {
+    let cfgSig = 'missing';
+    if (configPath) {
+      try {
+        const st = fs.statSync(configPath);
+        if (st.isFile()) cfgSig = `${st.ino}:${st.mtimeMs}:${st.size}`;
+      } catch {}
+    }
+    let pluginSig = 'none';
+    if (pluginDir) {
+      try {
+        const st = fs.statSync(pluginDir);
+        if (st.isDirectory()) pluginSig = `${st.ino}:${st.mtimeMs}`;
+      } catch {}
+    }
+    return `${cfgSig}|${pluginSig}`;
+  }
+
+  _readNovStateWithStatFastPath({ forceRead = false } = {}) {
+    const cached = this._novConfigStatCache;
+    if (!forceRead && cached && cached.configPath && cached.statSig && !cached.statSig.startsWith('missing|')) {
+      const curStatSig = this._statNovConfigFast(cached.configPath, cached.pluginDir);
+      if (curStatSig === cached.statSig) {
+        return cached.state;
+      }
+    }
+    const state = readNovState(this.novBridgeOpts);
+    const configPath = state?.configPath || null;
+    const pluginDir = state?.pluginDir || null;
+    this._novConfigStatCache = {
+      configPath,
+      pluginDir,
+      statSig: this._statNovConfigFast(configPath, pluginDir),
+      state,
+    };
+    return state;
+  }
+
   _computeNovSignature(state) {
     if (!state) return 'none';
     return `${state.installed ? '1' : '0'}:${state.version || ''}:${state.configPath || ''}:${state.signature || 'none'}`;
@@ -753,7 +847,7 @@ export class SagWatchDaemon {
     if (this.bridgeSessions.get(key) !== session) return false;
     let state;
     try {
-      state = readNovState(this.novBridgeOpts);
+      state = this._readNovStateWithStatFastPath({ forceRead: true });
     } catch {
       return false;
     }
@@ -890,6 +984,12 @@ export class SagWatchDaemon {
     // Delegate size check (64KB) and JSON parsing exclusively to handleBridgePayload
     const res = handleBridgePayload(rawPayload, this.novBridgeOpts);
     if (res.ok && res._meta?.mutated && res.data) {
+      this._novConfigStatCache = {
+        configPath: res.data.configPath || null,
+        pluginDir: res.data.pluginDir || null,
+        statSig: this._statNovConfigFast(res.data.configPath || null, res.data.pluginDir || null),
+        state: res.data,
+      };
       const nextSig = this._computeNovSignature(res.data);
       this.lastNovSignature = nextSig;
       this._novSignatureInitialized = true;
@@ -919,17 +1019,33 @@ export class SagWatchDaemon {
     if (this._stopped || !this.enableHostBridge || !wsUrl) return null;
     const existing = this.bridgeSessions.get(key);
     if (existing && !existing.closed && existing.wsUrl === wsUrl) {
+      const isReady = this._isSessionReady(existing);
+      const isOpen = Boolean(existing.isOpen?.());
       if (reInjected) {
         existing.ensureBinding?.();
-        const isReady =
-          typeof existing.isMainContextReady === 'function'
-            ? existing.isMainContextReady()
-            : Boolean(existing.isOpen?.());
         if (isReady) {
+          existing._unreadyBindAttempts = 0;
           this._pushInitialNovState(existing, key);
         }
+        return existing;
       }
-      return existing;
+      if (isOpen && !isReady) {
+        const failCount = (existing._unreadyBindAttempts || 0) + (existing._bindingFailureCount || 0);
+        if (failCount >= MAX_ZOMBIE_BRIDGE_BIND_FAILURES) {
+          try { existing.close?.(); } catch {}
+          this.bridgeSessions.delete(key);
+        } else {
+          const hasInFlightFrameTree = existing._frameTreeReqId !== null && existing._frameTreeReqId !== undefined;
+          if (!hasInFlightFrameTree) {
+            existing._unreadyBindAttempts = (existing._unreadyBindAttempts || 0) + 1;
+            existing.ensureBinding?.();
+          }
+          return existing;
+        }
+      } else {
+        if (isReady) existing._unreadyBindAttempts = 0;
+        return existing;
+      }
     }
     if (existing) {
       try { existing.close?.(); } catch {}
@@ -984,7 +1100,7 @@ export class SagWatchDaemon {
     }
     let state;
     try {
-      state = readNovState(this.novBridgeOpts);
+      state = this._readNovStateWithStatFastPath({ forceRead: Boolean(forcePush) });
     } catch {
       return { pushed: 0, changed: false };
     }

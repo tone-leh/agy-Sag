@@ -164,6 +164,7 @@
     const doc = options.doc || win?.document || null;
     const storage = options.storage !== undefined ? options.storage : win?.localStorage || null;
     const ctxSrc = options.contextSource || resolveDep('__agSgContextSource', './context-source.js');
+    const coexist = options.coexist || resolveDep('__agSgCoexist', './coexist.js');
     const exporter = options.exporter || resolveDep('__agSgPrecompactExport', './precompact-export.js');
     const draftMod = options.draftGuardMod || resolveDep('__agSgDraftGuard', './draft-guard.js');
     const i18n = options.i18n || resolveDep('__agSgI18n', './i18n.js');
@@ -179,18 +180,26 @@
     function writeEditor(text) {
       const ed = ctxSrc.findComposerEditor(doc);
       if (!ed) return false;
+      if (typeof coexist?.writeComposerTextSafely === 'function') {
+        return Boolean(coexist.writeComposerTextSafely(doc, win, ed, text, { replace: true }));
+      }
       try {
         ed.focus?.();
         const tag = String(ed.tagName || '').toUpperCase();
         if (tag === 'TEXTAREA' || tag === 'INPUT') {
           ed.value = text;
           ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
-        } else if (typeof doc.execCommand === 'function' && doc.execCommand('insertText', false, text)) {
-          // inserted via execCommand
-        } else {
-          ed.textContent = text;
-          ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
+          return true;
         }
+        const isLexical =
+          ed?.getAttribute?.('data-lexical-editor') === 'true' ||
+          Boolean(ed?.closest?.('[data-lexical-editor="true"]'));
+        if (typeof doc.execCommand === 'function' && doc.execCommand('insertText', false, text)) {
+          return true;
+        }
+        if (isLexical) return false;
+        ed.textContent = text;
+        ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
         return true;
       } catch {
         return false;
@@ -200,12 +209,19 @@
     function clearEditor() {
       const ed = ctxSrc.findComposerEditor(doc);
       if (!ed) return;
+      if (typeof coexist?.writeComposerTextSafely === 'function') {
+        coexist.writeComposerTextSafely(doc, win, ed, '', { replace: true });
+        return;
+      }
       try {
         const tag = String(ed.tagName || '').toUpperCase();
         if (tag === 'TEXTAREA' || tag === 'INPUT') {
           ed.value = '';
           ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
         } else {
+          const isLexical =
+            ed?.getAttribute?.('data-lexical-editor') === 'true' ||
+            Boolean(ed?.closest?.('[data-lexical-editor="true"]'));
           ed.focus?.();
           if (typeof win?.getSelection === 'function' && typeof doc.createRange === 'function') {
             try {
@@ -219,7 +235,7 @@
           if (typeof doc.execCommand === 'function') {
             try { doc.execCommand('delete', false); } catch {}
           }
-          if (String(ed.textContent || '').replace(/\u200B/g, '').trim()) {
+          if (!isLexical && String(ed.textContent || '').replace(/\u200B/g, '').trim()) {
             ed.textContent = '';
             ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
           }

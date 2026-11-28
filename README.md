@@ -207,7 +207,7 @@ Antigravity 2.0 Host (Electron 44 + language_server localhost UI)
 ## Development & Verification
 
 ```bash
-npm test                 # Run full native node:test suite (253/253 passing, zero external deps)
+npm test                 # Run full native node:test suite (255/255 passing, zero external deps)
 npm run i18n:validate    # Validate all 10 built-in + 9 extended UI translation packs (0 errors)
 npm run workbench:smoke  # Run automated HTTP smoke check against the offline workbench (22 markers)
 npm run doctor           # Read-only local environment diagnostics

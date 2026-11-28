@@ -1305,6 +1305,34 @@ export async function executeLaunchPlan(plan, options = {}) {
     return { ...plan, dryRun: true, executed: false };
   }
 
+  const spec = plan.launchSpec || {};
+  const executableFound =
+    typeof plan.executableFound === 'boolean'
+      ? plan.executableFound
+      : typeof spec.executableFound === 'boolean'
+        ? spec.executableFound
+        : true;
+  const explicitTargetPath =
+    typeof plan.executablePath === 'string' && plan.executablePath.trim()
+      ? plan.executablePath.trim()
+      : spec.command === 'open' && typeof spec.args?.[1] === 'string' && /[\\/]/.test(spec.args[1])
+        ? spec.args[1]
+        : typeof spec.command === 'string'
+          ? spec.command
+          : '';
+  const hasExplicitMissingExecutable = executableFound === false && /[\\/]/.test(explicitTargetPath);
+
+  if (plan.action !== 'graceful-relaunch' && hasExplicitMissingExecutable) {
+    return {
+      ...plan,
+      ok: false,
+      action: 'blocked-missing-executable',
+      code: 'EXECUTABLE_NOT_FOUND',
+      error: `Antigravity executable not found at explicit path: ${explicitTargetPath}`,
+      executed: false,
+    };
+  }
+
   const nowFn = options.nowFn || (() => Date.now());
   const spawnFn = options.spawnFn || defaultSpawnDetached;
 
@@ -1336,6 +1364,17 @@ export async function executeLaunchPlan(plan, options = {}) {
         code: quitRes.code,
         error: quitRes.error,
         quitResult: quitRes,
+        updatedState,
+        executed: false,
+      };
+    }
+    if (hasExplicitMissingExecutable) {
+      return {
+        ...plan,
+        ok: false,
+        action: 'blocked-missing-executable',
+        code: 'EXECUTABLE_NOT_FOUND',
+        error: `Antigravity executable not found at explicit path: ${explicitTargetPath}`,
         updatedState,
         executed: false,
       };

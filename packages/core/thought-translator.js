@@ -17,6 +17,9 @@
   const MAX_CACHE = 200;
   const MAX_AUTO_PANELS_PER_SCAN = 5;
   const MAX_AUTO_CONCURRENT = 2;
+  const MAX_TITLES_PER_SCAN = 15;
+  const MAX_TITLE_CONCURRENT = 2;
+  const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 
   function resolveDep(globalKey, relPath) {
     if (globalRoot && globalRoot[globalKey]) return globalRoot[globalKey];
@@ -111,22 +114,80 @@
 
     let destroyed = false;
     let observer = null;
+    let busOff = null;
     let scanTimer = null;
     let yieldedToPrism = false;
+    let runEpoch = 0;
 
+    const requestTimeoutMs = Math.max(100, Number(options.requestTimeoutMs) || DEFAULT_REQUEST_TIMEOUT_MS);
     const cache = new Map();
     const inFlightKeys = new Set();
-    const panelState = new WeakMap(); // panel -> { sourceText, translated, showOriginal, boxEl, hiddenOriginalNodes }
+    let panelState = new WeakMap(); // panel -> { sourceText, translated, showOriginal, boxEl }
+    const hiddenSrcPanels = new Set(); // track panels with data-ag-sag-thought-hide-src for O(k) cleanup
     const titleOriginals = new WeakMap(); // textNode -> { orig, translated }
     const modifiedTitles = new Set(); // track Text nodes for 100% lossless restore
     const autoQueue = [];
     const autoQueuedSet = new WeakSet();
     let autoInFlight = 0;
+    const titleQueue = [];
+    const titleQueuedSet = new WeakSet();
+    let titleInFlight = 0;
 
     const safeAppend = (parent, node) => {
       if (typeof coexist?.safeAppendChild === 'function') return coexist.safeAppendChild(parent, node);
       try { parent?.appendChild?.(node); return true; } catch { return false; }
     };
+    const safeInsert = (parent, node, ref) => {
+      if (typeof coexist?.safeInsertBefore === 'function') return coexist.safeInsertBefore(parent, node, ref);
+      try {
+        if (ref && ref.parentElement === parent && typeof parent.insertBefore === 'function') {
+          parent.insertBefore(node, ref);
+          return true;
+        }
+        parent?.appendChild?.(node);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const safeRemove = (node) => {
+      if (typeof coexist?.safeRemoveNode === 'function') return coexist.safeRemoveNode(node);
+      try { node?.remove?.(); return true; } catch { return false; }
+    };
+
+    const requestWithTimeout = (req) =>
+      new Promise((resolve, reject) => {
+        let settled = false;
+        const timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          resolve({ ok: false, error: 'Translation timeout' });
+        }, requestTimeoutMs);
+        timer?.unref?.();
+        let reqPromise;
+        try {
+          reqPromise = Promise.resolve(options.onRequestTranslate(req));
+        } catch (err) {
+          settled = true;
+          clearTimeout(timer);
+          reject(err);
+          return;
+        }
+        reqPromise.then(
+          (res) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(res);
+          },
+          (err) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            reject(err);
+          }
+        );
+      });
 
     const pruneDetachedTitles = () => {
       for (const tn of Array.from(modifiedTitles)) {
@@ -143,11 +204,18 @@
       }
     };
 
+    const clearTitleQueue = () => {
+      while (titleQueue.length) {
+        const item = titleQueue.pop();
+        if (item?.textNode) titleQueuedSet.delete(item.textNode);
+      }
+    };
+
     const drainAutoQueue = () => {
       while (autoInFlight < MAX_AUTO_CONCURRENT && autoQueue.length > 0 && !destroyed && enabled && triggerMode === 'auto') {
         const panel = autoQueue.shift();
+        if (panel) autoQueuedSet.delete(panel);
         if (!panel || panel.isConnected === false) continue;
-        autoQueuedSet.delete(panel);
         autoInFlight += 1;
         void Promise.resolve(translatePanel(panel, { force: false }))
           .catch(() => {})
@@ -210,14 +278,17 @@
       st.translated = translatedText;
       if (meta.sourceText) st.sourceText = meta.sourceText;
 
-      let box = panel.querySelector?.(`.${BOX_CLASS}[data-ag-sag-owned="1"]`) || st.boxEl;
+      let box = panel.querySelector?.(`.${BOX_CLASS}[data-ag-sag-owned="1"]`) || null;
+      if (!box && st.boxEl && st.boxEl.isConnected !== false && st.boxEl.parentElement === panel) {
+        box = st.boxEl;
+      }
       if (!box) {
         box = coexist.markOwnedNoTranslate(doc.createElement('div'));
         box.className = BOX_CLASS;
         box.setAttribute('data-testid', 'ag-sag-thought-box');
         if (!safeAppend(panel, box)) return;
-        st.boxEl = box;
       }
+      st.boxEl = box;
 
       while (box.firstChild) box.removeChild(box.firstChild);
 
@@ -289,16 +360,12 @@
       const hideSource = viewMode === 'translated' && !st.showOriginal && Boolean(st.translated);
       const hideTranslated = viewMode === 'bilingual' && st.showOriginal;
       if (body) body.hidden = hideTranslated;
-      const children = panel.children ? Array.from(panel.children) : [];
-      for (const ch of children) {
-        if (ch === box || ch.getAttribute?.('data-ag-sag-owned') === '1') continue;
-        if (hideSource) {
-          ch.setAttribute('data-ag-sag-thought-hidden', '1');
-          if (ch.style) ch.style.display = 'none';
-        } else if (ch.getAttribute?.('data-ag-sag-thought-hidden') === '1') {
-          ch.removeAttribute('data-ag-sag-thought-hidden');
-          if (ch.style) ch.style.display = '';
-        }
+      if (hideSource) {
+        panel.setAttribute?.('data-ag-sag-thought-hide-src', '1');
+        hiddenSrcPanels.add(panel);
+      } else if (panel.getAttribute?.('data-ag-sag-thought-hide-src') === '1' || hiddenSrcPanels.has(panel)) {
+        panel.removeAttribute?.('data-ag-sag-thought-hide-src');
+        hiddenSrcPanels.delete(panel);
       }
     };
 
@@ -317,22 +384,22 @@
         ev?.stopPropagation?.();
         void translatePanel(panel, { force: false });
       });
-      if (typeof btn.insertAdjacentElement === 'function') {
-        try { btn.insertAdjacentElement('afterend', chip); return; } catch {}
-      }
-      safeAppend(btn.parentElement, chip);
+      safeInsert(btn.parentElement, chip, btn.nextElementSibling || null);
     };
 
     const translatePanel = async (panel, { force = false } = {}) => {
-      if (destroyed || !enabled || !panel) return { ok: false, reason: 'disabled' };
+      if (destroyed || !enabled || !panel || yieldedToPrism || isPrismThoughtActive() || panel.isConnected === false) {
+        return { ok: false, reason: 'disabled' };
+      }
       const text = extractThoughtText(panel);
       if (!text || text.length < 4) return { ok: false, reason: 'empty' };
+      const reqEngine = engine;
       const lang = getEffectiveTargetLang();
-      const cacheKey = `thought|${engine}|${lang}|${text}`;
+      const cacheKey = `thought|${reqEngine}|${lang}|${text}`;
       if (!force) {
         const hit = getCache(cacheKey);
         if (hit) {
-          renderTranslatedBox(panel, hit, { sourceText: text, engine, cached: true });
+          renderTranslatedBox(panel, hit, { sourceText: text, engine: reqEngine, cached: true });
           return { ok: true, cached: true, translated: hit };
         }
       }
@@ -341,22 +408,35 @@
         renderTranslatedBox(panel, '', { sourceText: text, error: 'Watch sidecar bridge offline' });
         return { ok: false, reason: 'bridge-offline' };
       }
+      const epoch = runEpoch;
       inFlightKeys.add(cacheKey);
       renderTranslatedBox(panel, '', { sourceText: text, loading: true });
       try {
-        const res = await options.onRequestTranslate({
-          engine,
+        const res = await requestWithTimeout({
+          engine: reqEngine,
           targetLang: lang,
           kind: 'thought',
           text,
           force,
         });
-        if (destroyed || !enabled) return { ok: false, reason: 'aborted' };
+        if (
+          epoch !== runEpoch ||
+          destroyed ||
+          !enabled ||
+          yieldedToPrism ||
+          isPrismThoughtActive() ||
+          panel.isConnected === false
+        ) {
+          return { ok: false, reason: 'aborted' };
+        }
+        if (extractThoughtText(panel) !== text) {
+          return { ok: false, reason: 'stale-source' };
+        }
         if (res?.ok && res.data?.translated) {
           setCache(cacheKey, res.data.translated);
           renderTranslatedBox(panel, res.data.translated, {
             sourceText: text,
-            engine: res.data.engine || engine,
+            engine: res.data.engine || reqEngine,
             cached: Boolean(res.data.cached),
           });
           return { ok: true, translated: res.data.translated };
@@ -364,7 +444,15 @@
         renderTranslatedBox(panel, '', { sourceText: text, error: res?.error || 'Translation failed' });
         return { ok: false, error: res?.error || 'Translation failed' };
       } catch (err) {
-        if (!destroyed && enabled) {
+        if (
+          epoch === runEpoch &&
+          !destroyed &&
+          enabled &&
+          !yieldedToPrism &&
+          !isPrismThoughtActive() &&
+          panel.isConnected !== false &&
+          extractThoughtText(panel) === text
+        ) {
           renderTranslatedBox(panel, '', { sourceText: text, error: err?.message || 'Translation failed' });
         }
         return { ok: false, error: err?.message || 'Translation failed' };
@@ -373,22 +461,82 @@
       }
     };
 
+    const drainTitleQueue = () => {
+      while (
+        titleInFlight < MAX_TITLE_CONCURRENT &&
+        titleQueue.length > 0 &&
+        !destroyed &&
+        enabled &&
+        translateTitles &&
+        !yieldedToPrism &&
+        !isPrismThoughtActive()
+      ) {
+        const task = titleQueue.shift();
+        if (task?.textNode) titleQueuedSet.delete(task.textNode);
+        if (!task || !task.textNode || task.textNode.isConnected === false || task.textNode.parentElement?.isConnected === false) {
+          continue;
+        }
+        if (task.epoch !== runEpoch) continue;
+        if (inFlightKeys.has(task.key)) continue;
+        inFlightKeys.add(task.key);
+        titleInFlight += 1;
+        void requestWithTimeout({
+          engine: task.engine,
+          targetLang: task.lang,
+          kind: 'title',
+          text: task.origText,
+          force: false,
+        })
+          .then((res) => {
+            if (
+              task.epoch !== runEpoch ||
+              destroyed ||
+              !enabled ||
+              !translateTitles ||
+              yieldedToPrism ||
+              isPrismThoughtActive() ||
+              task.textNode.isConnected === false ||
+              task.textNode.parentElement?.isConnected === false
+            ) {
+              return;
+            }
+            if (res?.ok && res.data?.translated) {
+              const tr = String(res.data.translated).trim();
+              if (!tr) return;
+              setCache(task.key, tr);
+              titleOriginals.set(task.textNode, { orig: task.origText, translated: tr });
+              modifiedTitles.add(task.textNode);
+              try { task.textNode.nodeValue = tr; } catch {}
+            }
+          })
+          .catch(() => {})
+          .finally(() => {
+            inFlightKeys.delete(task.key);
+            titleInFlight = Math.max(0, titleInFlight - 1);
+            if (!destroyed && enabled && translateTitles && !yieldedToPrism) drainTitleQueue();
+          });
+      }
+    };
+
     const scanTitles = () => {
-      if (!doc || !enabled || !translateTitles || yieldedToPrism) return;
+      if (!doc || !enabled || !translateTitles || yieldedToPrism || isPrismThoughtActive()) return;
       if (typeof options.onRequestTranslate !== 'function') return;
+      const reqEngine = engine;
       const lang = getEffectiveTargetLang();
+      const epoch = runEpoch;
       const nodes = Array.from(doc.querySelectorAll?.(TITLE_SEL) || []);
+      let batchQueued = 0;
       for (const el of nodes) {
-        if (!el || el.getAttribute?.('data-ag-sag-owned') === '1') continue;
+        if (!el || el.isConnected === false || el.getAttribute?.('data-ag-sag-owned') === '1') continue;
         // Find primary leaf text node
         const textNode = findFirstMeaningfulTextNode(el);
-        if (!textNode) continue;
+        if (!textNode || textNode.isConnected === false) continue;
         const curText = String(textNode.nodeValue || '').trim();
         if (!curText || curText.length < 3 || curText.length > 200) continue;
         const tracked = titleOriginals.get(textNode);
         if (tracked && tracked.translated === curText) continue;
         const origText = tracked ? tracked.orig : curText;
-        const key = `title|${engine}|${lang}|${origText}`;
+        const key = `title|${reqEngine}|${lang}|${origText}`;
         const hit = getCache(key);
         if (hit) {
           if (!tracked) {
@@ -400,27 +548,13 @@
           try { textNode.nodeValue = hit; } catch {}
           continue;
         }
-        if (inFlightKeys.has(key)) continue;
-        inFlightKeys.add(key);
-        void Promise.resolve(
-          options.onRequestTranslate({ engine, targetLang: lang, kind: 'title', text: origText, force: false })
-        )
-          .then((res) => {
-            if (destroyed || !enabled || !translateTitles) return;
-            if (res?.ok && res.data?.translated) {
-              const tr = String(res.data.translated).trim();
-              if (!tr) return;
-              setCache(key, tr);
-              titleOriginals.set(textNode, { orig: origText, translated: tr });
-              modifiedTitles.add(textNode);
-              try { textNode.nodeValue = tr; } catch {}
-            }
-          })
-          .catch(() => {})
-          .finally(() => {
-            inFlightKeys.delete(key);
-          });
+        if (batchQueued >= MAX_TITLES_PER_SCAN || titleQueue.length >= MAX_TITLES_PER_SCAN) break;
+        if (inFlightKeys.has(key) || titleQueuedSet.has(textNode)) continue;
+        titleQueuedSet.add(textNode);
+        titleQueue.push({ textNode, origText, key, engine: reqEngine, lang, epoch });
+        batchQueued += 1;
       }
+      drainTitleQueue();
     };
 
     function findFirstMeaningfulTextNode(rootEl) {
@@ -453,14 +587,18 @@
 
     const cleanupDom = () => {
       restoreTitles();
+      panelState = new WeakMap();
       if (!doc) return;
       try {
-        doc.querySelectorAll?.(`.${BOX_CLASS}[data-ag-sag-owned="1"], .${BAR_CLASS}[data-ag-sag-owned="1"]`)?.forEach?.((n) => n.remove?.());
+        doc.querySelectorAll?.(`.${BOX_CLASS}[data-ag-sag-owned="1"], .${BAR_CLASS}[data-ag-sag-owned="1"]`)?.forEach?.((n) => safeRemove(n));
       } catch {}
+      for (const p of Array.from(hiddenSrcPanels)) {
+        try { p.removeAttribute?.('data-ag-sag-thought-hide-src'); } catch {}
+      }
+      hiddenSrcPanels.clear();
       try {
-        doc.querySelectorAll?.('[data-ag-sag-thought-hidden="1"]')?.forEach?.((n) => {
-          n.removeAttribute('data-ag-sag-thought-hidden');
-          if (n.style) n.style.display = '';
+        doc.querySelectorAll?.('[data-ag-sag-thought-hide-src="1"]')?.forEach?.((n) => {
+          n.removeAttribute?.('data-ag-sag-thought-hide-src');
         });
       } catch {}
     };
@@ -468,20 +606,27 @@
     const scanNow = () => {
       if (destroyed || !doc) return;
       if (!enabled) {
+        if (yieldedToPrism) runEpoch += 1;
         yieldedToPrism = false;
         clearAutoQueue();
+        clearTitleQueue();
         cleanupDom();
         return;
       }
       if (isPrismThoughtActive()) {
         if (!yieldedToPrism) {
           yieldedToPrism = true;
+          runEpoch += 1;
           clearAutoQueue();
+          clearTitleQueue();
           cleanupDom();
         }
         return;
       }
-      yieldedToPrism = false;
+      if (yieldedToPrism) {
+        yieldedToPrism = false;
+        runEpoch += 1;
+      }
       pruneDetachedTitles();
 
       const triggers = Array.from(doc.querySelectorAll?.(TRIGGER_SEL) || []);
@@ -512,6 +657,7 @@
       if (translateTitles) {
         scanTitles();
       } else if (modifiedTitles.size > 0) {
+        clearTitleQueue();
         restoreTitles();
       }
     };
@@ -529,7 +675,18 @@
     };
 
     const startObserver = () => {
-      if (observer || !doc || options.autoObserve === false) return;
+      if (busOff || observer || !doc || options.autoObserve === false) return;
+      if (typeof coexist?.getDomMutationBus === 'function') {
+        busOff = coexist.getDomMutationBus(doc, win).subscribe(
+          'thoughtTranslator',
+          () => {
+            if (!enabled || destroyed) return;
+            scheduleScan();
+          },
+          { wakeOnResume: true }
+        );
+        return;
+      }
       const MO = win?.MutationObserver || (typeof MutationObserver !== 'undefined' ? MutationObserver : null);
       if (!MO || !doc.body) return;
       observer = new MO((records) => {
@@ -557,12 +714,19 @@
         clearTimeout(scanTimer);
         scanTimer = null;
       }
+      if (busOff) {
+        try { busOff(); } catch {}
+        busOff = null;
+      }
       try { observer?.disconnect?.(); } catch {}
       observer = null;
     };
 
     const configure = (patch = {}) => {
       const prevEnabled = enabled;
+      const prevEngine = engine;
+      const prevTargetLang = targetLang;
+      const prevConflictPolicy = conflictPolicy;
       if (typeof patch.enabled === 'boolean') enabled = patch.enabled;
       if (typeof patch.engine === 'string') engine = patch.engine;
       if (typeof patch.targetLang === 'string') targetLang = patch.targetLang;
@@ -571,11 +735,20 @@
       if (typeof patch.translateTitles === 'boolean') translateTitles = patch.translateTitles;
       if (patch.conflictPolicy === 'yield' || patch.conflictPolicy === 'takeover') conflictPolicy = patch.conflictPolicy;
 
+      const engineOrLangChanged = engine !== prevEngine || targetLang !== prevTargetLang;
+      if (!enabled || engineOrLangChanged || conflictPolicy !== prevConflictPolicy) {
+        runEpoch += 1;
+        clearAutoQueue();
+        clearTitleQueue();
+      }
+
       if (!enabled) {
         stopObserver();
-        clearAutoQueue();
         cleanupDom();
       } else {
+        if (engineOrLangChanged) {
+          cleanupDom();
+        }
         if (!prevEnabled) startObserver();
         scanNow();
       }
@@ -585,8 +758,10 @@
       if (destroyed) return;
       destroyed = true;
       enabled = false;
+      runEpoch += 1;
       stopObserver();
       clearAutoQueue();
+      clearTitleQueue();
       cleanupDom();
       cache.clear();
       inFlightKeys.clear();

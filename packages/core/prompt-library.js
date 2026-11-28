@@ -448,6 +448,7 @@
     let createdStyleEl = null;
     let keydownOff = null;
     let domObserver = null;
+    let domBusUnsub = null;
     let observerTimer = null;
 
     const getLang = () =>
@@ -472,6 +473,10 @@
         else parent?.appendChild?.(node);
         return true;
       } catch { return false; }
+    };
+    const safeRemove = (node) => {
+      if (typeof coexist?.safeRemoveNode === 'function') return coexist.safeRemoveNode(node);
+      try { node?.remove?.(); return true; } catch { return false; }
     };
 
     function loadSnippets() {
@@ -772,7 +777,7 @@
     }
 
     function removeTrigger() {
-      try { triggerBtn?.remove?.(); } catch {}
+      safeRemove(triggerBtn);
       triggerBtn = null;
     }
 
@@ -850,7 +855,7 @@
     }
 
     function removeModalShell() {
-      try { backdropEl?.remove?.(); } catch {}
+      safeRemove(backdropEl);
       backdropEl = modalEl = searchInputEl = null;
     }
 
@@ -1257,7 +1262,7 @@
     let extraListenersOff = [];
 
     function removeSelectionPill() {
-      try { selPillEl?.remove?.(); } catch {}
+      safeRemove(selPillEl);
       selPillEl = null;
     }
 
@@ -1266,7 +1271,7 @@
         clearTimeout(ctxToastTimer);
         ctxToastTimer = null;
       }
-      try { ctxToastEl?.remove?.(); } catch {}
+      safeRemove(ctxToastEl);
       ctxToastEl = null;
     }
 
@@ -1303,7 +1308,7 @@
     }
 
     function removeContextMenu() {
-      try { ctxMenuEl?.remove?.(); } catch {}
+      safeRemove(ctxMenuEl);
       ctxMenuEl = null;
     }
 
@@ -1627,7 +1632,7 @@
         if (destroyed || !enabled) return;
         if (coexist?.isWindowHibernated?.(doc, win, false)) return;
         ensureTrigger();
-      }, 60);
+      }, 180);
       observerTimer?.unref?.();
     }
 
@@ -1719,32 +1724,50 @@
         addDocL('focusin', onPaneFocus, true);
       }
 
-      if (options.autoObserve !== false && typeof win?.MutationObserver === 'function' && doc.body) {
-        domObserver = new win.MutationObserver((records) => {
-          if (!enabled || destroyed) return;
-          if (coexist?.isWindowHibernated?.(doc, win, false)) return;
-          if (typeof coexist?.isMutationOwnedOnly === 'function') {
-            if (coexist.isMutationOwnedOnly(records)) return;
-          } else if (Array.isArray(records) && records.length > 0) {
-            const hasExternal = records.some((rec) => {
-              if (!isOwnedMutationNode(rec?.target)) {
-                const added = Array.from(rec?.addedNodes || []);
-                const removed = Array.from(rec?.removedNodes || []);
-                const allOwned =
-                  (added.length > 0 || removed.length > 0) &&
-                  added.every(isOwnedMutationNode) &&
-                  removed.every(isOwnedMutationNode);
-                return !allOwned;
-              }
-              return false;
-            });
-            if (!hasExternal) return;
+      if (options.autoObserve !== false && doc.body) {
+        const bus = coexist?.getDomMutationBus?.(doc, win);
+        if (bus && typeof bus.subscribe === 'function') {
+          try {
+            domBusUnsub = bus.subscribe(
+              'prompt-library',
+              (_records, meta) => {
+                if (!enabled || destroyed) return;
+                if (!meta?.woken && coexist?.isWindowHibernated?.(doc, win, false)) return;
+                scheduleEnsureTrigger();
+              },
+              { wakeOnResume: true }
+            );
+          } catch {
+            domBusUnsub = null;
           }
-          scheduleEnsureTrigger();
-        });
-        try {
-          domObserver.observe(doc.body, { childList: true, subtree: true });
-        } catch {}
+        }
+        if (!domBusUnsub && typeof win?.MutationObserver === 'function') {
+          domObserver = new win.MutationObserver((records) => {
+            if (!enabled || destroyed) return;
+            if (coexist?.isWindowHibernated?.(doc, win, false)) return;
+            if (typeof coexist?.isMutationOwnedOnly === 'function') {
+              if (coexist.isMutationOwnedOnly(records)) return;
+            } else if (Array.isArray(records) && records.length > 0) {
+              const hasExternal = records.some((rec) => {
+                if (!isOwnedMutationNode(rec?.target)) {
+                  const added = Array.from(rec?.addedNodes || []);
+                  const removed = Array.from(rec?.removedNodes || []);
+                  const allOwned =
+                    (added.length > 0 || removed.length > 0) &&
+                    added.every(isOwnedMutationNode) &&
+                    removed.every(isOwnedMutationNode);
+                  return !allOwned;
+                }
+                return false;
+              });
+              if (!hasExternal) return;
+            }
+            scheduleEnsureTrigger();
+          });
+          try {
+            domObserver.observe(doc.body, { childList: true, subtree: true });
+          } catch {}
+        }
       }
     }
 
@@ -1763,6 +1786,10 @@
       removeSelectionPill();
       removeContextMenu();
       removeCtxToast();
+      if (domBusUnsub) {
+        try { domBusUnsub(); } catch {}
+        domBusUnsub = null;
+      }
       if (domObserver) {
         try { domObserver.disconnect(); } catch {}
         domObserver = null;
@@ -1823,7 +1850,7 @@
       detachListeners();
       removeTrigger();
       removeModalShell();
-      try { createdStyleEl?.remove?.(); } catch {}
+      safeRemove(createdStyleEl);
       createdStyleEl = null;
       activePaneEl = null;
     }
