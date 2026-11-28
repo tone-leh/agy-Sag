@@ -157,7 +157,7 @@ test('Phase 12: per-turn 3-way rewind menu offers NOV rollback, compact focus, a
   assert.equal(u1.querySelector('.ag-sag-turn-rewind'), null);
 });
 
-test('Phase 12: prismBridge mounts native Settings nav anchor & dynamic Ctrl/Cmd+Alt+/ shortcut sheet based on active modules', () => {
+test('Phase 12: prismBridge mounts native Settings nav anchor & dynamic Ctrl/Cmd+Shift+Alt+/ shortcut sheet based on active modules', () => {
   const doc = {
     documentElement: makeEl('html'),
     head: makeEl('head'),
@@ -205,8 +205,12 @@ test('Phase 12: prismBridge mounts native Settings nav anchor & dynamic Ctrl/Cmd
     assert.ok(navAnchor, 'Native Settings sidebar anchor must be injected');
     navAnchor.click();
 
-    // Ctrl+Alt+/ opens dynamic shortcut sheet
-    doc.body.dispatchEvent({ type: 'keydown', ctrlKey: true, altKey: true, key: '/', code: 'Slash', preventDefault() {}, stopPropagation() {} });
+    // Option+Cmd+/ (without Shift) must yield to Antigravity v2.36.0 native keyboard shortcuts list
+    doc.body.dispatchEvent({ type: 'keydown', metaKey: true, altKey: true, shiftKey: false, key: '/', code: 'Slash', preventDefault() {}, stopPropagation() {} });
+    assert.equal(pb.isShortcutSheetOpen(), false, 'Option+Cmd+/ without Shift must not hijack v2.36.0 native shortcuts');
+
+    // Ctrl+Shift+Alt+/ opens dynamic shortcut sheet
+    doc.body.dispatchEvent({ type: 'keydown', ctrlKey: true, shiftKey: true, altKey: true, key: '/', code: 'Slash', preventDefault() {}, stopPropagation() {} });
     assert.equal(pb.isShortcutSheetOpen(), true);
     const modal = doc.querySelector('[data-testid="ag-sag-shortcuts-modal"]');
     assert.ok(modal);

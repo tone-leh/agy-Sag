@@ -349,6 +349,7 @@
     let createdStyleEl = null;
     let embeddedShadowHosts = new Set();
     let lastSegments = [];
+    let lastBreakdownCache = null;
     let lastState = {
       snap: null,
       watchdog: null,
@@ -387,11 +388,19 @@
     function findFooterHost(scope = getScope()) {
       if (!doc) return null;
       const root = scope && scope.isConnected !== false ? scope : doc;
+      const pick = (container, sel) => {
+        if (!container || typeof container.querySelectorAll !== 'function') return null;
+        const nodes = container.querySelectorAll(sel) || [];
+        for (let i = 0; i < nodes.length; i += 1) {
+          if (!ctxSrc?.isSidebarOrAuxiliaryNode?.(nodes[i])) return nodes[i];
+        }
+        return null;
+      };
       return (
-        root.querySelector?.('.agy-composer-footer') ||
-        doc.querySelector?.('.agy-composer-footer') ||
-        root.querySelector?.('[data-testid="agent-input-box"] .composer-foot') ||
-        doc.querySelector?.('[data-testid="agent-input-box"] .composer-foot') ||
+        pick(root, '.agy-composer-footer') ||
+        (root !== doc ? pick(doc, '.agy-composer-footer') : null) ||
+        pick(root, '[data-testid="agent-input-box"] .composer-foot') ||
+        (root !== doc ? pick(doc, '[data-testid="agent-input-box"] .composer-foot') : null) ||
         null
       );
     }
@@ -615,7 +624,7 @@
       const lastElapsed = Number(lastState.watchdog?.lastTurnElapsedSec);
       metaEl.textContent =
         mods.sessionWatchdog && Number.isFinite(lastElapsed) && lastElapsed > 0
-          ? `${pct} · ⏱ ${lastElapsed >= 60 ? formatElapsed(lastElapsed) : `${lastElapsed}s`}`
+          ? `${pct} · ⏱ ${lastElapsed >= 60 ? formatDurationMMSS(lastElapsed) : `${lastElapsed}s`}`
           : pct;
       head.appendChild(titleEl);
       head.appendChild(metaEl);
@@ -623,9 +632,14 @@
 
       const sagStr = typeof i18n.getSagStrings === 'function' ? i18n.getSagStrings(getLang()) : {};
 
-      // Context Breakdown Lens (pure local DOM breakdown + Top-3 heaviest turns)
+      // Context Breakdown Lens (pure local DOM breakdown + Top-3 heaviest turns, 3s TTL cache)
       if (mods.compactGuard && typeof ctxSrc?.analyzeContextBreakdown === 'function') {
-        const bd = ctxSrc.analyzeContextBreakdown(doc, activePaneEl);
+        const nowMs = Date.now();
+        const curCid = String(lastState.snap?.cascadeId || '');
+        if (!lastBreakdownCache || nowMs - lastBreakdownCache.ts > 3000 || lastBreakdownCache.cid !== curCid) {
+          lastBreakdownCache = { ts: nowMs, cid: curCid, data: ctxSrc.analyzeContextBreakdown(doc, activePaneEl) };
+        }
+        const bd = lastBreakdownCache.data;
         if (bd && bd.totalChars > 0) {
           const lens = doc.createElement('div');
           lens.className = 'ag-sag-ctx-lens';
@@ -886,10 +900,12 @@
 
         const kids = Array.from(footer.children || []);
         const trailing = kids.length > 1 ? kids[kids.length - 1] : null;
-        if (trailing && typeof footer.insertBefore === 'function') {
-          footer.insertBefore(wrapEl, trailing);
+        if (trailing && coexist?.safeInsertBefore) {
+          coexist.safeInsertBefore(footer, wrapEl, trailing);
+        } else if (coexist?.safeAppendChild) {
+          coexist.safeAppendChild(footer, wrapEl);
         } else {
-          footer.appendChild(wrapEl);
+          try { footer.appendChild(wrapEl); } catch {}
         }
       }
       return wrapEl;

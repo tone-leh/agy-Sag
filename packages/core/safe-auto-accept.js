@@ -581,8 +581,11 @@
   const VALID_POLICIES = new Set(Object.keys(POLICY_PRESETS));
 
   const NEGATIVE_BUTTON_RE = /\b(?:deny|reject|cancel|abort|disallow|decline|dismiss|stop|close|don't|do not|never)\b|拒绝|取消|禁止|关闭|停止/i;
+  const PERSISTENT_ALLOW_BUTTON_RE = /\b(?:always\s+allow|allow\s+for\s+this\s+workspace|allow\s+all)\b|始终允许|本工作区内允许/i;
   const POSITIVE_BUTTON_RE = /\b(?:allow|accept|approve|run|proceed|continue|confirm)\b|允许|批准|继续|运行/i;
   const READONLY_BUTTON_RE = /^(?:proceed|continue|allow|allow\s+read|accept|approve|confirm|view|open|继续|允许|批准|允许读取|查看)$/i;
+  const CROSS_WORKSPACE_RE = /\b(?:outside\s+(?:the\s+)?(?:current\s+)?(?:workspace|project|repo(?:sitory)?)|non-workspace|cross-repo(?:sitory)?|(?:another|different)\s+(?:workspace|repo|repository|project))\b|工作区外|跨仓|外部仓库|其他项目/i;
+  const PATH_TRAVERSAL_RE = /(?:^|[^.])\.\.[\/\\]/;
   const STRICT_READONLY_PROMPT_RE = new RegExp(
     [
       String.raw`\b(?:allow\s+read(?:\s+access)?|read-?only(?:\s+(?:access|mode|view|permission))?|read\s+file|view\s+file|open\s+file|inspect(?:\s+(?:file|workspace|directory|code|logs?|state))?|search\s+workspace|list\s+director(?:y|ies)|continue\s+(?:conversation|reading|generating|streaming|response|to\s+next\s+step|next\s+step|turn|thinking))\b`,
@@ -891,10 +894,17 @@
       const invocations = parseGitInvocations(cmd);
       for (let i = 0; i < invocations.length; i++) {
         const inv = invocations[i];
-        // Block `git -c` / `--config-env` / `--exec-path` in built-in allowlists (can inject core.fsmonitor / diff.external)
+        // Block `git -c` / `git -C` / `--config-env` / `--exec-path` in built-in allowlists
         for (let g = 0; g < inv.globalArgs.length; g++) {
           const ga = inv.globalArgs[g];
-          if (ga === '-c' || /^-c.+/.test(ga) || /^--config-env(?:=|$)/i.test(ga) || /^--exec-path(?:=|$)/i.test(ga)) {
+          if (
+            ga === '-c' ||
+            /^-c.+/.test(ga) ||
+            ga === '-C' ||
+            /^-C.+/.test(ga) ||
+            /^--config-env(?:=|$)/i.test(ga) ||
+            /^--exec-path(?:=|$)/i.test(ga)
+          ) {
             return true;
           }
         }
@@ -908,8 +918,8 @@
           }
         }
       }
-      // Catch inline `git -c` even if not parsed into a known subcommand
-      if (/(?:^|\s)-c(?:\s|=|$)/.test(cmd)) return true;
+      // Catch inline `git -c` / `git -C` even if not parsed into a known subcommand
+      if (/(?:^|\s)-[cC](?:\s|=|$)/.test(cmd)) return true;
     }
     return false;
   }
@@ -1023,6 +1033,26 @@
       };
     }
 
+    // 1.5 Fail-closed on cross-workspace/cross-repo approvals and persistent allow buttons across ALL policies.
+    if (CROSS_WORKSPACE_RE.test(combined)) {
+      return {
+        allowed: false,
+        decision: 'skipped-policy',
+        reason: 'cross-workspace-blocked',
+        matchedRule: 'cross-workspace',
+        policy: resolvedPolicy,
+      };
+    }
+    if (btn && PERSISTENT_ALLOW_BUTTON_RE.test(btn)) {
+      return {
+        allowed: false,
+        decision: 'skipped-policy',
+        reason: 'persistent-allow-blocked',
+        matchedRule: 'persistent-allow',
+        policy: resolvedPolicy,
+      };
+    }
+
     // 2. Reject unsafe shell redirection / background chaining / process substitution / multi-line commands / unsafe flags across ALL policies (including custom).
     if (hasUnsafeShellSyntax(card) || hasUnsafeBuiltinCommandFlags(card)) {
       return {
@@ -1112,10 +1142,11 @@
     if (
       card &&
       card.length <= MAX_READONLY_PROMPT_CHARS &&
+      !PATH_TRAVERSAL_RE.test(card) &&
       !LIKELY_COMMAND_OR_WRITE_RE.test(card) &&
       !CLI_FLAG_OR_OPERATOR_RE.test(card) &&
       STRICT_READONLY_PROMPT_RE.test(card) &&
-      (!btn || (!NEGATIVE_BUTTON_RE.test(btn) && READONLY_BUTTON_RE.test(btn)))
+      (!btn || (!NEGATIVE_BUTTON_RE.test(btn) && !PERSISTENT_ALLOW_BUTTON_RE.test(btn) && READONLY_BUTTON_RE.test(btn)))
     ) {
       return {
         allowed: true,
@@ -1199,7 +1230,7 @@
     if (!btn || isOwnedNode(btn) || !isButtonEnabled(btn) || !isElementVisible(btn, win)) return false;
     const label = getButtonLabel(btn);
     if (!label) return false;
-    if (NEGATIVE_BUTTON_RE.test(label)) return false;
+    if (NEGATIVE_BUTTON_RE.test(label) || PERSISTENT_ALLOW_BUTTON_RE.test(label)) return false;
     return POSITIVE_BUTTON_RE.test(label);
   }
 
@@ -1249,12 +1280,22 @@
       out.push(el);
     };
     const sel = '.approval-card, [data-testid*="approval"], [data-testid*="permission"], [role="alertdialog"], [role="dialog"]';
-    for (const el of safeQueryAll(doc, sel)) addCandidate(el);
-    // Fallback for minimal DOM mocks without [attr*="..."]
-    for (const el of safeQueryAll(doc, '[data-testid]')) {
-      const tid = String(el.getAttribute?.('data-testid') || '').toLowerCase();
-      if (tid.includes('approval') || tid.includes('permission')) {
-        addCandidate(el);
+    let selThrew = false;
+    if (typeof doc.querySelectorAll === 'function') {
+      try {
+        for (const el of Array.from(doc.querySelectorAll(sel) || [])) addCandidate(el);
+      } catch {
+        selThrew = true;
+      }
+    }
+    // Only fall back to full [data-testid] scan in minimal mock DOMs where [attr*="..."] throws
+    if (selThrew) {
+      for (const el of safeQueryAll(doc, '.approval-card, [role="alertdialog"], [role="dialog"]')) addCandidate(el);
+      for (const el of safeQueryAll(doc, '[data-testid]')) {
+        const tid = String(el.getAttribute?.('data-testid') || '').toLowerCase();
+        if (tid.includes('approval') || tid.includes('permission')) {
+          addCandidate(el);
+        }
       }
     }
     // Prefer innermost approval containers when wrappers nest (e.g. role="dialog" wrapping .approval-card)
@@ -1269,13 +1310,28 @@
     return out.filter((node) => !out.some((other) => other !== node && isDescendant(node, other)));
   }
 
+  function resolveCoexist(optCoexist) {
+    if (optCoexist) return optCoexist;
+    if (globalRoot && globalRoot.__agSgCoexist) return globalRoot.__agSgCoexist;
+    if (typeof require === 'function') {
+      try { return require('./coexist.js'); } catch {}
+    }
+    return null;
+  }
+
   function createSafeAutoAcceptController(options = {}) {
     const win = options.win || globalRoot;
     const doc = options.doc || win?.document || null;
+    const coexist = resolveCoexist(options.coexist);
     const nowFn = typeof options.now === 'function' ? options.now : () => Date.now();
     const cooldownMs = Math.max(0, Number(options.cooldownMs ?? DEFAULT_COOLDOWN_MS));
+    const observeDebounceMs = Math.max(0, Number(options.observeDebounceMs ?? 150));
     const maxAuditEntries = Math.max(1, Number(options.maxAuditEntries ?? MAX_AUDIT_ENTRIES));
     const autoObserve = options.autoObserve !== undefined ? Boolean(options.autoObserve) : true;
+    const isHibernated = () =>
+      coexist?.isWindowHibernated
+        ? coexist.isWindowHibernated(doc, win, false)
+        : Boolean(doc?.hidden || doc?.documentElement?.getAttribute?.('data-ag-cs-win-blur') === '1');
 
     // Strictly disabled by default; requires explicit opt-in.
     let enabled = options.enabled === true;
@@ -1329,16 +1385,22 @@
       const target = doc.body || doc.documentElement;
       if (typeof MO !== 'function' || !target) return;
       observer = new MO((records) => {
-        if (destroyed || !enabled || paused) return;
-        const hasExternal = Array.isArray(records)
-          ? records.some((r) => r && !isOwnedNode(r.target))
-          : true;
-        if (!hasExternal) return;
-        if (observeTimer) return;
+        if (destroyed || !enabled || paused || isHibernated()) return;
+        if (typeof coexist?.isMutationOwnedOnly === 'function') {
+          if (coexist.isMutationOwnedOnly(records)) return;
+        } else {
+          const hasExternal = Array.isArray(records)
+            ? records.some((r) => r && !isOwnedNode(r.target))
+            : true;
+          if (!hasExternal) return;
+        }
+        if (observeTimer) clearTimeout(observeTimer);
         observeTimer = setTimeout(() => {
           observeTimer = null;
-          scanNow();
-        }, 50);
+          if (!destroyed && enabled && !paused && !isHibernated()) {
+            scanNow();
+          }
+        }, observeDebounceMs);
         observeTimer?.unref?.();
       });
       try {
@@ -1346,7 +1408,7 @@
           childList: true,
           subtree: true,
           attributes: true,
-          attributeFilter: ['hidden', 'disabled', 'aria-disabled', 'style', 'class'],
+          attributeFilter: ['hidden', 'disabled', 'aria-disabled'],
         });
       } catch {
         observer = null;

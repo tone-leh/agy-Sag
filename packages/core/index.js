@@ -368,11 +368,7 @@
         const ctxSrc = resolveDep('__agSgContextSource', './context-source.js');
         const ed = ctxSrc?.findComposerEditor?.(doc);
         if (!ed) return { ok: false, reason: 'no-editor' };
-        const tag = String(ed.tagName || '').toUpperCase();
-        if (tag === 'TEXTAREA' || tag === 'INPUT') ed.value = cmd;
-        else ed.textContent = cmd;
-        try { ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true })); } catch {}
-        return { ok: true };
+        return { ok: Boolean(coexist.writeComposerTextSafely(doc, win, ed, cmd, { replace: true })) };
       },
       onRollbackTurn: ({ turnNum, snippet }) => {
         const prompt = `Please use agy-NOV guard to list snapshots before turn #${turnNum}${snippet ? ` ("${snippet}")` : ''} and confirm before rolling back workspace files.`;
@@ -384,14 +380,7 @@
         if (!ed) return { ok: false, reason: 'no-editor' };
         const existing = String(ctxSrc?.readComposerDraft?.(doc) || '');
         const finalText = existing.trim() ? `${existing}\n\n${prompt}` : prompt;
-        const tag = String(ed.tagName || '').toUpperCase();
-        if (tag === 'TEXTAREA' || tag === 'INPUT') {
-          ed.value = finalText;
-        } else {
-          ed.textContent = finalText;
-        }
-        try { ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true })); } catch {}
-        return { ok: true };
+        return { ok: Boolean(coexist.writeComposerTextSafely(doc, win, ed, finalText, { replace: true })) };
       },
     });
 

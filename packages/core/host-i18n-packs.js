@@ -584,6 +584,15 @@
     ['Allowlist', '白名单', '允許清單', '許可リスト', '허용 목록', 'Lista permitida', 'Liste autorisée', 'Positivliste', 'Белый список', 'Lista de permissão'],
     ['Denylist', '黑名单', '封鎖清單', '拒否リスト', '차단 목록', 'Lista bloqueada', 'Liste bloquée', 'Sperrliste', 'Чёрный список', 'Lista de bloqueio'],
     ['Sandbox', '沙箱', '沙箱', 'サンドボックス', '샌드박스', 'Entorno aislado', 'Bac à sable', 'Sandbox-Modus', 'Песочница', 'Ambiente isolado'],
+    ['Send Now', '立即发送', '立即傳送', '今すぐ送信', '지금 보내기', 'Enviar ahora', 'Envoyer maintenant', 'Jetzt senden', 'Отправить сейчас', 'Enviar agora'],
+    ['Skipped', '已跳过', '已略過', 'スキップ済み', '건너뜀', 'Omitido', 'Ignoré', 'Übersprungen', 'Пропущено', 'Pulado'],
+    ['Customizations', '自定义配置', '自訂設定', 'カスタマイズ', '사용자 지정 설정', 'Personalizaciones', 'Personnalisations', 'Anpassungen', 'Настройки расширений', 'Personalizações'],
+    ['Installed by You', '你安装的', '您安裝的', 'あなたがインストール', '직접 설치함', 'Instalado por ti', 'Installé par vous', 'Von Ihnen installiert', 'Установлено вами', 'Instalado por você'],
+    ['Installed Plugins', '已安装插件', '已安裝外掛程式', 'インストール済みプラグイン', '설치된 플러그인', 'Complementos instalados', 'Greffons installés', 'Installierte Plugins', 'Установленные плагины', 'Extensões instaladas'],
+    ['Installed Skills', '已安装技能', '已安裝技能', 'インストール済みスキル', '설치된 스킬', 'Habilidades instaladas', 'Compétences installées', 'Installierte Fähigkeiten', 'Установленные навыки', 'Habilidades instaladas'],
+    ['Installed MCP Servers', '已安装 MCP 服务器', '已安裝 MCP 伺服器', 'インストール済み MCP サーバー', '설치된 MCP 서버', 'Servidores MCP instalados', 'Serveurs MCP installés', 'Installierte MCP-Server', 'Установленные серверы MCP', 'Servidores MCP instalados'],
+    ['Default Customizations', '默认自定义项', '預設自訂項目', 'デフォルトカスタマイズ', '기본 사용자 지정', 'Personalizaciones predeterminadas', 'Personnalisations par défaut', 'Standardanpassungen', 'Настройки по умолчанию', 'Personalizações padrão'],
+    ['Other Customizations', '其他自定义项', '其他自訂項目', 'その他のカスタマイズ', '기타 사용자 지정', 'Otras personalizaciones', 'Autres personnalisations', 'Weitere Anpassungen', 'Другие настройки', 'Outras personalizações'],
   ];
 
   // Pattern tuple order: [regexSource, flags, zh-CN, zh-TW, ja, ko, es, fr, de, ru, pt-BR]

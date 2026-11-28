@@ -840,6 +840,7 @@
   border-color:color-mix(in srgb,var(--warning,#f59e0b) 58%,transparent);
   color:var(--warning,#f59e0b);
 }
+[data-ag-sg-radar-hidden="1"]{display:none!important;}
 @keyframes ag-sag-pulse{
   0%,100%{opacity:1;transform:scale(1);}
   50%{opacity:.55;transform:scale(.88);}
@@ -1956,8 +1957,7 @@ html[data-ag-cs-theme="crystal"] .ag-sag-code-bar{
   border-radius:8px 8px 0 0;
   border:1px solid var(--border,rgba(148,163,184,.24));
   border-bottom:0;
-  background:color-mix(in srgb,var(--card,#0f172a) 90%,transparent);
-  backdrop-filter:blur(6px);
+  background:color-mix(in srgb,var(--card,#0f172a) 96%,var(--background,#0b0d13));
   color:var(--muted-foreground,#94a3b8);
   font:500 11px/1.2 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei UI",sans-serif;
 }

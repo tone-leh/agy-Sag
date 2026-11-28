@@ -1,8 +1,11 @@
 // agy-Sag — Zero-Dependency Bundle Builder (ESM)
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+const require = createRequire(import.meta.url);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CORE_DIR = path.resolve(__dirname, '..', 'packages', 'core');
@@ -791,11 +794,116 @@ function packHostI18nExactRows(code) {
   return code.slice(0, arrStart) + replacement + code.slice(arrEnd);
 }
 
+function packStaticJsonConst(code, constName, obj) {
+  if (!obj || typeof obj !== 'object') return code;
+  const marker = `const ${constName}=`;
+  const start = code.indexOf(marker);
+  if (start < 0) return code;
+  const objStart = start + marker.length;
+  if (code[objStart] !== '{') return code;
+  let depth = 0;
+  let quote = '';
+  let objEnd = -1;
+  for (let i = objStart; i < code.length; i += 1) {
+    const c = code[i];
+    if (quote) {
+      if (c === '\\') { i += 1; continue; }
+      if (c === quote) quote = '';
+      continue;
+    }
+    if (c === "'" || c === '"') { quote = c; continue; }
+    if (c === '{') depth += 1;
+    else if (c === '}') {
+      depth -= 1;
+      if (depth === 0) { objEnd = i + 1; break; }
+    }
+  }
+  if (objEnd < 0) return code;
+  const rawJson = JSON.stringify(obj);
+  const freq = new Map();
+  const wordRe = /"[A-Za-z0-9_]{4,30}":|[\u4e00-\u9fff]{2,6}|[A-Za-zÀ-ÿ0-9_-]{4,28}/g;
+  let m;
+  while ((m = wordRe.exec(rawJson)) !== null) {
+    freq.set(m[0], (freq.get(m[0]) || 0) + 1);
+  }
+  const candidates = Array.from(freq.entries())
+    .map(([tok, cnt]) => ({ tok, cnt, gain: (cnt - 1) * (Buffer.byteLength(tok, 'utf8') - 3) - 6 }))
+    .filter((x) => x.gain > 10)
+    .sort((a, b) => b.gain - a.gain)
+    .slice(0, 384);
+  let packed = rawJson;
+  const dict = [];
+  for (const { tok } of candidates) {
+    const ch = String.fromCharCode(0xe000 + dict.length);
+    if (rawJson.includes(ch)) continue;
+    const parts = packed.split(tok);
+    if (parts.length > 3 && (parts.length - 1) * (Buffer.byteLength(tok, 'utf8') - 3) > Buffer.byteLength(tok, 'utf8') + 8) {
+      packed = parts.join(ch);
+      dict.push(tok);
+    }
+  }
+  if (!dict.length) return code;
+  let check = packed;
+  for (let i = dict.length - 1; i >= 0; i -= 1) {
+    check = check.split(String.fromCharCode(0xe000 + i)).join(dict[i]);
+  }
+  if (check !== rawJson) return code;
+  // Single-quoted JS string literal avoids double-escaping all JSON double quotes (saves ~8 KB per pack)
+  const sqEsc = (s) =>
+    "'" +
+    s
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\u2028/g, '\\u2028')
+      .replace(/\u2029/g, '\\u2029') +
+    "'";
+  const dictSrc = `[${dict.map(sqEsc).join(',')}]`;
+  const replacement = `(()=>{const _d=${dictSrc};let _s=${sqEsc(packed)};for(let i=_d.length-1;i>=0;i--)_s=_s.split(String.fromCharCode(0xe000+i)).join(_d[i]);return JSON.parse(_s);})()`;
+  if (Buffer.byteLength(replacement, 'utf8') >= Buffer.byteLength(code.slice(objStart, objEnd), 'utf8')) return code;
+  return code.slice(0, objStart) + replacement + code.slice(objEnd);
+}
+
+function packStaticCssConst(css) {
+  const min = minifyStaticCss(css);
+  const freq = new Map();
+  const tokRe = /color-mix\(in srgb,var\(--[a-z-]+|var\(--[a-z0-9-]{4,32}|rgba\(\d+,\d+,\d+,|[a-z-]{6,28}:/g;
+  let m;
+  while ((m = tokRe.exec(min)) !== null) {
+    freq.set(m[0], (freq.get(m[0]) || 0) + 1);
+  }
+  const candidates = Array.from(freq.entries())
+    .map(([tok, cnt]) => ({ tok, cnt, gain: (cnt - 1) * (Buffer.byteLength(tok, 'utf8') - 3) - 6 }))
+    .filter((x) => x.gain > 12)
+    .sort((a, b) => b.gain - a.gain)
+    .slice(0, 256);
+  let packed = min;
+  const dict = [];
+  for (const { tok } of candidates) {
+    const ch = String.fromCharCode(0xe000 + dict.length);
+    if (min.includes(ch)) continue;
+    const parts = packed.split(tok);
+    if (parts.length > 3 && (parts.length - 1) * (Buffer.byteLength(tok, 'utf8') - 3) > Buffer.byteLength(tok, 'utf8') + 10) {
+      packed = parts.join(ch);
+      dict.push(tok);
+    }
+  }
+  if (!dict.length) return `\`${min}\`.trim()`;
+  let check = packed;
+  for (let i = dict.length - 1; i >= 0; i -= 1) {
+    check = check.split(String.fromCharCode(0xe000 + i)).join(dict[i]);
+  }
+  if (check !== min) return `\`${min}\`.trim()`;
+  const expr = `(()=>{const _d=${JSON.stringify(dict)};let _s=${JSON.stringify(packed)};for(let i=_d.length-1;i>=0;i--)_s=_s.split(String.fromCharCode(0xe000+i)).join(_d[i]);return _s;})()`;
+  return Buffer.byteLength(expr, 'utf8') < Buffer.byteLength(min, 'utf8') ? expr : `\`${min}\`.trim()`;
+}
+
 function compactCorePart(part) {
   let code = compactCoreSource(part.code);
   if (part.file === 'styles.js') {
     code = code.replace(/const CORE_CSS\s*=\s*`([\s\S]*?)`\.trim\(\)/, (_m, css) => {
-      return `const CORE_CSS=\`${minifyStaticCss(css)}\`.trim()`;
+      return `const CORE_CSS=${packStaticCssConst(css)}`;
     });
   } else if (part.file === 'prompt-queue.js') {
     code = code.replace(/const QUEUE_CSS\s*=\s*`([\s\S]*?)`\.trim\(\)/, (_m, css) => {
@@ -809,6 +917,12 @@ function compactCorePart(part) {
     code = minifyThemeCssTemplates(code);
   } else if (part.file === 'host-i18n-packs.js') {
     code = packHostI18nExactRows(code);
+  } else if (part.file === 'i18n.js') {
+    try {
+      const i18nMod = require('../packages/core/i18n.js');
+      code = packStaticJsonConst(code, 'PACKS', i18nMod?.PACKS);
+      code = packStaticJsonConst(code, 'SAG_UI_PACKS', i18nMod?.SAG_UI_PACKS);
+    } catch {}
   }
   return code;
 }

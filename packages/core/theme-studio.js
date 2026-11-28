@@ -767,6 +767,7 @@
     const blocks = [];
     const H = 'html[data-ag-sag-theme="1"]';
     const HC = `${H}[data-ag-sag-theme-colors="active"]`;
+    const mi = (p, s = '') => `${p} [data-testid="conversation-view"] [data-testid="agent-input-box"]:not([data-testid*="floating"])${s},${p} main [data-testid="agent-input-box"]:not([data-testid*="floating"])${s}`;
 
     // 1. Color tokens + Browser Hole transparency guard
     if (applyColors) {
@@ -790,7 +791,7 @@
     blocks.push(
       `${H}{--ag-sag-r-sm:${cornerSpec.sm};--ag-sag-r-md:${cornerSpec.md};--ag-sag-r-lg:${cornerSpec.lg};--ag-sag-r-bubble:${cornerSpec.bubble};--ag-sag-r-input:${cornerSpec.input};}` +
         `${H} [data-testid="user-message-bubble"]{border-radius:var(--ag-sag-r-bubble);}` +
-        `${H} [data-testid="agent-input-box"]{border-radius:var(--ag-sag-r-input);}` +
+        `${mi(H)}{border-radius:var(--ag-sag-r-input);}` +
         `${H} [data-testid="conversation-view"] pre,${H} [data-testid="auxiliary-pane"] pre,${H} [data-testid="terminal-panel"] pre{border-radius:var(--ag-sag-r-md);}`
     );
 
@@ -805,8 +806,8 @@
       const bubbleBg = isLight ? 'color-mix(in srgb,var(--card) 92%,var(--primary) 8%)' : 'color-mix(in srgb,var(--card) 94%,#fff 6%)';
       blocks.push(
         `${S} [data-testid="user-message-bubble"]{background-color:${bubbleBg};border:1px solid var(--card-border,var(--border));box-shadow:${cardSh};padding:10px 15px;}` +
-          `${S} [data-testid="agent-input-box"]{background-color:var(--card);border:1px solid var(--card-border,var(--border));box-shadow:inset 0 1px 0 ${specHi},${cardSh};transition:border-color 140ms ease,box-shadow 140ms ease;}` +
-          `${S} [data-testid="agent-input-box"]:focus-within{border-color:color-mix(in srgb,var(--primary) 54%,var(--border));box-shadow:0 0 0 2px color-mix(in srgb,var(--primary) 18%,transparent),${cardSh};}` +
+          `${mi(S)}{background-color:var(--card);border:1px solid var(--card-border,var(--border));box-shadow:inset 0 1px 0 ${specHi},${cardSh};transition:border-color 140ms ease,box-shadow 140ms ease;}` +
+          `${mi(S, ':focus-within')}{border-color:color-mix(in srgb,var(--primary) 54%,var(--border));box-shadow:0 0 0 2px color-mix(in srgb,var(--primary) 18%,transparent),${cardSh};}` +
           `${S} [data-testid="thinking-collapsible-trigger"]{background:transparent;border:0;border-left:2px solid color-mix(in srgb,var(--primary) 42%,transparent);padding-left:8px;color:var(--muted-foreground);}` +
           `${S} [data-testid="changed-files-card"],${S} [data-testid="artifact-view"]{border:1px solid var(--card-border,var(--border));border-radius:var(--ag-sag-r-lg);box-shadow:${cardSh};}` +
           `${S} [data-testid="auxiliary-pane"],${S} [data-testid="terminal-panel"]{border-left:1px solid var(--card-border,var(--border));}` +
@@ -816,14 +817,14 @@
       const S = `${H}[data-ag-sag-theme-surface="paper"]`;
       blocks.push(
         `${S} [data-testid="user-message-bubble"]{background-color:var(--card);border:1.5px solid var(--card-border,var(--border));box-shadow:2px 2px 0 color-mix(in srgb,var(--foreground) 12%,transparent);padding:10px 15px;}` +
-          `${S} [data-testid="agent-input-box"]{background-color:var(--card);border:1.5px solid var(--card-border,var(--border));box-shadow:0 2px 0 color-mix(in srgb,var(--foreground) 10%,transparent);}` +
+          `${mi(S)}{background-color:var(--card);border:1.5px solid var(--card-border,var(--border));box-shadow:0 2px 0 color-mix(in srgb,var(--foreground) 10%,transparent);}` +
           `${S} [data-testid="thinking-collapsible-trigger"]{border-left:2px dashed color-mix(in srgb,var(--primary) 55%,transparent);padding-left:8px;}`
       );
     } else if (settings.surface === 'glass' && !colorsYielded) {
       const S = `${H}[data-ag-sag-theme-surface="glass"]`;
       blocks.push(
         `${S} [data-testid="user-message-bubble"]{background:linear-gradient(145deg,color-mix(in srgb,var(--card) 82%,var(--primary) 18%),color-mix(in srgb,var(--card) 92%,transparent));border:1px solid color-mix(in srgb,var(--primary) 34%,var(--border));box-shadow:inset 0 1px 0 rgba(255,255,255,0.22),0 10px 28px -12px color-mix(in srgb,var(--primary) 32%,rgba(0,0,0,0.45));padding:10px 15px;}` +
-          `${S} [data-testid="agent-input-box"]{background:color-mix(in srgb,var(--card) 88%,transparent);border:1px solid color-mix(in srgb,var(--primary) 36%,var(--border));box-shadow:inset 0 1px 0 rgba(255,255,255,0.20),0 12px 32px -12px color-mix(in srgb,var(--primary) 26%,rgba(0,0,0,0.4));}`
+          `${mi(S)}{background:color-mix(in srgb,var(--card) 88%,transparent);border:1px solid color-mix(in srgb,var(--primary) 36%,var(--border));box-shadow:inset 0 1px 0 rgba(255,255,255,0.20),0 12px 32px -12px color-mix(in srgb,var(--primary) 26%,rgba(0,0,0,0.4));}`
       );
     }
 
@@ -874,18 +875,18 @@
     }
 
     // 7. Velvet Stream Feathering (CSS.highlights 5-step ink fade, zero DOM wrap)
-    if (settings.streamFade) {
+    if (settings.streamFade && !colorsYielded) {
       blocks.push(
         [20, 40, 62, 82, 94].map((p, i) => `::highlight(ag-sag-sf${i}){color:color-mix(in srgb,currentColor ${p}%,transparent);}`).join('')
       );
     }
 
     // 8. FastDOM Smooth Caret
-    if (settings.smoothCaret) {
+    if (settings.smoothCaret && !colorsYielded) {
       blocks.push(
         `[data-ag-sag-caret-host="1"]{position:relative;}[data-ag-sag-smooth-caret="1"]{caret-color:transparent!important;}` +
-          `.ag-sag-smooth-caret{position:absolute;top:0;left:0;width:2px;border-radius:999px;pointer-events:none;z-index:8;background:var(--primary,#38bdf8);box-shadow:0 0 8px color-mix(in srgb,var(--primary,#38bdf8) 55%,transparent);opacity:0;will-change:transform,height,opacity;transition:transform 75ms cubic-bezier(0.22,1,0.36,1),height 75ms ease,opacity 110ms ease;}` +
-          `.ag-sag-smooth-caret[data-visible="1"]{opacity:1;}@media (prefers-reduced-motion:reduce){.ag-sag-smooth-caret{transition:none;}}`
+          `.ag-sag-smooth-caret{position:absolute;top:0;left:0;width:2px;border-radius:999px;pointer-events:none;z-index:8;background:var(--primary,#38bdf8);box-shadow:0 0 8px color-mix(in srgb,var(--primary,#38bdf8) 55%,transparent);opacity:0;transition:transform 75ms cubic-bezier(0.22,1,0.36,1),height 75ms ease,opacity 110ms ease;}` +
+          `.ag-sag-smooth-caret[data-visible="1"]{opacity:1;will-change:transform,height,opacity;}@media (prefers-reduced-motion:reduce){.ag-sag-smooth-caret{transition:none;}}`
       );
     }
 
@@ -913,13 +914,32 @@
     return blocks.join('\n\n') + '\n';
   }
 
+  const resolveDep = (k, p) => (globalRoot?.[k] || (typeof require === 'function' ? (() => { try { return require(p); } catch { return null; } })() : null));
+  const AUX_SEL = 'aside,[data-testid="sidebar"],[data-testid="conversation-list-sidebar"],[data-testid*="floating-composer"]';
+
   function createThemeStudioController(options = {}) {
     const win = options.win || globalRoot || null;
     const doc = options.doc || win?.document || null;
+    const coexist = options.coexist || resolveDep('__agSgCoexist', './coexist.js');
+    const ctxSrc = options.contextSource || resolveDep('__agSgContextSource', './context-source.js');
 
     let enabled = Boolean(options.enabled === true);
     let destroyed = false;
+    let winBlurred = false;
     let settings = normalizeSettings(options, DEFAULT_SETTINGS);
+
+    const isHibernated = () =>
+      coexist?.isWindowHibernated ? coexist.isWindowHibernated(doc, win, winBlurred) : Boolean(winBlurred || doc?.hidden || doc?.documentElement?.getAttribute?.('data-ag-cs-win-blur') === '1');
+    const markOwned = (el) => {
+      if (!el?.setAttribute) return el;
+      if (coexist?.markOwnedNoTranslate) return coexist.markOwnedNoTranslate(el);
+      el.setAttribute('data-ag-sg-owned', '1');
+      el.setAttribute('data-ag-sag-owned', '1');
+      el.setAttribute('data-ag-no-i18n', '1');
+      return el;
+    };
+    const safeAppend = (p, n) => (coexist?.safeAppendChild ? coexist.safeAppendChild(p, n) : Boolean(p?.appendChild && (() => { try { p.appendChild(n); return true; } catch { return false; } })()));
+    const isAuxEditor = (el) => Boolean(el && (ctxSrc?.isSidebarOrAuxiliaryNode?.(el) || el.closest?.(AUX_SEL)));
     let styleEl = null;
     let lastCss = '';
     let lastPrismDetected = false;
@@ -961,6 +981,7 @@
     let mediaQuery = null;
     let mediaListener = null;
     let schemeObserver = null;
+    let schemeRaf = 0;
     let lastObservedHostScheme = null;
 
     function prefersReducedMotion() {
@@ -1026,7 +1047,7 @@
 
     function stepStreamFade() {
       fadeTimer = null;
-      if (destroyed || !enabled || !settings.streamFade || doc?.hidden || fadeItems.length === 0) {
+      if (destroyed || !enabled || !settings.streamFade || lastSurfaceYielded || isHibernated() || fadeItems.length === 0) {
         clearStreamFade();
         return;
       }
@@ -1069,7 +1090,7 @@
     }
 
     function enqueueStreamRange(textNode, startOffset, endOffset) {
-      if (!textNode || endOffset <= startOffset || prefersReducedMotion() || doc?.hidden) return false;
+      if (!textNode || endOffset <= startOffset || prefersReducedMotion() || lastSurfaceYielded || isHibernated()) return false;
       const buckets = getHighlightBuckets();
       if (!buckets) return false;
       try {
@@ -1097,7 +1118,7 @@
     function isInsideAgentResponse(node) {
       const el = node?.nodeType === 3 ? node.parentElement : node;
       if (!el || typeof el.closest !== 'function') return false;
-      if (el.closest('pre, code, [data-ag-sag-owned="1"], [data-ag-sg-owned="1"]')) return false;
+      if (el.closest('pre, code, .katex, math, mjx-container, .MathJax, [data-ag-sag-owned="1"], [data-ag-sg-owned="1"]')) return false;
       return Boolean(el.closest('[data-testid="agent-response"], [data-testid="planner-response-text"]'));
     }
 
@@ -1109,7 +1130,18 @@
       }
       if (node.nodeType !== 1) return;
       const tag = String(node.tagName || '').toUpperCase();
-      if (tag === 'PRE' || tag === 'CODE' || tag === 'SCRIPT' || tag === 'STYLE' || tag === 'SVG') return;
+      if (
+        tag === 'PRE' ||
+        tag === 'CODE' ||
+        tag === 'SCRIPT' ||
+        tag === 'STYLE' ||
+        tag === 'SVG' ||
+        tag === 'MATH' ||
+        tag === 'MJX-CONTAINER'
+      ) {
+        return;
+      }
+      if (node.classList?.contains?.('katex') || node.classList?.contains?.('MathJax')) return;
       if (node.getAttribute?.('data-ag-sag-owned') === '1' || node.getAttribute?.('data-ag-sg-owned') === '1') return;
       const kids = node.childNodes || node.children || [];
       for (let i = 0; i < kids.length && out.length < limit; i += 1) {
@@ -1117,22 +1149,43 @@
       }
     }
 
-    function syncStreamFade() {
-      const shouldRun = Boolean(enabled && !destroyed && settings.streamFade && !prefersReducedMotion() && doc?.body);
+    function syncStreamFade(surfaceYielded = lastSurfaceYielded) {
+      const shouldRun = Boolean(enabled && !destroyed && settings.streamFade && !surfaceYielded && !prefersReducedMotion() && doc?.body);
       if (!shouldRun) {
         teardownStreamFade();
         return;
       }
-      if (!streamVisOff && typeof doc.addEventListener === 'function') {
+      if (!streamVisOff) {
+        const offs = [];
         const onVis = () => {
-          if (doc.hidden) clearStreamFade();
+          if (isHibernated()) clearStreamFade();
         };
-        doc.addEventListener('visibilitychange', onVis);
-        streamVisOff = () => doc.removeEventListener('visibilitychange', onVis);
+        const onBlur = () => {
+          winBlurred = true;
+          clearStreamFade();
+        };
+        const onFocus = () => {
+          winBlurred = false;
+        };
+        if (typeof doc.addEventListener === 'function') {
+          doc.addEventListener('visibilitychange', onVis);
+          offs.push(() => doc.removeEventListener('visibilitychange', onVis));
+        }
+        if (typeof win?.addEventListener === 'function') {
+          win.addEventListener('blur', onBlur);
+          win.addEventListener('focus', onFocus);
+          offs.push(() => win.removeEventListener?.('blur', onBlur));
+          offs.push(() => win.removeEventListener?.('focus', onFocus));
+        }
+        streamVisOff = () => {
+          while (offs.length) {
+            try { offs.pop()(); } catch {}
+          }
+        };
       }
       if (streamObserver || typeof win?.MutationObserver !== 'function') return;
       streamObserver = new win.MutationObserver((records) => {
-        if (destroyed || !enabled || !settings.streamFade || doc?.hidden) return;
+        if (destroyed || !enabled || !settings.streamFade || lastSurfaceYielded || isHibernated()) return;
         const pending = [];
         let batchChars = 0;
         for (const rec of records || []) {
@@ -1140,7 +1193,7 @@
             const tn = rec.target;
             if (!isInsideAgentResponse(tn)) continue;
             const curLen = String(tn.nodeValue ?? tn.data ?? '').length;
-            const prevLen = textLenMap.get(tn) ?? (typeof rec.oldValue === 'string' ? rec.oldValue.length : 0);
+            const prevLen = textLenMap.get(tn) ?? 0;
             textLenMap.set(tn, curLen);
             if (curLen > prevLen) {
               batchChars += curLen - prevLen;
@@ -1169,7 +1222,7 @@
         }
       });
       try {
-        streamObserver.observe(doc.body, { childList: true, subtree: true, characterData: true, characterDataOldValue: true });
+        streamObserver.observe(doc.body, { childList: true, subtree: true, characterData: true });
       } catch {}
     }
 
@@ -1198,9 +1251,8 @@
       const el = doc.createElement('div');
       el.className = 'ag-sag-ambient-glow';
       el.setAttribute('aria-hidden', 'true');
-      el.setAttribute('data-ag-sag-owned', '1');
-      el.setAttribute('data-ag-no-i18n', '1');
-      doc.body.appendChild(el);
+      markOwned(el);
+      safeAppend(doc.body, el);
       glowEl = el;
     }
 
@@ -1275,15 +1327,25 @@
       };
     }
 
+    function isFocusInControlledEditor() {
+      const act = doc?.activeElement;
+      if (!act || act === doc?.body || act === doc?.documentElement || isAuxEditor(act)) return false;
+      const ed =
+        act.getAttribute?.('contenteditable') === 'true'
+          ? act
+          : act.closest?.('[contenteditable="true"]') || null;
+      if (!ed || isAuxEditor(ed)) return false;
+      return Boolean(ed.closest?.('[data-testid="agent-input-box"]'));
+    }
+
     function measureAndPaintCaret() {
       caretRaf = 0;
-      if (destroyed || !enabled || !settings.smoothCaret || !doc) return;
+      if (destroyed || !enabled || !settings.smoothCaret || lastSurfaceYielded || !doc) return;
       const editors = Array.from(
-        doc.querySelectorAll?.(
-          '[data-testid="agent-input-box"] [contenteditable="true"], [data-side-panel-focus-scope="true"] [contenteditable="true"], [data-testid="side-question-panel"] [contenteditable="true"]'
-        ) || []
-      );
+        doc.querySelectorAll?.('[data-testid="agent-input-box"] [contenteditable="true"]') || []
+      ).filter((ed) => !isAuxEditor(ed));
       if (!editors.length) return;
+      const windowFocused = !isHibernated() && (typeof doc.hasFocus !== 'function' || doc.hasFocus() !== false);
       const activeEl = doc.activeElement;
       const sel = typeof doc.getSelection === 'function' ? doc.getSelection() : null;
       const dpr = Math.max(1, Math.min(4, Number(win?.devicePixelRatio) || 1));
@@ -1294,7 +1356,7 @@
       for (const ed of editors) {
         const host = ed.parentElement;
         if (!host) continue;
-        const focused = activeEl === ed || Boolean(activeEl && ed.contains?.(activeEl));
+        const focused = windowFocused && (activeEl === ed || Boolean(activeEl && ed.contains?.(activeEl)));
         if (caretComposing || !focused || !sel || sel.rangeCount <= 0) {
           plan.push({ ed, host, visible: false });
           continue;
@@ -1347,9 +1409,8 @@
           caret = doc.createElement('div');
           caret.className = 'ag-sag-smooth-caret';
           caret.setAttribute('aria-hidden', 'true');
-          caret.setAttribute('data-ag-sag-owned', '1');
-          caret.setAttribute('data-ag-no-i18n', '1');
-          item.host.appendChild(caret);
+          markOwned(caret);
+          safeAppend(item.host, caret);
         }
         if (!caret) continue;
         caretNodes.set(item.host, caret);
@@ -1363,7 +1424,7 @@
     }
 
     function scheduleCaretUpdate() {
-      if (destroyed || !enabled || !settings.smoothCaret || caretRaf) return;
+      if (destroyed || !enabled || !settings.smoothCaret || lastSurfaceYielded || caretRaf) return;
       if (typeof win?.requestAnimationFrame === 'function') {
         caretRaf = win.requestAnimationFrame(measureAndPaintCaret);
       } else {
@@ -1371,8 +1432,8 @@
       }
     }
 
-    function syncSmoothCaret() {
-      const shouldRun = Boolean(enabled && !destroyed && settings.smoothCaret && !prefersReducedMotion() && doc);
+    function syncSmoothCaret(surfaceYielded = lastSurfaceYielded) {
+      const shouldRun = Boolean(enabled && !destroyed && settings.smoothCaret && !surfaceYielded && !prefersReducedMotion() && doc);
       if (!shouldRun) {
         teardownSmoothCaret();
         return;
@@ -1395,15 +1456,30 @@
         caretComposing = false;
         scheduleCaretUpdate();
       };
+      const onScroll = () => {
+        if (isFocusInControlledEditor()) scheduleCaretUpdate();
+      };
+      const onWinBlur = () => {
+        winBlurred = true;
+        scheduleCaretUpdate();
+      };
+      const onWinFocus = () => {
+        winBlurred = false;
+        scheduleCaretUpdate();
+      };
       bind(doc, 'selectionchange', scheduleCaretUpdate, false);
       bind(doc, 'input', scheduleCaretUpdate, true);
       bind(doc, 'keyup', scheduleCaretUpdate, true);
-      bind(doc, 'scroll', scheduleCaretUpdate, true);
+      bind(doc, 'scroll', onScroll, true);
       bind(doc, 'focusin', scheduleCaretUpdate, true);
       bind(doc, 'focusout', scheduleCaretUpdate, true);
       bind(doc, 'compositionstart', onCompStart, true);
       bind(doc, 'compositionend', onCompEnd, true);
+      bind(doc, 'visibilitychange', scheduleCaretUpdate, false);
+      bind(win, 'blur', onWinBlur, false);
+      bind(win, 'focus', onWinFocus, false);
       bind(win, 'resize', scheduleCaretUpdate, false);
+      if (win?.visualViewport) bind(win.visualViewport, 'resize', scheduleCaretUpdate, false);
       scheduleCaretUpdate();
     }
 
@@ -1528,10 +1604,9 @@
       const el = doc.createElement('style');
       el.id = STYLE_ID;
       el.setAttribute?.('id', STYLE_ID);
-      el.setAttribute?.('data-ag-sag-owned', '1');
+      markOwned(el);
       const host = doc.head || doc.documentElement || doc.body;
-      if (!host || typeof host.appendChild !== 'function') return null;
-      host.appendChild(el);
+      if (!host || !safeAppend(host, el)) return null;
       styleEl = el;
       return styleEl;
     }
@@ -1549,23 +1624,56 @@
       if (!schemeObserver && typeof win?.MutationObserver === 'function' && doc?.documentElement) {
         try {
           lastObservedHostScheme = detectHostColorScheme(doc, win);
-          schemeObserver = new win.MutationObserver(() => {
+          let schemeInFlight = false;
+          let schemeQueued = false;
+          const runSchemeCheck = () => {
             if (destroyed || !enabled) return;
-            const nextPrism = detectPrismTheme(doc);
-            if (nextPrism !== lastPrismDetected) {
-              sync();
+            if (schemeInFlight) {
+              schemeQueued = true;
               return;
             }
-            if (!settings.autoPair) return;
-            const nextScheme = detectHostColorScheme(doc, win);
-            if (nextScheme !== lastObservedHostScheme) {
-              lastObservedHostScheme = nextScheme;
-              sync();
+            schemeInFlight = true;
+            try {
+              if (isHibernated()) {
+                clearStreamFade();
+                if (caretActive) scheduleCaretUpdate();
+              }
+              const nextPrism = detectPrismTheme(doc);
+              if (nextPrism !== lastPrismDetected) {
+                sync();
+                return;
+              }
+              if (!settings.autoPair) return;
+              const nextScheme = detectHostColorScheme(doc, win);
+              if (nextScheme !== lastObservedHostScheme) {
+                lastObservedHostScheme = nextScheme;
+                sync();
+              }
+            } finally {
+              schemeInFlight = false;
+              if (schemeQueued && !destroyed && enabled) {
+                schemeQueued = false;
+                if (typeof queueMicrotask === 'function') queueMicrotask(runSchemeCheck);
+                else Promise.resolve().then(runSchemeCheck);
+              }
             }
-          });
+          };
+          const onSchemeMut = () => {
+            if (destroyed || !enabled) return;
+            if (typeof win?.requestAnimationFrame === 'function') {
+              if (schemeRaf) return;
+              schemeRaf = win.requestAnimationFrame(() => {
+                schemeRaf = 0;
+                runSchemeCheck();
+              });
+              return;
+            }
+            runSchemeCheck();
+          };
+          schemeObserver = new win.MutationObserver(onSchemeMut);
           schemeObserver.observe(doc.documentElement, {
             attributes: true,
-            attributeFilter: ['data-theme', 'data-color-scheme', 'class', 'data-ag-cs-style'],
+            attributeFilter: ['data-theme', 'data-color-scheme', 'class', 'data-ag-cs-style', 'data-ag-cs-win-blur'],
           });
           if (doc.body) {
             schemeObserver.observe(doc.body, {
@@ -1578,6 +1686,10 @@
     }
 
     function unbindSchemeWatcher() {
+      if (schemeRaf && typeof win?.cancelAnimationFrame === 'function') {
+        try { win.cancelAnimationFrame(schemeRaf); } catch {}
+      }
+      schemeRaf = 0;
       if (mediaQuery && mediaListener) {
         try { mediaQuery.removeEventListener?.('change', mediaListener); } catch {}
       }
@@ -1631,37 +1743,30 @@
       refreshConvStateFromDom();
       if (convObserver || typeof win?.MutationObserver !== 'function') return;
       const schedule = () => {
-        if (destroyed || !enabled || externalConvStateSource || convThrottleTimer) return;
+        if (destroyed || !enabled || externalConvStateSource || convThrottleTimer || isHibernated()) return;
         convThrottleTimer = setTimeout(() => {
           convThrottleTimer = null;
-          if (!destroyed && enabled && !externalConvStateSource && settings.ambientGlow !== 'off' && !lastSurfaceYielded) {
+          if (!destroyed && enabled && !externalConvStateSource && settings.ambientGlow !== 'off' && !lastSurfaceYielded && !isHibernated()) {
             refreshConvStateFromDom();
           }
         }, convThrottleMs);
         convThrottleTimer?.unref?.();
       };
       convObserver = new win.MutationObserver((records) => {
-        if (destroyed || !enabled || externalConvStateSource) return;
-        let relevant = false;
-        for (const rec of records || []) {
-          const tgt = rec?.target;
-          if (
-            tgt?.nodeType === 1 &&
-            (tgt.getAttribute?.('data-ag-sag-owned') === '1' || tgt.getAttribute?.('data-ag-sg-owned') === '1')
-          ) {
-            continue;
-          }
-          relevant = true;
-          break;
+        if (destroyed || !enabled || externalConvStateSource || isHibernated()) return;
+        if (coexist?.isMutationOwnedOnly) {
+          if (coexist.isMutationOwnedOnly(records)) return;
+        } else if ((records || []).every((r) => { const t = r?.target; return t?.nodeType === 1 && Boolean(t.closest?.('[data-ag-sg-owned="1"], [data-ag-sag-owned="1"]')); })) {
+          return;
         }
-        if (relevant) schedule();
+        schedule();
       });
       try {
         convObserver.observe(doc.body, {
           childList: true,
           subtree: true,
           attributes: true,
-          attributeFilter: ['hidden', 'data-error', 'data-testid', 'role', 'style', 'aria-hidden'],
+          attributeFilter: ['hidden', 'data-error', 'data-testid', 'role', 'aria-hidden'],
         });
       } catch {}
     }
@@ -1754,8 +1859,8 @@
 
       syncAmbientGlow(surfaceYielded);
       syncConvStateWatcher(surfaceYielded);
-      syncStreamFade();
-      syncSmoothCaret();
+      syncStreamFade(surfaceYielded);
+      syncSmoothCaret(surfaceYielded);
       const syncedFrames = syncExtensionFrames(presetSpec, colorsState, effVars);
 
       return {

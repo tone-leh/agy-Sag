@@ -10,6 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   assertNoSymlinkAncestors,
+  atomicRenameWithRetry,
   canonicalRealpathSync,
   copyFileSafeAtomic,
   expandTildePath,
@@ -21,12 +22,20 @@ export const DEFAULT_DATA_DIR = path.join(os.homedir(), '.gemini', 'antigravity'
 
 const MAX_WALK_DEPTH = 16;
 const MAX_METADATA_SCAN_BYTES = 512 * 1024;
+const DEFAULT_AUDIT_MAX_FILES = 50_000;
+const DEFAULT_AUDIT_MAX_METADATA_SCANS = 2_000;
+const DEFAULT_AUDIT_MAX_DURATION_MS = 4_000;
+const DEFAULT_EXPORT_MAX_BYTES = 32 * 1024 * 1024;
+const DEFAULT_BACKUP_MAX_FILE_BYTES = 512 * 1024 * 1024;
+const DEFAULT_BACKUP_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
+const SQLITE_MAGIC_HEADER = Buffer.from('SQLite format 3\0', 'ascii');
 const MAX_SEARCH_SESSIONS = 40;
 const MAX_SEARCH_FILE_BYTES = 512 * 1024;
 const MAX_SEARCH_LIMIT = 20;
 const MAX_SEARCH_MATCHES_PER_SESSION = 3;
 const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const BACKUP_PRIORITY_ROOTS = new Set(['conversations', 'annotations', 'brain']);
+let exportTmpCounter = 0;
 
 export function redactSecrets(text) {
   return String(text ?? '')
@@ -265,9 +274,13 @@ function safeLstat(filePath) {
   }
 }
 
-function walkDirectorySafe(rootDir, { onFile, onDir, onSymlink } = {}) {
+function walkDirectorySafe(rootDir, { onFile, onDir, onSymlink, onDepthLimit, shouldStop } = {}) {
   function recurse(curDir, depth) {
-    if (depth > MAX_WALK_DEPTH) return;
+    if (shouldStop?.()) return;
+    if (depth > MAX_WALK_DEPTH) {
+      onDepthLimit?.({ fullPath: curDir, relPath: toPosixRel(rootDir, curDir), depth });
+      return;
+    }
     let entries;
     try {
       entries = fs.readdirSync(curDir, { withFileTypes: true });
@@ -275,6 +288,7 @@ function walkDirectorySafe(rootDir, { onFile, onDir, onSymlink } = {}) {
       return;
     }
     for (const entry of entries) {
+      if (shouldStop?.()) return;
       const fullPath = path.join(curDir, entry.name);
       const st = safeLstat(fullPath);
       if (!st) continue;
@@ -293,6 +307,54 @@ function walkDirectorySafe(rootDir, { onFile, onDir, onSymlink } = {}) {
   }
 
   recurse(rootDir, 0);
+}
+
+function compareTopFile(a, b) {
+  return b.bytes - a.bytes || a.relPath.localeCompare(b.relPath);
+}
+
+function insertTopFile(topFiles, item, limit) {
+  if (limit <= 0) return;
+  if (topFiles.length >= limit && compareTopFile(item, topFiles[topFiles.length - 1]) >= 0) {
+    return;
+  }
+  let lo = 0;
+  let hi = topFiles.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (compareTopFile(item, topFiles[mid]) < 0) hi = mid;
+    else lo = mid + 1;
+  }
+  topFiles.splice(lo, 0, item);
+  if (topFiles.length > limit) topFiles.length = limit;
+}
+
+function isScannableMetadataFile(relPath, bytes) {
+  if (bytes <= 0 || bytes > MAX_METADATA_SCAN_BYTES) return false;
+  const lower = relPath.toLowerCase();
+  return lower.endsWith('.json') || lower.endsWith('.pbtxt') || lower.endsWith('.txt');
+}
+
+function probeSqliteHeaderReadOnly(dbPath, fileBytes) {
+  if (fileBytes === 0) {
+    return { valid: false, reason: 'corrupt-sqlite-header', bytes: 0 };
+  }
+  let fd = null;
+  try {
+    fd = fs.openSync(dbPath, 'r');
+    const header = Buffer.alloc(16);
+    const bytesRead = fs.readSync(fd, header, 0, 16, 0);
+    if (bytesRead < 16 || !header.equals(SQLITE_MAGIC_HEADER)) {
+      return { valid: false, reason: 'corrupt-sqlite-header', bytes: fileBytes };
+    }
+    return { valid: true, reason: null, bytes: fileBytes };
+  } catch {
+    return { valid: true, reason: null, bytes: fileBytes };
+  } finally {
+    if (fd !== null) {
+      try { fs.closeSync(fd); } catch {}
+    }
+  }
 }
 
 function inspectMetadataAnomalies(fullPath, relPath, bytes, anomalies) {
@@ -404,9 +466,27 @@ function inspectSqliteStatus(resolvedDir, discoveredDbPaths = []) {
   };
 }
 
-export function auditAntigravityStorage({ dataDir = DEFAULT_DATA_DIR, topN = 10 } = {}) {
+export function auditAntigravityStorage({
+  dataDir = DEFAULT_DATA_DIR,
+  topN = 10,
+  maxFiles = DEFAULT_AUDIT_MAX_FILES,
+  maxMetadataScans = DEFAULT_AUDIT_MAX_METADATA_SCANS,
+  maxDurationMs = DEFAULT_AUDIT_MAX_DURATION_MS,
+} = {}) {
   const resolvedDir = path.resolve(expandTildePath(dataDir || DEFAULT_DATA_DIR));
   const topLimit = Number.isInteger(topN) && topN > 0 ? topN : 10;
+  const fileLimit =
+    Number.isFinite(Number(maxFiles)) && Number(maxFiles) > 0
+      ? Math.floor(Number(maxFiles))
+      : DEFAULT_AUDIT_MAX_FILES;
+  const metadataLimit =
+    Number.isFinite(Number(maxMetadataScans)) && Number(maxMetadataScans) >= 0
+      ? Math.floor(Number(maxMetadataScans))
+      : DEFAULT_AUDIT_MAX_METADATA_SCANS;
+  const durationLimit =
+    Number.isFinite(Number(maxDurationMs)) && Number(maxDurationMs) > 0
+      ? Math.floor(Number(maxDurationMs))
+      : DEFAULT_AUDIT_MAX_DURATION_MS;
 
   let rootStat = null;
   try {
@@ -424,6 +504,8 @@ export function auditAntigravityStorage({ dataDir = DEFAULT_DATA_DIR, topN = 10 
       totalDirs: 0,
       totalBytes: 0,
       skippedSymlinks: 0,
+      truncated: false,
+      truncatedDirs: [],
       topFiles: [],
       brain: { exists: false, sessionCount: 0, totalBytes: 0, sessions: [] },
       conversations: { exists: false, fileCount: 0, totalBytes: 0, files: [] },
@@ -447,30 +529,88 @@ export function auditAntigravityStorage({ dataDir = DEFAULT_DATA_DIR, topN = 10 
     };
   }
 
+  const startedAt = Date.now();
   let totalFiles = 0;
   let totalDirs = 0;
   let totalBytes = 0;
   let skippedSymlinks = 0;
-  const allFiles = [];
+  let truncated = false;
+  const truncationReasons = new Set();
+  const truncatedDirs = [];
+  let metadataScanned = 0;
+  let stopRequested = false;
+
+  const topFiles = [];
   const corruptFiles = [];
   const anomalies = [];
   const discoveredDbPaths = new Set();
 
+  let convExists = false;
+  const convFiles = [];
+  let convTotalBytes = 0;
+  const convIdSet = new Set();
+
+  let brainExists = false;
+  let brainTotalBytes = 0;
+  const brainSessionMap = new Map();
+
+  let opsCount = 0;
+  const checkStop = () => {
+    if (stopRequested) return true;
+    if (totalFiles >= fileLimit) {
+      truncated = true;
+      truncationReasons.add('max-files');
+      stopRequested = true;
+      return true;
+    }
+    opsCount += 1;
+    if ((opsCount & 15) === 0 && Date.now() - startedAt >= durationLimit) {
+      truncated = true;
+      truncationReasons.add('max-duration');
+      stopRequested = true;
+      return true;
+    }
+    return false;
+  };
+
   walkDirectorySafe(resolvedDir, {
+    shouldStop: checkStop,
+    onDepthLimit: ({ relPath }) => {
+      truncatedDirs.push(relPath);
+    },
     onSymlink: () => {
       skippedSymlinks += 1;
     },
-    onDir: () => {
+    onDir: ({ relPath, name, depth }) => {
       totalDirs += 1;
+      if (depth === 0) {
+        if (name === 'conversations') convExists = true;
+        else if (name === 'brain') brainExists = true;
+      } else if (depth === 1 && relPath.startsWith('brain/')) {
+        if (!brainSessionMap.has(name)) {
+          brainSessionMap.set(name, {
+            sessionId: name,
+            relPath: `brain/${name}`,
+            bytes: 0,
+            fileCount: 0,
+            nestedTranscriptBytes: null,
+            rootTranscriptBytes: null,
+          });
+        }
+      }
     },
     onFile: ({ fullPath, relPath, name, stat }) => {
       totalFiles += 1;
       totalBytes += stat.size;
-      allFiles.push({
-        relPath,
-        bytes: stat.size,
-        mtimeMs: Math.round(stat.mtimeMs),
-      });
+      insertTopFile(
+        topFiles,
+        {
+          relPath,
+          bytes: stat.size,
+          mtimeMs: Math.round(stat.mtimeMs),
+        },
+        topLimit
+      );
 
       if (isSqliteDbFilename(name)) {
         discoveredDbPaths.add(fullPath);
@@ -487,131 +627,146 @@ export function auditAntigravityStorage({ dataDir = DEFAULT_DATA_DIR, topN = 10 
         });
       }
 
-      inspectMetadataAnomalies(fullPath, relPath, stat.size, anomalies);
+      if (isScannableMetadataFile(relPath, stat.size)) {
+        if (metadataScanned < metadataLimit) {
+          metadataScanned += 1;
+          inspectMetadataAnomalies(fullPath, relPath, stat.size, anomalies);
+        } else {
+          truncated = true;
+          truncationReasons.add('max-metadata-scans');
+        }
+      }
+
+      if (relPath.startsWith('conversations/')) {
+        convTotalBytes += stat.size;
+        convFiles.push({ relPath, name, bytes: stat.size });
+        const stem = name.replace(/\.[^.]+$/, '');
+        if (stem) convIdSet.add(stem);
+      } else if (relPath.startsWith('brain/')) {
+        const firstSlash = relPath.indexOf('/');
+        const secondSlash = relPath.indexOf('/', firstSlash + 1);
+        if (secondSlash > firstSlash + 1) {
+          const sessionId = relPath.slice(firstSlash + 1, secondSlash);
+          let sess = brainSessionMap.get(sessionId);
+          if (!sess) {
+            sess = {
+              sessionId,
+              relPath: `brain/${sessionId}`,
+              bytes: 0,
+              fileCount: 0,
+              nestedTranscriptBytes: null,
+              rootTranscriptBytes: null,
+            };
+            brainSessionMap.set(sessionId, sess);
+          }
+          sess.bytes += stat.size;
+          sess.fileCount += 1;
+          brainTotalBytes += stat.size;
+          const tail = relPath.slice(secondSlash + 1);
+          if (tail === '.system_generated/logs/transcript.jsonl') {
+            sess.nestedTranscriptBytes = stat.size;
+          } else if (tail === 'transcript.jsonl') {
+            sess.rootTranscriptBytes = stat.size;
+          }
+        }
+      }
     },
   });
 
-  const topFiles = [...allFiles]
-    .sort((a, b) => b.bytes - a.bytes || a.relPath.localeCompare(b.relPath))
-    .slice(0, topLimit);
+  const brainSessions = [];
+  const orphans = [];
 
-  // Inspect conversations/
-  const convDir = path.join(resolvedDir, 'conversations');
-  const convStat = safeLstat(convDir);
-  const convExists = Boolean(convStat && !convStat.isSymbolicLink() && convStat.isDirectory());
-  const convFiles = [];
-  let convTotalBytes = 0;
-  const convIdSet = new Set();
+  for (const sess of brainSessionMap.values()) {
+    let transcriptRel = null;
+    let transcriptBytes = 0;
+    if (sess.nestedTranscriptBytes !== null) {
+      transcriptRel = `brain/${sess.sessionId}/.system_generated/logs/transcript.jsonl`;
+      transcriptBytes = sess.nestedTranscriptBytes;
+    } else if (sess.rootTranscriptBytes !== null) {
+      transcriptRel = `brain/${sess.sessionId}/transcript.jsonl`;
+      transcriptBytes = sess.rootTranscriptBytes;
+    }
 
-  if (convExists) {
-    walkDirectorySafe(convDir, {
-      onFile: ({ relPath, name, stat }) => {
-        convTotalBytes += stat.size;
-        convFiles.push({ relPath: `conversations/${relPath}`, name, bytes: stat.size });
-        const stem = name.replace(/\.[^.]+$/, '');
-        if (stem) convIdSet.add(stem);
-      },
+    const hasTranscript = transcriptRel !== null;
+    const corruptTranscript = hasTranscript && transcriptBytes === 0;
+    const hasConversationMatch = convIdSet.has(sess.sessionId);
+
+    let orphanReason = null;
+    if (sess.fileCount === 0) {
+      orphanReason = 'empty-session-dir';
+    } else if (convFiles.length > 0 && !hasConversationMatch && !hasTranscript) {
+      orphanReason = 'orphan-brain-dir';
+    }
+
+    if (orphanReason) {
+      orphans.push({
+        sessionId: sess.sessionId,
+        relPath: sess.relPath,
+        bytes: sess.bytes,
+        fileCount: sess.fileCount,
+        reason: orphanReason,
+      });
+    }
+
+    brainSessions.push({
+      sessionId: sess.sessionId,
+      relPath: sess.relPath,
+      bytes: sess.bytes,
+      fileCount: sess.fileCount,
+      hasTranscript,
+      transcriptPath: transcriptRel,
+      transcriptBytes,
+      corruptTranscript,
+      hasConversationMatch,
+      isOrphan: Boolean(orphanReason),
     });
   }
 
-  // Inspect brain/
-  const brainDir = path.join(resolvedDir, 'brain');
-  const brainStat = safeLstat(brainDir);
-  const brainExists = Boolean(brainStat && !brainStat.isSymbolicLink() && brainStat.isDirectory());
-  const brainSessions = [];
-  let brainTotalBytes = 0;
-  const orphans = [];
-
-  if (brainExists) {
-    let entries = [];
-    try {
-      entries = fs.readdirSync(brainDir, { withFileTypes: true });
-    } catch {
-      entries = [];
-    }
-
-    for (const entry of entries) {
-      const sessionDir = path.join(brainDir, entry.name);
-      const st = safeLstat(sessionDir);
-      if (!st || st.isSymbolicLink() || !st.isDirectory()) continue;
-
-      let sessionBytes = 0;
-      let sessionFileCount = 0;
-      walkDirectorySafe(sessionDir, {
-        onFile: ({ stat }) => {
-          sessionBytes += stat.size;
-          sessionFileCount += 1;
-        },
-      });
-      brainTotalBytes += sessionBytes;
-
-      const nestedTranscript = path.join(sessionDir, '.system_generated', 'logs', 'transcript.jsonl');
-      const rootTranscript = path.join(sessionDir, 'transcript.jsonl');
-      const nestedSt = safeLstat(nestedTranscript);
-      const rootSt = safeLstat(rootTranscript);
-
-      let transcriptRel = null;
-      let transcriptBytes = 0;
-      if (nestedSt && !nestedSt.isSymbolicLink() && nestedSt.isFile()) {
-        transcriptRel = toPosixRel(resolvedDir, nestedTranscript);
-        transcriptBytes = nestedSt.size;
-      } else if (rootSt && !rootSt.isSymbolicLink() && rootSt.isFile()) {
-        transcriptRel = toPosixRel(resolvedDir, rootTranscript);
-        transcriptBytes = rootSt.size;
-      }
-
-      const hasTranscript = transcriptRel !== null;
-      const corruptTranscript = hasTranscript && transcriptBytes === 0;
-      const hasConversationMatch = convIdSet.has(entry.name);
-
-      let orphanReason = null;
-      if (sessionFileCount === 0) {
-        orphanReason = 'empty-session-dir';
-      } else if (convFiles.length > 0 && !hasConversationMatch && !hasTranscript) {
-        orphanReason = 'orphan-brain-dir';
-      }
-
-      if (orphanReason) {
-        orphans.push({
-          sessionId: entry.name,
-          relPath: `brain/${entry.name}`,
-          bytes: sessionBytes,
-          fileCount: sessionFileCount,
-          reason: orphanReason,
-        });
-      }
-
-      brainSessions.push({
-        sessionId: entry.name,
-        relPath: `brain/${entry.name}`,
-        bytes: sessionBytes,
-        fileCount: sessionFileCount,
-        hasTranscript,
-        transcriptPath: transcriptRel,
-        transcriptBytes,
-        corruptTranscript,
-        hasConversationMatch,
-        isOrphan: Boolean(orphanReason),
-      });
-    }
-
-    brainSessions.sort((a, b) => b.bytes - a.bytes || a.sessionId.localeCompare(b.sessionId));
-  }
+  brainSessions.sort((a, b) => b.bytes - a.bytes || a.sessionId.localeCompare(b.sessionId));
 
   const sqlite = inspectSqliteStatus(resolvedDir, [...discoveredDbPaths]);
+
+  // Pure read-only 16-byte magic header probe on inactive SQLite databases (skip active WAL/SHM to avoid lock contention & false positives)
+  for (const db of sqlite.databases) {
+    if (!db.dbExists || db.walActive) continue;
+    const absDbPath = path.join(resolvedDir, ...db.dbPath.split('/'));
+    const probe = probeSqliteHeaderReadOnly(absDbPath, db.dbBytes);
+    if (!probe.valid) {
+      corruptFiles.push({
+        relPath: db.dbPath,
+        bytes: db.dbBytes,
+        reason: 'corrupt-sqlite-header',
+      });
+    }
+  }
 
   const warnings = [...sqlite.warnings];
   if (skippedSymlinks > 0) {
     warnings.push(`Skipped ${skippedSymlinks} symlink(s) during read-only traversal for safety.`);
   }
-  if (corruptFiles.length > 0) {
-    warnings.push(`Detected ${corruptFiles.length} zero-byte .jsonl file(s).`);
+  const emptyJsonlCount = corruptFiles.filter((c) => c.reason === 'empty-jsonl').length;
+  const corruptSqliteCount = corruptFiles.filter((c) => c.reason === 'corrupt-sqlite-header').length;
+  if (emptyJsonlCount > 0) {
+    warnings.push(`Detected ${emptyJsonlCount} zero-byte .jsonl file(s).`);
+  }
+  if (corruptSqliteCount > 0) {
+    warnings.push(`Detected ${corruptSqliteCount} SQLite database file(s) with invalid or 0-byte header.`);
   }
   if (orphans.length > 0) {
     warnings.push(`Detected ${orphans.length} empty or suspected orphan session director(y/ies) under brain/.`);
   }
   if (anomalies.length > 0) {
     warnings.push(`Detected ${anomalies.length} metadata anomal(y/ies) (read-only audit; no files were modified).`);
+  }
+  if (truncated) {
+    warnings.push(
+      `Audit truncated before completion (${[...truncationReasons].join(', ')}); reported totals may be partial.`
+    );
+  }
+  if (truncatedDirs.length > 0) {
+    warnings.push(
+      `Truncated ${truncatedDirs.length} deep director(y/ies) exceeding max depth (${MAX_WALK_DEPTH}).`
+    );
   }
 
   return {
@@ -622,6 +777,8 @@ export function auditAntigravityStorage({ dataDir = DEFAULT_DATA_DIR, topN = 10 
     totalDirs,
     totalBytes,
     skippedSymlinks,
+    truncated,
+    truncatedDirs,
     topFiles,
     brain: {
       exists: brainExists,
@@ -722,12 +879,17 @@ export function exportSanitizedSession({
   sessionId,
   outFile = null,
   format = 'md',
+  maxBytes = DEFAULT_EXPORT_MAX_BYTES,
 } = {}) {
   const sid = validateSessionId(sessionId);
   const fmt = String(format || 'md').trim().toLowerCase();
   if (fmt !== 'md' && fmt !== 'json') {
     throw new Error(`Unsupported export format "${format}" (expected md | json)`);
   }
+  const byteLimit =
+    Number.isFinite(Number(maxBytes)) && Number(maxBytes) > 0
+      ? Math.floor(Number(maxBytes))
+      : DEFAULT_EXPORT_MAX_BYTES;
 
   const resolvedDataDir = path.resolve(expandTildePath(dataDir || DEFAULT_DATA_DIR));
   const brainDir = path.join(resolvedDataDir, 'brain');
@@ -804,6 +966,13 @@ export function exportSanitizedSession({
     throw new Error(`Resolved transcript path escapes dataDir for session: ${sid}`);
   }
 
+  const realTranscriptStat = fs.statSync(realTranscriptPath);
+  if (realTranscriptStat.size > byteLimit) {
+    throw new Error(
+      `Transcript file for session "${sid}" exceeds maxBytes limit (${realTranscriptStat.size} > ${byteLimit} bytes)`
+    );
+  }
+
   const rawText = fs.readFileSync(realTranscriptPath, 'utf8');
   const { entries, malformedLines } = parseTranscriptJsonl(rawText);
   const sourceRelPath = toPosixRel(resolvedDataDir, transcriptPath);
@@ -855,9 +1024,28 @@ export function exportSanitizedSession({
       throw new Error('Refusing to write export file inside source dataDir');
     }
     assertNoSymlinkAncestors(resolvedOut);
-    fs.mkdirSync(path.dirname(resolvedOut), { recursive: true });
+    const outDirPath = path.dirname(resolvedOut);
+    fs.mkdirSync(outDirPath, { recursive: true });
     assertNoSymlinkAncestors(resolvedOut);
-    fs.writeFileSync(resolvedOut, output, 'utf8');
+    const existingOut = safeLstat(resolvedOut);
+    if (existingOut && (existingOut.isSymbolicLink() || existingOut.isDirectory())) {
+      throw new Error(`Security violation: refusing symlink or directory export target (${resolvedOut})`);
+    }
+    exportTmpCounter += 1;
+    const tmpName = `.sag-export.${process.pid}.${Date.now()}.${exportTmpCounter}.${Math.random().toString(16).slice(2)}.tmp`;
+    const tmpPath = path.join(outDirPath, tmpName);
+    let createdTmp = false;
+    try {
+      fs.writeFileSync(tmpPath, output, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+      createdTmp = true;
+      assertNoSymlinkAncestors(resolvedOut);
+      atomicRenameWithRetry(tmpPath, resolvedOut);
+    } catch (err) {
+      if (createdTmp) {
+        try { fs.unlinkSync(tmpPath); } catch {}
+      }
+      throw err;
+    }
     return {
       ok: true,
       sessionId: sid,
@@ -978,7 +1166,51 @@ export function searchSanitizedSessions({
       continue;
     }
     if (!st.isDirectory()) continue;
-    sessionCandidates.push({ sessionId: entry.name, sessionDir, mtimeMs: Math.round(st.mtimeMs || 0) });
+
+    const transcriptCandidates = [
+      path.join(sessionDir, '.system_generated', 'logs', 'transcript.jsonl'),
+      path.join(sessionDir, 'transcript.jsonl'),
+    ];
+    let chosenPath = null;
+    let chosenStat = null;
+    let candSkippedSymlinks = 0;
+    for (const tp of transcriptCandidates) {
+      const tst = safeLstat(tp);
+      if (!tst) continue;
+      if (tst.isSymbolicLink()) {
+        candSkippedSymlinks += 1;
+        continue;
+      }
+      if (!tst.isFile()) continue;
+      let cur = path.dirname(tp);
+      let hasSymParent = false;
+      while (cur.startsWith(sessionDir) && cur !== sessionDir) {
+        const pst = safeLstat(cur);
+        if (pst && pst.isSymbolicLink()) {
+          hasSymParent = true;
+          break;
+        }
+        cur = path.dirname(cur);
+      }
+      if (hasSymParent) {
+        candSkippedSymlinks += 1;
+        continue;
+      }
+      chosenPath = tp;
+      chosenStat = tst;
+      break;
+    }
+
+    const dirMtimeMs = Math.round(st.mtimeMs || 0);
+    const transcriptMtimeMs = chosenStat ? Math.round(chosenStat.mtimeMs || 0) : null;
+    sessionCandidates.push({
+      sessionId: entry.name,
+      sessionDir,
+      mtimeMs: transcriptMtimeMs !== null ? transcriptMtimeMs : dirMtimeMs,
+      chosenPath,
+      chosenStat,
+      candSkippedSymlinks,
+    });
   }
   sessionCandidates.sort((a, b) => b.mtimeMs - a.mtimeMs || a.sessionId.localeCompare(b.sessionId));
 
@@ -989,38 +1221,9 @@ export function searchSanitizedSessions({
 
   for (const cand of sessionCandidates.slice(0, sessionCap)) {
     if (results.length >= maxResults) break;
-    const transcriptCandidates = [
-      path.join(cand.sessionDir, '.system_generated', 'logs', 'transcript.jsonl'),
-      path.join(cand.sessionDir, 'transcript.jsonl'),
-    ];
-    let chosenPath = null;
-    let chosenStat = null;
-    for (const tp of transcriptCandidates) {
-      const st = safeLstat(tp);
-      if (!st) continue;
-      if (st.isSymbolicLink()) {
-        skippedSymlinks += 1;
-        continue;
-      }
-      if (!st.isFile()) continue;
-      let cur = path.dirname(tp);
-      let hasSymParent = false;
-      while (cur.startsWith(cand.sessionDir) && cur !== cand.sessionDir) {
-        const pst = safeLstat(cur);
-        if (pst && pst.isSymbolicLink()) {
-          hasSymParent = true;
-          break;
-        }
-        cur = path.dirname(cur);
-      }
-      if (hasSymParent) {
-        skippedSymlinks += 1;
-        continue;
-      }
-      chosenPath = tp;
-      chosenStat = st;
-      break;
-    }
+    skippedSymlinks += cand.candSkippedSymlinks;
+    const chosenPath = cand.chosenPath;
+    const chosenStat = cand.chosenStat;
     if (!chosenPath || !chosenStat) continue;
     if (chosenStat.size > MAX_SEARCH_FILE_BYTES) {
       skippedLargeFiles += 1;
@@ -1108,10 +1311,21 @@ export function createStorageBackup({
   dataDir = DEFAULT_DATA_DIR,
   outDir,
   dryRun = false,
+  maxFileBytes = DEFAULT_BACKUP_MAX_FILE_BYTES,
+  maxTotalBytes = DEFAULT_BACKUP_MAX_TOTAL_BYTES,
 } = {}) {
   if (!outDir || !String(outDir).trim()) {
     throw new Error('createStorageBackup requires a non-empty outDir');
   }
+
+  const fileByteLimit =
+    Number.isFinite(Number(maxFileBytes)) && Number(maxFileBytes) > 0
+      ? Math.floor(Number(maxFileBytes))
+      : DEFAULT_BACKUP_MAX_FILE_BYTES;
+  const totalByteLimit =
+    Number.isFinite(Number(maxTotalBytes)) && Number(maxTotalBytes) > 0
+      ? Math.floor(Number(maxTotalBytes))
+      : DEFAULT_BACKUP_MAX_TOTAL_BYTES;
 
   const resolvedSrc = path.resolve(expandTildePath(dataDir || DEFAULT_DATA_DIR));
   const resolvedOut = path.resolve(expandTildePath(String(outDir)));
@@ -1145,6 +1359,9 @@ export function createStorageBackup({
   const activeDbSet = new Set(activeDbPaths);
   const warnings = [...audit.sqlite.warnings];
   const skippedActiveDbs = [];
+  const skippedOversizedFiles = [];
+  const skippedOverTotalBudget = [];
+  const candidateFiles = [];
   const files = [];
   const skipped = [];
 
@@ -1173,7 +1390,13 @@ export function createStorageBackup({
         return;
       }
 
-      files.push({
+      if (stat.size > fileByteLimit) {
+        skippedOversizedFiles.push(relPath);
+        skipped.push({ relPath, bytes: stat.size, reason: 'exceeds-max-file-bytes' });
+        return;
+      }
+
+      candidateFiles.push({
         srcPath: fullPath,
         relPath,
         bytes: stat.size,
@@ -1181,12 +1404,34 @@ export function createStorageBackup({
     },
   });
 
+  candidateFiles.sort((a, b) => a.relPath.localeCompare(b.relPath));
+
+  let plannedBytes = 0;
+  for (const item of candidateFiles) {
+    if (plannedBytes + item.bytes > totalByteLimit) {
+      skippedOverTotalBudget.push(item.relPath);
+      skipped.push({ relPath: item.relPath, bytes: item.bytes, reason: 'exceeds-max-total-bytes' });
+      continue;
+    }
+    plannedBytes += item.bytes;
+    files.push(item);
+  }
+
   if (skippedActiveDbs.length > 0) {
     warnings.push(`Skipped active SQLite database(s) with WAL/SHM lock: ${skippedActiveDbs.join(', ')}`);
   }
+  if (skippedOversizedFiles.length > 0) {
+    warnings.push(
+      `Skipped ${skippedOversizedFiles.length} file(s) exceeding maxFileBytes limit (${formatBytes(fileByteLimit)}).`
+    );
+  }
+  if (skippedOverTotalBudget.length > 0) {
+    warnings.push(
+      `Skipped ${skippedOverTotalBudget.length} file(s) exceeding maxTotalBytes budget (${formatBytes(totalByteLimit)}).`
+    );
+  }
 
-  files.sort((a, b) => a.relPath.localeCompare(b.relPath));
-  const totalBytes = files.reduce((acc, f) => acc + f.bytes, 0);
+  const totalBytes = plannedBytes;
 
   if (dryRun) {
     return {

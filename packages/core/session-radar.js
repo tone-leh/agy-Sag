@@ -132,14 +132,66 @@
     return 'idle';
   }
 
+  function isButtonLikeNode(node) {
+    if (!node || node.nodeType !== 1) return false;
+    const tag = String(node.tagName || '').toUpperCase();
+    if (tag === 'BUTTON') return true;
+    const role = String(node.getAttribute?.('role') || '').toLowerCase();
+    return role === 'button';
+  }
+
+  function isInsideButtonWithin(node, boundary) {
+    let cur = node;
+    while (cur && cur !== boundary) {
+      if (isButtonLikeNode(cur)) return true;
+      cur = cur.parentElement;
+    }
+    return false;
+  }
+
+  function extractTextExcludingButtons(node) {
+    if (!node) return '';
+    if (node.nodeType === 3) return String(node.nodeValue || '');
+    if (node.nodeType !== 1) return '';
+    if (isButtonLikeNode(node)) return '';
+    if (node.getAttribute?.('data-ag-sg-owned') === '1' || node.getAttribute?.('data-ag-sag-owned') === '1') return '';
+    if (node.childNodes && node.childNodes.length > 0) {
+      const parts = [];
+      for (let i = 0; i < node.childNodes.length; i += 1) {
+        parts.push(extractTextExcludingButtons(node.childNodes[i]));
+      }
+      return parts.join('');
+    }
+    if (node.children && node.children.length > 0) {
+      const parts = [];
+      if (typeof node._text === 'string' && node._text) parts.push(node._text);
+      for (let i = 0; i < node.children.length; i += 1) {
+        parts.push(extractTextExcludingButtons(node.children[i]));
+      }
+      return parts.join('');
+    }
+    return String(node.textContent || '');
+  }
+
   function extractRowMeta(row, index) {
     const id =
       row.getAttribute?.('data-cascade-id') ||
       row.getAttribute?.('data-conversation-id') ||
       row.getAttribute?.('data-id') ||
       `row-${index + 1}`;
-    const titleNode = row.querySelector?.('[data-testid="conversation-title"], .truncate, span') || row;
-    const title = String(titleNode.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    let titleNode = null;
+    try {
+      const candidates = row.querySelectorAll?.('[data-testid="conversation-title"], .truncate, span') || [];
+      for (let i = 0; i < candidates.length; i += 1) {
+        const c = candidates[i];
+        if (!c || isInsideButtonWithin(c, row)) continue;
+        if (c.getAttribute?.('data-ag-sg-owned') === '1' || c.getAttribute?.('data-ag-sag-owned') === '1') continue;
+        titleNode = c;
+        break;
+      }
+    } catch {}
+    const rawTitle = extractTextExcludingButtons(titleNode || row);
+    const title = String(rawTitle || '').replace(/\s+/g, ' ').trim().slice(0, 80);
     return { id, title, status: classifyRowStatus(row), el: row };
   }
 
@@ -183,12 +235,28 @@
     let ttsSpokenCount = 0;
     let quietSuppressedCount = 0;
     const listeners = [];
+    const hiddenRows = new Set();
     const nowFn = typeof options.now === 'function' ? options.now : () => Date.now();
+    const safeInsert = (parent, node, ref) => {
+      if (typeof coexist?.safeInsertBefore === 'function') return coexist.safeInsertBefore(parent, node, ref);
+      try {
+        if (ref && ref.parentElement === parent && typeof parent.insertBefore === 'function') parent.insertBefore(node, ref);
+        else parent?.appendChild?.(node);
+        return true;
+      } catch { return false; }
+    };
 
     const getLang = () => (typeof options.getLang === 'function' ? i18n.normalizeLang(options.getLang()) : i18n.detectLang(doc, win));
     const S = () => i18n.getStrings(getLang());
 
     const clearFilterHiding = () => {
+      for (const row of Array.from(hiddenRows)) {
+        try {
+          row.hidden = false;
+          row.removeAttribute?.('data-ag-sg-radar-hidden');
+        } catch {}
+      }
+      hiddenRows.clear();
       try {
         doc?.querySelectorAll?.('[data-ag-sg-radar-hidden="1"]')?.forEach?.((row) => {
           row.hidden = false;
@@ -234,8 +302,7 @@
         wrap.appendChild(b);
       }
 
-      if (sidebar.firstChild) sidebar.insertBefore(wrap, sidebar.firstChild);
-      else sidebar.appendChild(wrap);
+      safeInsert(sidebar, wrap, sidebar.firstChild || null);
       barEl = wrap;
       return barEl;
     };
@@ -364,9 +431,11 @@
         if (!match) {
           s.el.hidden = true;
           s.el.setAttribute('data-ag-sg-radar-hidden', '1');
-        } else if (s.el.getAttribute?.('data-ag-sg-radar-hidden') === '1') {
+          hiddenRows.add(s.el);
+        } else if (s.el.getAttribute?.('data-ag-sg-radar-hidden') === '1' || hiddenRows.has(s.el)) {
           s.el.hidden = false;
           s.el.removeAttribute?.('data-ag-sg-radar-hidden');
+          hiddenRows.delete(s.el);
         }
       }
       return sync(sessions);

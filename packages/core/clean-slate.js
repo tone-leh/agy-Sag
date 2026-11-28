@@ -206,8 +206,23 @@
           ed.value = '';
           ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
         } else {
-          ed.textContent = '';
-          ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
+          ed.focus?.();
+          if (typeof win?.getSelection === 'function' && typeof doc.createRange === 'function') {
+            try {
+              const range = doc.createRange();
+              range.selectNodeContents(ed);
+              const sel = win.getSelection();
+              sel?.removeAllRanges?.();
+              sel?.addRange?.(range);
+            } catch {}
+          }
+          if (typeof doc.execCommand === 'function') {
+            try { doc.execCommand('delete', false); } catch {}
+          }
+          if (String(ed.textContent || '').replace(/\u200B/g, '').trim()) {
+            ed.textContent = '';
+            ed.dispatchEvent?.(new (win.Event || Event)('input', { bubbles: true }));
+          }
         }
       } catch {}
     }
@@ -298,7 +313,11 @@
     const onKeyDown = (ev) => {
       if (destroyed || !ev) return;
       if (ev.key !== 'Enter' || ev.shiftKey || ev.ctrlKey || ev.metaKey || ev.altKey || ev.isComposing) return;
-      const draft = ctxSrc.readComposerDraft(doc);
+      if (ev.target && ctxSrc?.isSidebarOrAuxiliaryNode?.(ev.target)) return;
+      const scope = ctxSrc.resolveActivePaneScope ? ctxSrc.resolveActivePaneScope(doc) : doc;
+      const mainEd = ctxSrc.findComposerEditor(doc, scope);
+      if (ev.target && mainEd && ev.target !== mainEd && !mainEd.contains?.(ev.target)) return;
+      const draft = ctxSrc.readComposerDraft(doc, scope);
       const parsed = parseClearCommand(draft);
       if (!parsed) return;
       ev.preventDefault?.();
@@ -309,11 +328,13 @@
 
     const onSendClick = (ev) => {
       if (destroyed || !ev?.target) return;
+      if (ctxSrc?.isSidebarOrAuxiliaryNode?.(ev.target)) return;
       const btn = ev.target.closest?.(
         '[data-testid="input-send-button"], [data-testid="send-button"], button[type="submit"]'
       );
-      if (!btn) return;
-      const draft = ctxSrc.readComposerDraft(doc);
+      if (!btn || ctxSrc?.isSidebarOrAuxiliaryNode?.(btn)) return;
+      const scope = ctxSrc.resolveActivePaneScope ? ctxSrc.resolveActivePaneScope(doc) : doc;
+      const draft = ctxSrc.readComposerDraft(doc, scope);
       const parsed = parseClearCommand(draft);
       if (!parsed) return;
       ev.preventDefault?.();

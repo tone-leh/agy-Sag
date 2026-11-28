@@ -164,7 +164,11 @@
     let settingsNavEl = null;
     let createdStyleEl = null;
     let domObserver = null;
+    let domDebounceTimer = null;
     let htmlObserver = null;
+    let htmlRaf = 0;
+    let htmlSyncInFlight = false;
+    let htmlSyncQueued = false;
     let keydownCleanup = null;
     let compositionCleanup = null;
     let imeComposing = false;
@@ -847,7 +851,7 @@
         dKey.className = 'ag-sag-chip';
         dKey.setAttribute('data-testid', 'ag-sag-drawer-shortcuts');
         dKey.textContent = '⌨';
-        dKey.title = 'Shortcuts (Ctrl/Cmd+Alt+/)';
+        dKey.title = 'Shortcuts (Ctrl/Cmd+Shift+Alt+/)';
         dKey.addEventListener('click', (ev) => {
           ev?.preventDefault?.();
           ev?.stopPropagation?.();
@@ -924,7 +928,7 @@
       const modKey = isMac ? 'Cmd' : navPlat ? 'Ctrl' : 'Ctrl/Cmd';
       const rows = [
         { keys: `${modKey} + Alt + ,`, desc: sag.scSettingsDrawer || 'Toggle agy-Sag Settings Drawer' },
-        { keys: `${modKey} + Alt + /`, desc: sag.scShortcutSheet || 'Show Active Keyboard Shortcuts' },
+        { keys: `${modKey} + Shift + Alt + /`, desc: sag.scShortcutSheet || 'Show Active Keyboard Shortcuts' },
       ];
       if (mods.promptLibrary) {
         rows.push({ keys: `${modKey} + Alt + P`, desc: sag.scPromptPalette || 'Open Prompt Library & Command Palette' });
@@ -1011,7 +1015,7 @@
             mountedEl?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
           } catch {}
         });
-        navHost.appendChild(navBtn);
+        coexist.safeAppendChild(navHost, navBtn);
       }
       settingsNavEl = navBtn;
     }
@@ -1047,15 +1051,20 @@
 
     function renderIntoSettings({ fromObserver = false } = {}) {
       if (destroyed || !doc) return false;
-      if (fromObserver && mountedEl && mountedEl.isConnected !== false && isUserEditingInside(mountedEl)) {
-        return true;
+      const settingsEl = doc.getElementById?.(PRISM_SETTINGS_SEC_ID);
+      const modulesGroup = settingsEl?.querySelector?.(PRISM_MODULES_GROUP_SEL) || null;
+      const prismAvailable = Boolean(settingsEl && modulesGroup);
+      if (fromObserver && mountedEl && mountedEl.isConnected !== false) {
+        const modeUnchanged =
+          (mountedMode === 'prism' && prismAvailable && mountedEl.parentElement === modulesGroup) ||
+          (mountedMode === 'native' && !prismAvailable);
+        if (modeUnchanged) return true;
+        if (isUserEditingInside(mountedEl)) return true;
       }
       ensureStyle();
 
       // Priority 1: Embed cleanly inside Obsidian Prism's Modules tab if #ag-cs-settings-sec exists
-      const settingsEl = doc.getElementById?.(PRISM_SETTINGS_SEC_ID);
-      const modulesGroup = settingsEl?.querySelector?.(PRISM_MODULES_GROUP_SEL) || null;
-      if (settingsEl && modulesGroup) {
+      if (prismAvailable) {
         doc.querySelectorAll?.(`[data-testid="${NATIVE_SECTION_TESTID}"]`)?.forEach?.((n) => n.remove?.());
         try { settingsNavEl?.remove?.(); } catch {}
         settingsNavEl = null;
@@ -1064,7 +1073,7 @@
           section = coexist.markOwnedNoTranslate(doc.createElement('div'));
           section.className = 'ag-sg-set-section';
           section.setAttribute('data-testid', EMBED_SECTION_TESTID);
-          modulesGroup.appendChild(section);
+          coexist.safeAppendChild(modulesGroup, section);
         }
         mountedEl = section;
         mountedMode = 'prism';
@@ -1081,7 +1090,7 @@
           section = coexist.markOwnedNoTranslate(doc.createElement('div'));
           section.className = 'space-y-2 ag-sg-native-section';
           section.setAttribute('data-testid', NATIVE_SECTION_TESTID);
-          nativeAnchor.parent.appendChild(section);
+          coexist.safeAppendChild(nativeAnchor.parent, section);
         }
         mountedEl = section;
         mountedMode = 'native';
@@ -1165,7 +1174,7 @@
           closeDrawer();
           return;
         }
-        if ((ev.ctrlKey || ev.metaKey) && ev.altKey && !ev.shiftKey && (ev.key === '/' || ev.code === 'Slash')) {
+        if ((ev.ctrlKey || ev.metaKey) && ev.altKey && ev.shiftKey && (ev.key === '/' || ev.key === '?' || ev.code === 'Slash')) {
           ev.preventDefault?.();
           ev.stopPropagation?.();
           if (shortcutSheetOpen) closeShortcutSheet();
@@ -1198,29 +1207,69 @@
       if (typeof win?.MutationObserver !== 'function') return;
       try {
         if (!domObserver) {
-          let scheduled = false;
           domObserver = new win.MutationObserver((muts) => {
-            if (destroyed || scheduled || coexist.isWindowHibernated(doc, win, false)) return;
-            const relevant = muts.some((m) => {
-              const t = m.target;
-              if (t?.getAttribute?.('data-ag-sg-owned') === '1' || t?.closest?.('[data-ag-sg-owned="1"]')) return false;
-              return true;
-            });
-            if (!relevant) return;
-            scheduled = true;
-            const run = () => {
-              scheduled = false;
-              if (!destroyed) renderIntoSettings({ fromObserver: true });
-            };
-            if (typeof win.requestAnimationFrame === 'function') win.requestAnimationFrame(run);
-            else setTimeout(run, 16);
+            if (destroyed || coexist.isWindowHibernated(doc, win, false)) return;
+            if (typeof coexist.isMutationOwnedOnly === 'function') {
+              if (coexist.isMutationOwnedOnly(muts)) return;
+            } else {
+              const relevant = (muts || []).some((m) => {
+                const t = m?.target;
+                if (
+                  t?.getAttribute?.('data-ag-sg-owned') === '1' ||
+                  t?.getAttribute?.('data-ag-sag-owned') === '1' ||
+                  t?.closest?.('[data-ag-sg-owned="1"], [data-ag-sag-owned="1"]')
+                ) {
+                  return false;
+                }
+                return true;
+              });
+              if (!relevant) return;
+            }
+            if (domDebounceTimer) clearTimeout(domDebounceTimer);
+            domDebounceTimer = setTimeout(() => {
+              domDebounceTimer = null;
+              if (!destroyed && !coexist.isWindowHibernated(doc, win, false)) {
+                renderIntoSettings({ fromObserver: true });
+              }
+            }, 250);
+            domDebounceTimer?.unref?.();
           });
           const rootNode = doc.body || doc.documentElement;
           if (rootNode) domObserver.observe(rootNode, { childList: true, subtree: true });
         }
         if (!htmlObserver && doc.documentElement) {
+          const runHtmlSync = () => {
+            if (destroyed) return;
+            if (htmlSyncInFlight) {
+              htmlSyncQueued = true;
+              return;
+            }
+            htmlSyncInFlight = true;
+            try {
+              checkHostContextChange();
+            } finally {
+              htmlSyncInFlight = false;
+              if (htmlSyncQueued && !destroyed) {
+                htmlSyncQueued = false;
+                if (typeof queueMicrotask === 'function') queueMicrotask(runHtmlSync);
+                else Promise.resolve().then(runHtmlSync);
+              }
+            }
+          };
+          const scheduleHtmlSync = () => {
+            if (destroyed) return;
+            if (typeof win?.requestAnimationFrame === 'function') {
+              if (htmlRaf) return;
+              htmlRaf = win.requestAnimationFrame(() => {
+                htmlRaf = 0;
+                runHtmlSync();
+              });
+              return;
+            }
+            runHtmlSync();
+          };
           htmlObserver = new win.MutationObserver(() => {
-            if (!destroyed) checkHostContextChange();
+            if (!destroyed) scheduleHtmlSync();
           });
           htmlObserver.observe(doc.documentElement, {
             attributes: true,
@@ -1234,6 +1283,16 @@
       if (destroyed) return;
       destroyed = true;
       drawerOpen = false;
+      if (domDebounceTimer) {
+        try { clearTimeout(domDebounceTimer); } catch {}
+        domDebounceTimer = null;
+      }
+      if (htmlRaf && typeof win?.cancelAnimationFrame === 'function') {
+        try { win.cancelAnimationFrame(htmlRaf); } catch {}
+      }
+      htmlRaf = 0;
+      htmlSyncInFlight = false;
+      htmlSyncQueued = false;
       if (uiState.copyResetTimer) {
         try { clearTimeout(uiState.copyResetTimer); } catch {}
         uiState.copyResetTimer = null;

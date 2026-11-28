@@ -153,18 +153,89 @@ export function discoverCdpPort(
   return null;
 }
 
-export function httpGetJson(url, timeoutMs = 2500) {
+const MAX_HTTP_JSON_BYTES = 4 * 1024 * 1024;
+
+export function httpGetJson(url, timeoutMs = 2500, maxBytes = MAX_HTTP_JSON_BYTES) {
   return new Promise((resolve, reject) => {
-    const req = http.get(url, { timeout: timeoutMs }, (res) => {
-      let data = '';
-      res.setEncoding('utf8');
-      res.on('data', (c) => { data += c; });
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)); } catch (err) { reject(err); }
+    const byteLimit =
+      Number.isFinite(Number(maxBytes)) && Number(maxBytes) > 0
+        ? Math.floor(Number(maxBytes))
+        : MAX_HTTP_JSON_BYTES;
+    const totalMs =
+      Number.isFinite(Number(timeoutMs)) && Number(timeoutMs) > 0 ? Math.floor(Number(timeoutMs)) : 2500;
+    let settled = false;
+    let req = null;
+    let totalTimer = null;
+
+    const finish = (ok, val) => {
+      if (settled) return;
+      settled = true;
+      if (totalTimer !== null) {
+        clearTimeout(totalTimer);
+        totalTimer = null;
+      }
+      if (ok) resolve(val);
+      else reject(val instanceof Error ? val : new Error(String(val)));
+    };
+
+    try {
+      req = http.get(url, { timeout: totalMs }, (res) => {
+        const statusCode = res.statusCode ?? 0;
+        if (statusCode < 200 || statusCode >= 300) {
+          res.resume();
+          finish(false, new Error(`HTTP ${statusCode}`));
+          return;
+        }
+        const chunks = [];
+        let totalBytes = 0;
+        res.on('data', (chunk) => {
+          if (settled) return;
+          const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          totalBytes += buf.length;
+          if (totalBytes > byteLimit) {
+            finish(false, new Error(`HTTP response exceeds ${byteLimit} byte limit`));
+            try { res.destroy(); } catch {}
+            try { req.destroy(); } catch {}
+            return;
+          }
+          chunks.push(buf);
+        });
+        res.on('error', (err) => {
+          finish(false, err instanceof Error ? err : new Error(String(err)));
+        });
+        res.on('aborted', () => {
+          finish(false, new Error('HTTP response aborted'));
+        });
+        res.on('end', () => {
+          if (settled) return;
+          try {
+            const text = Buffer.concat(chunks, totalBytes).toString('utf8');
+            finish(true, JSON.parse(text));
+          } catch (err) {
+            finish(false, err);
+          }
+        });
       });
+    } catch (err) {
+      finish(false, err);
+      return;
+    }
+
+    totalTimer = setTimeout(() => {
+      const timeoutErr = new Error('HTTP timeout');
+      finish(false, timeoutErr);
+      try { req.destroy(timeoutErr); } catch {}
+    }, totalMs);
+    totalTimer?.unref?.();
+
+    req.on('error', (err) => {
+      finish(false, err);
     });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(new Error('HTTP timeout')); });
+    req.on('timeout', () => {
+      const timeoutErr = new Error('HTTP timeout');
+      finish(false, timeoutErr);
+      try { req.destroy(timeoutErr); } catch {}
+    });
   });
 }
 
@@ -249,41 +320,63 @@ export function evalViaCdp(wsUrl, expression, timeoutMs = 4000, WebSocketImpl = 
     if (typeof WebSocketImpl !== 'function') {
       return reject(new Error('Node.js >= 22 global WebSocket is required'));
     }
-    const ws = new WebSocketImpl(wsUrl);
-    const timer = setTimeout(() => {
+    let ws;
+    try {
+      ws = new WebSocketImpl(wsUrl);
+    } catch (err) {
+      return reject(err instanceof Error ? err : new Error(String(err)));
+    }
+    let settled = false;
+    let timer = null;
+    const settle = (ok, val) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
       try { ws.close(); } catch {}
-      reject(new Error('CDP evaluation timeout'));
+      if (ok) resolve(val);
+      else reject(val instanceof Error ? val : new Error(String(val)));
+    };
+
+    timer = setTimeout(() => {
+      settle(false, new Error('CDP evaluation timeout'));
     }, timeoutMs);
     timer?.unref?.();
 
     ws.addEventListener('open', () => {
-      ws.send(JSON.stringify({
-        id: 1,
-        method: 'Runtime.evaluate',
-        params: { expression, returnByValue: true, awaitPromise: true },
-      }));
+      if (settled) return;
+      try {
+        ws.send(JSON.stringify({
+          id: 1,
+          method: 'Runtime.evaluate',
+          params: { expression, returnByValue: true, awaitPromise: true },
+        }));
+      } catch (err) {
+        settle(false, err instanceof Error ? err : new Error(String(err)));
+      }
     });
     ws.addEventListener('message', (ev) => {
+      if (settled) return;
       try {
         const msg = JSON.parse(String(ev.data || '{}'));
         if (msg.id === 1) {
-          clearTimeout(timer);
-          try { ws.close(); } catch {}
-          if (msg.error) return reject(new Error(msg.error.message || 'CDP error'));
+          if (msg.error) return settle(false, new Error(msg.error.message || 'CDP error'));
           if (msg.result?.exceptionDetails) {
-            return reject(new Error(formatCdpExceptionDetails(msg.result.exceptionDetails)));
+            return settle(false, new Error(formatCdpExceptionDetails(msg.result.exceptionDetails)));
           }
-          resolve(msg.result?.result?.value ?? null);
+          settle(true, msg.result?.result?.value ?? null);
         }
       } catch (err) {
-        clearTimeout(timer);
-        try { ws.close(); } catch {}
-        reject(err);
+        settle(false, err instanceof Error ? err : new Error(String(err)));
       }
     });
     ws.addEventListener('error', (err) => {
-      clearTimeout(timer);
-      reject(err instanceof Error ? err : new Error('WebSocket error'));
+      settle(false, err instanceof Error ? err : new Error('WebSocket error'));
+    });
+    ws.addEventListener('close', () => {
+      settle(false, new Error('CDP WebSocket closed before response'));
     });
   });
 }

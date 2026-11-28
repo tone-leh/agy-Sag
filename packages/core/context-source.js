@@ -22,18 +22,49 @@
     return String(Math.round(n));
   }
 
+  const SIDEBAR_AUX_SELECTOR =
+    'aside, [data-testid="sidebar"], [data-testid="conversation-list-sidebar"], [data-side-panel-focus-scope="true"], [data-testid="side-question-panel"], [data-testid*="floating-composer"], [data-testid*="sidebar-composer"]';
+
   function isConnectedNode(el) {
     return Boolean(el && el.isConnected !== false);
   }
 
+  function isSidebarOrAuxiliaryNode(el) {
+    if (!el || el.nodeType !== 1) return false;
+    try {
+      if (typeof el.closest === 'function' && el.closest(SIDEBAR_AUX_SELECTOR)) return true;
+    } catch {}
+    return false;
+  }
+
+  function findMainComposerBox(doc, scopeEl = null) {
+    const pick = (root) => {
+      if (!root || typeof root.querySelectorAll !== 'function') return null;
+      const list = root.querySelectorAll('[data-testid="agent-input-box"], .surface-composer-card') || [];
+      for (let i = 0; i < list.length; i += 1) {
+        if (!isSidebarOrAuxiliaryNode(list[i])) return list[i];
+      }
+      return null;
+    };
+    const root = isConnectedNode(scopeEl) ? scopeEl : doc;
+    return pick(root) || (root !== doc ? pick(doc) : null);
+  }
+
   function findPaneRootForNode(node, doc) {
-    if (!isConnectedNode(node)) return null;
+    if (!isConnectedNode(node) || isSidebarOrAuxiliaryNode(node)) return null;
     let cur = node;
     for (let depth = 0; cur && depth < 8; depth++) {
       if (cur === doc?.body || cur === doc?.documentElement) break;
+      if (isSidebarOrAuxiliaryNode(cur)) return null;
       const hasConv = Boolean(cur.getAttribute?.('data-testid') === 'conversation-view' || cur.querySelector?.('[data-testid="conversation-view"]'));
-      const hasInput = Boolean(cur.getAttribute?.('data-testid') === 'agent-input-box' || cur.querySelector?.('[data-testid="agent-input-box"], .surface-composer-card'));
-      if (hasConv && hasInput) return cur;
+      const boxes = cur.querySelectorAll?.('[data-testid="agent-input-box"], .surface-composer-card') || [];
+      let hasMainInput = cur.getAttribute?.('data-testid') === 'agent-input-box';
+      if (!hasMainInput) {
+        for (let i = 0; i < boxes.length; i += 1) {
+          if (!isSidebarOrAuxiliaryNode(boxes[i])) { hasMainInput = true; break; }
+        }
+      }
+      if (hasConv && hasMainInput) return cur;
       cur = cur.parentElement;
     }
     return null;
@@ -100,9 +131,20 @@
 
     if (cv) {
       if (isScrollableEl(cv)) return cv;
-      const children = cv.querySelectorAll?.('*') || [];
-      for (let i = 0; i < children.length; i++) {
-        if (isScrollableEl(children[i])) return children[i];
+      // Bounded BFS (max 60 nodes, depth <= 5) instead of unbounded querySelectorAll('*')
+      const queue = [];
+      const kids = cv.children || [];
+      for (let i = 0; i < kids.length; i++) queue.push([kids[i], 1]);
+      let visited = 0;
+      while (queue.length > 0 && visited < 60) {
+        const [el, depth] = queue.shift();
+        visited += 1;
+        if (isScrollableEl(el)) return el;
+        if (depth < 5 && el?.children?.length) {
+          for (let j = 0; j < el.children.length && visited + queue.length < 120; j++) {
+            queue.push([el.children[j], depth + 1]);
+          }
+        }
       }
     }
     return null;
@@ -141,23 +183,34 @@
 
   function isTurnStreaming(doc, scopeEl = null) {
     const root = isConnectedNode(scopeEl) ? scopeEl : doc;
-    if (!root || typeof root.querySelector !== 'function') return false;
-    return Boolean(
-      root.querySelector(
-        '[data-testid="agent-input-box"] [data-testid="input-cancel-button"], [data-testid="agent-input-box"] [data-testid="stop-button"], [data-testid="stop-button"], [data-testid="cancel-button"]'
-      )
+    if (!root || typeof root.querySelectorAll !== 'function') return false;
+    const btns = root.querySelectorAll(
+      '[data-testid="agent-input-box"] [data-testid="input-cancel-button"], [data-testid="agent-input-box"] [data-testid="stop-button"], [data-testid="stop-button"], [data-testid="cancel-button"]'
     );
+    for (let i = 0; i < btns.length; i += 1) {
+      if (!isSidebarOrAuxiliaryNode(btns[i])) return true;
+    }
+    return false;
   }
 
   function findComposerEditor(doc, scopeEl = null) {
     const root = isConnectedNode(scopeEl) ? scopeEl : doc;
-    if (!root || typeof root.querySelector !== 'function') return null;
-    const box = root.querySelector('[data-testid="agent-input-box"], .surface-composer-card') || root;
-    return (
-      box.querySelector('[data-lexical-editor="true"], [contenteditable="true"], textarea') ||
-      root.querySelector('[data-lexical-editor="true"], [contenteditable="true"], textarea') ||
-      (root !== doc ? doc?.querySelector?.('[data-lexical-editor="true"], [contenteditable="true"], textarea') : null)
-    );
+    if (!root || typeof root.querySelectorAll !== 'function') return null;
+    const edSel = '[data-lexical-editor="true"], [contenteditable="true"], textarea';
+    const box = findMainComposerBox(doc, root);
+    if (box) {
+      const inBox = box.querySelector?.(edSel);
+      if (inBox && !isSidebarOrAuxiliaryNode(inBox)) return inBox;
+    }
+    const pickIn = (container) => {
+      if (!container || typeof container.querySelectorAll !== 'function') return null;
+      const eds = container.querySelectorAll(edSel) || [];
+      for (let i = 0; i < eds.length; i += 1) {
+        if (!isSidebarOrAuxiliaryNode(eds[i])) return eds[i];
+      }
+      return null;
+    };
+    return pickIn(root) || (root !== doc ? pickIn(doc) : null);
   }
 
   function readComposerDraft(doc, scopeEl = null) {
@@ -264,15 +317,16 @@
       const blocks = Array.from(
         root.querySelectorAll('pre, [data-testid*="tool"], [data-testid*="step"], details') || []
       );
+      const blockSet = new Set(blocks);
       let total = 0;
       for (let i = 0; i < blocks.length; i++) {
         const b = blocks[i];
         if (b.getAttribute?.('data-ag-sg-owned') === '1' || b.getAttribute?.('data-ag-sag-owned') === '1') continue;
-        // Skip nested match to avoid double counting (e.g., pre inside details)
+        // O(1) Set lookup prevents O(N^2 * depth) stall on 3,000-step conversations
         let nested = false;
         let p = b.parentElement;
         while (p && p !== root) {
-          if (blocks.includes(p)) {
+          if (blockSet.has(p)) {
             nested = true;
             break;
           }
@@ -287,27 +341,28 @@
     let userChars = 0;
     let assistantChars = 0;
     let codeToolsChars = 0;
+    const uLens = new Array(userBubbles.length);
+    const aLens = new Array(assistantNodes.length);
 
-    // Also include standalone tool/step blocks inside conversation view not already inside assistantNodes
     for (let i = 0; i < userBubbles.length; i++) {
-      userChars += measureOwnedExcludedLen(userBubbles[i]);
+      const len = measureOwnedExcludedLen(userBubbles[i]);
+      uLens[i] = len;
+      userChars += len;
     }
     for (let i = 0; i < assistantNodes.length; i++) {
       const a = assistantNodes[i];
       const totalA = measureOwnedExcludedLen(a);
+      aLens[i] = totalA;
       const ct = Math.min(totalA, measureCodeAndToolChars(a));
       codeToolsChars += ct;
       assistantChars += Math.max(0, totalA - ct);
     }
 
-    // Build per-turn weight list (pairing user turn i with assistant turn i when aligned)
+    // Build per-turn weight list reusing cached lengths (single pass)
     const turnWeights = [];
     for (let i = 0; i < userBubbles.length; i++) {
       const uNode = userBubbles[i];
-      const aNode = assistantNodes[i] || null;
-      const uLen = measureOwnedExcludedLen(uNode);
-      const aLen = aNode ? measureOwnedExcludedLen(aNode) : 0;
-      const tChars = uLen + aLen;
+      const tChars = (uLens[i] || 0) + (aLens[i] || 0);
       const rawPreview = String(uNode.textContent || '').replace(/\s+/g, ' ').trim();
       turnWeights.push({
         turnNum: i + 1,
@@ -496,6 +551,8 @@
   return {
     DEFAULT_MAX_TOKENS,
     formatTokens,
+    isSidebarOrAuxiliaryNode,
+    findMainComposerBox,
     findPaneRootForNode,
     resolveActivePaneScope,
     resolveActiveConversationView,

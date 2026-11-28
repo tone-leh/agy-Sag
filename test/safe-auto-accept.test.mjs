@@ -551,7 +551,7 @@ test('SafeAutoAccept UMD global mount, permission/dialog containers, rm flag reo
   });
 
   moCallback([{ target: dom.doc.body }]);
-  await new Promise((r) => setTimeout(r, 80));
+  await new Promise((r) => setTimeout(r, 180));
 
   assert.equal(permCard.getConfirmClicks(), 1);
   assert.equal(permCard.getDenyClicks(), 0);

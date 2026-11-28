@@ -304,6 +304,7 @@
         statusDraft: '输入框有草稿，已自动暂停',
         statusApproval: '等待审批处理，已自动暂停',
         statusSpecLock: 'agy-NOV Spec 写锁生效，队列暂停',
+        statusNativeQueue: '检测到原生排队/立即发送，已自动暂停',
         statusSubmitUnconfirmed: '未能确认发送，已保留在队列并暂停',
         statusReady: '空闲后自动发送',
       };
@@ -329,6 +330,7 @@
       statusDraft: 'Paused: composer has draft',
       statusApproval: 'Paused: approval pending',
       statusSpecLock: 'Paused: agy-NOV Spec write-lock active',
+      statusNativeQueue: 'Paused: native Send Now queue active',
       statusSubmitUnconfirmed: 'Paused: submit not confirmed (kept in queue)',
       statusReady: 'Auto-send when idle',
     };
@@ -343,7 +345,28 @@
     const exporter = options.exporter || resolveDep('__agSgPrecompactExport', './precompact-export.js');
     const nowFn = typeof options.now === 'function' ? options.now : () => Date.now();
     const dispatchDelayMs = Math.max(0, Number(options.dispatchDelayMs ?? 1200));
+    const observeThrottleMs = Math.max(0, Number(options.observeThrottleMs ?? (dispatchDelayMs === 0 ? 40 : 150)));
     const autoObserve = options.autoObserve !== undefined ? Boolean(options.autoObserve) : true;
+    const SEND_NOW_TEXT_RE = /^\s*(?:send\s+now|立即发送)\s*$/i;
+    const safeInsert = (parent, node, ref) => {
+      if (typeof coexist?.safeInsertBefore === 'function') return coexist.safeInsertBefore(parent, node, ref);
+      try {
+        if (ref && ref.parentElement === parent && typeof parent.insertBefore === 'function') parent.insertBefore(node, ref);
+        else parent?.appendChild?.(node);
+        return true;
+      } catch { return false; }
+    };
+    const isSidebarAux = (el) => Boolean(ctxSrc?.isSidebarOrAuxiliaryNode?.(el));
+    const isSendNowBtn = (el) => {
+      if (!el) return false;
+      const tid = String(el.getAttribute?.('data-testid') || '').toLowerCase();
+      if (tid.includes('send-now') || tid.includes('native-queue')) return true;
+      const lbl = String(el.textContent || '');
+      if (SEND_NOW_TEXT_RE.test(lbl)) return true;
+      const aria = String(el.getAttribute?.('aria-label') || '');
+      if (SEND_NOW_TEXT_RE.test(aria)) return true;
+      return false;
+    };
 
     let enabled = options.enabled !== undefined ? Boolean(options.enabled) : true;
     let paused = Boolean(options.paused);
@@ -456,10 +479,14 @@
 
     function findComposerBox(scope = getScope()) {
       if (!doc) return null;
-      const pools = scope && scope !== doc ? [scope] : [doc];
+      if (typeof ctxSrc?.findMainComposerBox === 'function') {
+        const mainBox = ctxSrc.findMainComposerBox(doc, scope);
+        if (mainBox && !isOwnedNode(mainBox)) return mainBox;
+      }
+      const pools = scope && scope !== doc ? [scope, doc] : [doc];
       for (const pool of pools) {
         const hit = safeQueryAll(pool, '[data-testid="agent-input-box"], .surface-composer-card').find(
-          (el) => el && !isOwnedNode(el)
+          (el) => el && !isOwnedNode(el) && !isSidebarAux(el)
         );
         if (hit) return hit;
       }
@@ -472,7 +499,7 @@
       const sel = '[data-lexical-editor="true"], [contenteditable="true"], textarea';
       const pools = [box, scope && scope !== doc ? scope : doc].filter(Boolean);
       for (const pool of pools) {
-        const found = safeQueryAll(pool, sel).find((el) => el && !isOwnedNode(el));
+        const found = safeQueryAll(pool, sel).find((el) => el && !isOwnedNode(el) && !isSidebarAux(el));
         if (found) return found;
       }
       return null;
@@ -499,7 +526,7 @@
       const sel = '[data-testid="stop-button"], [data-testid="input-cancel-button"]';
       const nodes = [...safeQueryAll(scope, sel), ...safeQueryAll(doc, sel)];
       for (const n of nodes) {
-        if (!n || isOwnedNode(n)) continue;
+        if (!n || isOwnedNode(n) || isSidebarAux(n)) continue;
         if (isElementVisible(n, win)) return true;
       }
       return false;
@@ -522,18 +549,55 @@
         }
       };
       const approvalSel = '.approval-card, [data-testid*="approval"], [data-testid*="permission"], [role="alertdialog"]';
-      pushList(safeQueryAll(scope, approvalSel));
-      pushList(safeQueryAll(doc, approvalSel));
-      // Fallback for minimal DOM mocks that do not implement [attr*="val"]
-      for (const el of safeQueryAll(doc, '[data-testid]')) {
-        if (!el || seen.has(el) || isOwnedNode(el)) continue;
-        const tid = String(el.getAttribute?.('data-testid') || '').toLowerCase();
-        if (tid.includes('approval') || tid.includes('permission')) {
-          seen.add(el);
-          candidates.push(el);
+      let selectorSupported = true;
+      for (const root of scope && scope !== doc ? [scope, doc] : [doc]) {
+        if (!root || typeof root.querySelectorAll !== 'function') continue;
+        try {
+          pushList(Array.from(root.querySelectorAll(approvalSel) || []));
+        } catch {
+          selectorSupported = false;
+        }
+      }
+      // Fallback only when selector throws on a minimal DOM mock lacking [attr*="val"]
+      if (!selectorSupported) {
+        for (const el of safeQueryAll(doc, '[data-testid]')) {
+          if (!el || seen.has(el) || isOwnedNode(el)) continue;
+          const tid = String(el.getAttribute?.('data-testid') || '').toLowerCase();
+          if (tid.includes('approval') || tid.includes('permission')) {
+            seen.add(el);
+            candidates.push(el);
+          }
         }
       }
       return candidates.some((el) => isElementVisible(el, win));
+    }
+
+    function checkNativeQueueActive(scope = getScope()) {
+      if (!doc) return false;
+      const box = findComposerBox(scope);
+      const roots = box ? [box] : (scope && scope !== doc ? [scope] : [doc]);
+      const nativeSel = '[data-testid*="send-now"], [data-testid*="native-queue"]';
+      for (const root of roots) {
+        if (!root || typeof root.querySelectorAll !== 'function') continue;
+        let bySel = [];
+        try {
+          bySel = Array.from(root.querySelectorAll(nativeSel) || []);
+        } catch {
+          bySel = [];
+        }
+        for (const el of bySel) {
+          if (!el || isOwnedNode(el) || isSidebarAux(el)) continue;
+          if (isElementVisible(el, win)) return true;
+        }
+        if (box && root === box) {
+          const btns = safeQueryAll(box, 'button');
+          for (const b of btns) {
+            if (!b || isOwnedNode(b) || isSidebarAux(b)) continue;
+            if (isSendNowBtn(b) && isElementVisible(b, win)) return true;
+          }
+        }
+      }
+      return false;
     }
 
     function evaluateReadiness() {
@@ -554,6 +618,9 @@
       }
       if (typeof options.isSpecWriteLocked === 'function' && options.isSpecWriteLocked()) {
         return { ready: false, reason: 'spec-write-lock' };
+      }
+      if (checkNativeQueueActive(scope)) {
+        return { ready: false, reason: 'native-queue-active' };
       }
       return { ready: true, reason: null, scope };
     }
@@ -608,7 +675,17 @@
       const formScope = ed.closest?.('form') || null;
       const fb = !box && !formScope && ed.parentElement && ed.parentElement !== doc.body && ed.parentElement !== doc.documentElement ? ed.parentElement : null;
       const usable = (b) =>
-        Boolean(b && !isOwnedNode(b) && isElementVisible(b, win) && !b.disabled && b.getAttribute?.('aria-disabled') !== 'true' && !b.hasAttribute?.('disabled') && typeof b.click === 'function');
+        Boolean(
+          b &&
+          !isOwnedNode(b) &&
+          !isSidebarAux(b) &&
+          !isSendNowBtn(b) &&
+          isElementVisible(b, win) &&
+          !b.disabled &&
+          b.getAttribute?.('aria-disabled') !== 'true' &&
+          !b.hasAttribute?.('disabled') &&
+          typeof b.click === 'function'
+        );
       const pickBtn = (list, sels) => {
         const seen = new Set();
         for (const sc of list) {
@@ -668,7 +745,7 @@
 
       if (barEl && barEl.isConnected !== false) {
         if (barEl.parentElement !== anchor.parentElement) {
-          anchor.parentElement.insertBefore(barEl, anchor);
+          safeInsert(anchor.parentElement, barEl, anchor);
         }
         return barEl;
       }
@@ -788,7 +865,7 @@
       bar.appendChild(triggerBtn);
       bar.appendChild(panelEl);
 
-      anchor.parentElement.insertBefore(bar, anchor);
+      safeInsert(anchor.parentElement, bar, anchor);
       barEl = bar;
       return barEl;
     }
@@ -827,6 +904,7 @@
       else if (lastSkipReason === 'composer-occupied') statusEl.textContent = s.statusDraft;
       else if (lastSkipReason === 'blocking-approval') statusEl.textContent = s.statusApproval;
       else if (lastSkipReason === 'spec-write-lock') statusEl.textContent = s.statusSpecLock || 'Spec write-lock active, paused';
+      else if (lastSkipReason === 'native-queue-active') statusEl.textContent = s.statusNativeQueue || 'Paused: native Send Now queue active';
       else statusEl.textContent = s.statusReady;
 
       pauseBtn.textContent = paused ? s.resume : s.pause;
@@ -1296,15 +1374,21 @@
       if (typeof MO !== 'function' || !target) return;
       observer = new MO((records) => {
         if (destroyed || !enabled) return;
-        const hasExternal = Array.isArray(records)
-          ? records.some((r) => r && !isOwnedNode(r.target))
-          : true;
-        if (!hasExternal) return;
+        if (coexist?.isWindowHibernated?.(doc, win, false)) return;
+        if (typeof coexist?.isMutationOwnedOnly === 'function') {
+          if (coexist.isMutationOwnedOnly(records)) return;
+        } else {
+          const hasExternal = Array.isArray(records)
+            ? records.some((r) => r && !isOwnedNode(r.target))
+            : true;
+          if (!hasExternal) return;
+        }
         if (observeTimer) return;
         observeTimer = setTimeout(() => {
           observeTimer = null;
+          if (destroyed || !enabled || coexist?.isWindowHibernated?.(doc, win, false)) return;
           sync();
-        }, 60);
+        }, observeThrottleMs);
         observeTimer?.unref?.();
       });
       try {
@@ -1312,7 +1396,7 @@
           childList: true,
           subtree: true,
           attributes: true,
-          attributeFilter: ['hidden', 'aria-hidden', 'disabled', 'data-cascade-id', 'data-ag-sag-lang', 'style', 'class'],
+          attributeFilter: ['hidden', 'aria-hidden', 'disabled', 'data-cascade-id', 'data-ag-sag-lang'],
         });
       } catch {
         observer = null;
@@ -1353,7 +1437,8 @@
         autoPaused:
           lastSkipReason === 'composer-occupied' ||
           lastSkipReason === 'blocking-approval' ||
-          lastSkipReason === 'spec-write-lock',
+          lastSkipReason === 'spec-write-lock' ||
+          lastSkipReason === 'native-queue-active',
         dispatchedCount,
         lastDispatchedItem: lastDispatchedItem ? { ...lastDispatchedItem } : null,
         barMounted: Boolean(barEl && barEl.isConnected !== false),

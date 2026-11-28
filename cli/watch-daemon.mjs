@@ -39,19 +39,12 @@ import { auditAntigravityStorage, searchSanitizedSessions } from './storage-doct
 import { TranslatorService } from './translator-service.mjs';
 
 export const HOST_BRIDGE_BINDING_NAME = '__agSagHostBridge';
+const MAX_EXECUTION_CONTEXTS = 1024;
+const HOST_BRIDGE_HANDSHAKE_TIMEOUT_MS = 8000;
+const STORAGE_AUDIT_CACHE_TTL_MS = 15_000;
 
 export function serializeInlineJson(value) {
   return (JSON.stringify(value) ?? 'null').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
-}
-
-function collectChildFrameIds(frameTree, outSet) {
-  if (!frameTree || typeof frameTree !== 'object') return;
-  const children = Array.isArray(frameTree.childFrames) ? frameTree.childFrames : [];
-  for (const child of children) {
-    const id = typeof child?.frame?.id === 'string' && child.frame.id ? child.frame.id : null;
-    if (id) outSet.add(id);
-    collectChildFrameIds(child, outSet);
-  }
 }
 
 function decodeWsMessageData(data) {
@@ -114,6 +107,7 @@ export class HostBridgeSession {
     targetId,
     wsUrl,
     WebSocketImpl = globalThis.WebSocket,
+    handshakeTimeoutMs = HOST_BRIDGE_HANDSHAKE_TIMEOUT_MS,
     onPayload,
     onOpen = () => {},
     onReady = () => {},
@@ -125,6 +119,10 @@ export class HostBridgeSession {
     this.targetId = rawTargetId || String(wsUrl || '');
     this.wsUrl = wsUrl;
     this.WebSocketImpl = WebSocketImpl;
+    this.handshakeTimeoutMs =
+      Number.isFinite(Number(handshakeTimeoutMs)) && Number(handshakeTimeoutMs) > 0
+        ? Math.floor(Number(handshakeTimeoutMs))
+        : HOST_BRIDGE_HANDSHAKE_TIMEOUT_MS;
     this.onPayload = typeof onPayload === 'function' ? onPayload : () => ({ reqId: null, ok: false, error: 'No handler' });
     this.onOpen = typeof onOpen === 'function' ? onOpen : () => {};
     this.onReady = typeof onReady === 'function' ? onReady : () => {};
@@ -143,9 +141,33 @@ export class HostBridgeSession {
     this._frameTreeResolved = false;
     this._frameTreeSupported = true;
     this._executionContexts = new Map(); // ctxId -> { id, frameId, isDefault, type }
-    this._knownChildFrameIds = new Set();
+    this._handshakeTimer = null;
     this._lastNovStateSig = undefined;
     this._lastNovFeedSig = undefined;
+  }
+
+  _clearHandshakeTimer() {
+    if (this._handshakeTimer !== null) {
+      clearTimeout(this._handshakeTimer);
+      this._handshakeTimer = null;
+    }
+  }
+
+  _pruneExecutionContexts() {
+    if (this._executionContexts.size <= MAX_EXECUTION_CONTEXTS) return;
+    for (const [entryId, entry] of this._executionContexts) {
+      if (this._executionContexts.size <= MAX_EXECUTION_CONTEXTS) break;
+      if (entryId === this.mainContextId) continue;
+      if (this._authoritativeMainFrameId && entry.frameId === this._authoritativeMainFrameId) continue;
+      this._executionContexts.delete(entryId);
+    }
+    if (this._executionContexts.size > MAX_EXECUTION_CONTEXTS) {
+      for (const entryId of this._executionContexts.keys()) {
+        if (this._executionContexts.size <= MAX_EXECUTION_CONTEXTS) break;
+        if (entryId === this.mainContextId) continue;
+        this._executionContexts.delete(entryId);
+      }
+    }
   }
 
   isOpen() {
@@ -282,6 +304,7 @@ export class HostBridgeSession {
     this.ws = ws;
 
     const handleOpen = () => {
+      this._clearHandshakeTimer();
       if (this.closed || this.ws !== ws) {
         try { ws.close(); } catch {}
         return;
@@ -316,9 +339,6 @@ export class HostBridgeSession {
         if (topFrameId && !msg.error && urlAllowed) {
           this._frameTreeResolved = true;
           this._frameTreeSupported = true;
-          this._knownChildFrameIds.clear();
-          collectChildFrameIds(msg.result.frameTree, this._knownChildFrameIds);
-          this._knownChildFrameIds.delete(topFrameId);
           this._authoritativeMainFrameId = topFrameId;
           this.mainFrameId = topFrameId;
           this._reconcileMainContext();
@@ -345,7 +365,6 @@ export class HostBridgeSession {
         const parentId =
           typeof msg.params?.parentFrameId === 'string' && msg.params.parentFrameId ? msg.params.parentFrameId : null;
         if (childId && parentId) {
-          this._knownChildFrameIds.add(childId);
           if (this.mainFrameId === childId && this._authoritativeMainFrameId !== childId) {
             this.mainFrameId = null;
             this.mainContextId = null;
@@ -361,7 +380,6 @@ export class HostBridgeSession {
         const frameId = typeof frame?.id === 'string' && frame.id ? frame.id : null;
         if (frameId) {
           if (frame.parentId) {
-            this._knownChildFrameIds.add(frameId);
             if (this.mainFrameId === frameId && this._authoritativeMainFrameId !== frameId) {
               this.mainFrameId = null;
               this.mainContextId = null;
@@ -378,7 +396,6 @@ export class HostBridgeSession {
               this._boundContextId = null;
               return;
             }
-            this._knownChildFrameIds.delete(frameId);
             this._authoritativeMainFrameId = frameId;
             this.mainFrameId = frameId;
             this._reconcileMainContext();
@@ -402,6 +419,7 @@ export class HostBridgeSession {
             isDefault,
             type,
           });
+          this._pruneExecutionContexts();
           if (isDefault) {
             this._reconcileMainContext();
           }
@@ -426,7 +444,6 @@ export class HostBridgeSession {
 
       if (msg.method === 'Runtime.executionContextsCleared') {
         this._executionContexts.clear();
-        this._knownChildFrameIds.clear();
         this._frameTreeResolved = false;
         this._authoritativeMainFrameId = null;
         this.mainFrameId = null;
@@ -465,6 +482,7 @@ export class HostBridgeSession {
 
     const handleCloseOrError = (kind, err) => {
       if (this.ws !== ws) return;
+      this._clearHandshakeTimer();
       const wasClosed = this.closed;
       this.ready = false;
       this.closed = true;
@@ -473,7 +491,6 @@ export class HostBridgeSession {
       this._boundContextId = null;
       this._frameTreeReqId = null;
       this._executionContexts.clear();
-      this._knownChildFrameIds.clear();
       if (kind === 'error') {
         this.onEvent('bridge-error', {
           targetId: this.targetId,
@@ -491,6 +508,14 @@ export class HostBridgeSession {
     ws.addEventListener('message', handleMessage);
     ws.addEventListener('close', () => handleCloseOrError('close'));
     ws.addEventListener('error', (err) => handleCloseOrError('error', err));
+
+    this._clearHandshakeTimer();
+    this._handshakeTimer = setTimeout(() => {
+      this._handshakeTimer = null;
+      if (this.closed || this.ready || this.ws !== ws) return;
+      handleCloseOrError('error', new Error(`CDP WebSocket handshake timeout (${this.handshakeTimeoutMs}ms)`));
+    }, this.handshakeTimeoutMs);
+    this._handshakeTimer?.unref?.();
     return true;
   }
 
@@ -533,6 +558,7 @@ export class HostBridgeSession {
   }
 
   close() {
+    this._clearHandshakeTimer();
     if (this.closed && !this.ws) return;
     const ws = this.ws;
     this.closed = true;
@@ -542,7 +568,6 @@ export class HostBridgeSession {
     this._boundContextId = null;
     this._frameTreeReqId = null;
     this._executionContexts.clear();
-    this._knownChildFrameIds.clear();
     if (ws) {
       try { ws.close?.(); } catch {}
     }
@@ -647,17 +672,32 @@ export class SagWatchDaemon {
     this.deferExtPack = typeof options.deferExtPack === 'boolean' ? options.deferExtPack : this.enableHostBridge;
     this.storageDataDir = options.storageDataDir || undefined;
     this.translatorService = options.translatorService || new TranslatorService(options.translatorOpts || {});
+    this._defaultInjectCache = new Map();
+    this._cachedCoreHash = null;
+    this._storageAuditCache = new Map();
     this.buildInject =
       options.buildInject ||
-      (({ extLocale = null } = {}) => ({
-        codeHash: computeCoreHash(),
-        expression: buildInjectExpression(this.config, {
+      (({ extLocale = null } = {}) => {
+        const effectiveLocale = this.deferExtPack ? '' : String(extLocale || this.config?.hostI18nLocale || '');
+        const cached = this._defaultInjectCache.get(effectiveLocale);
+        if (cached) return cached;
+        const expression = buildInjectExpression(this.config, {
           source: 'standalone',
-          extLocale: extLocale || this.config?.hostI18nLocale || null,
+          extLocale: effectiveLocale || null,
           deferExtPack: this.deferExtPack,
           respectManualRemove: true,
-        }),
-      }));
+        });
+        const hashMatch = expression.match(/const targetHash = "([a-f0-9]+)";/);
+        const codeHash = hashMatch ? hashMatch[1] : (this._cachedCoreHash ||= computeCoreHash());
+        this._cachedCoreHash = codeHash;
+        const built = { codeHash, expression };
+        if (this._defaultInjectCache.size >= 16) {
+          const oldestKey = this._defaultInjectCache.keys().next().value;
+          if (oldestKey !== undefined) this._defaultInjectCache.delete(oldestKey);
+        }
+        this._defaultInjectCache.set(effectiveLocale, built);
+        return built;
+      });
     this.extPacksRepoRoot = options.extPacksRepoRoot || undefined;
     this.onEvent = typeof options.onEvent === 'function' ? options.onEvent : () => {};
     this.now = options.now || (() => Date.now());
@@ -796,27 +836,38 @@ export class SagWatchDaemon {
         if (parsed && typeof parsed === 'object' && parsed.type === 'sag:storage_audit') {
           const reqId = typeof parsed.reqId === 'string' && parsed.reqId.length <= 128 ? parsed.reqId : null;
           try {
+            const cacheKey = this.storageDataDir ? path.resolve(this.storageDataDir) : '__default__';
+            const nowMs = this.now();
+            const cached = this._storageAuditCache.get(cacheKey);
+            if (cached && cached.expiresAt > nowMs) {
+              return { reqId, ok: true, data: cached.data };
+            }
             const rep = auditAntigravityStorage({
               ...(this.storageDataDir ? { dataDir: this.storageDataDir } : {}),
               topN: 5,
             });
-            return {
-              reqId,
-              ok: true,
-              data: {
-                exists: Boolean(rep?.exists),
-                totalBytes: Number(rep?.totalBytes) || 0,
-                totalFiles: Number(rep?.totalFiles) || 0,
-                brainSessionCount: Number(rep?.brain?.sessionCount) || 0,
-                brainBytes: Number(rep?.brain?.totalBytes) || 0,
-                conversationCount: Number(rep?.conversations?.fileCount) || 0,
-                conversationBytes: Number(rep?.conversations?.totalBytes) || 0,
-                walActive: Boolean(rep?.sqlite?.walActive),
-                orphanCount: Array.isArray(rep?.orphans) ? rep.orphans.length : 0,
-                corruptCount: Array.isArray(rep?.corruptFiles) ? rep.corruptFiles.length : 0,
-                warningCount: Array.isArray(rep?.warnings) ? rep.warnings.length : 0,
-              },
+            const data = {
+              exists: Boolean(rep?.exists),
+              totalBytes: Number(rep?.totalBytes) || 0,
+              totalFiles: Number(rep?.totalFiles) || 0,
+              brainSessionCount: Number(rep?.brain?.sessionCount) || 0,
+              brainBytes: Number(rep?.brain?.totalBytes) || 0,
+              conversationCount: Number(rep?.conversations?.fileCount) || 0,
+              conversationBytes: Number(rep?.conversations?.totalBytes) || 0,
+              walActive: Boolean(rep?.sqlite?.walActive),
+              orphanCount: Array.isArray(rep?.orphans) ? rep.orphans.length : 0,
+              corruptCount: Array.isArray(rep?.corruptFiles) ? rep.corruptFiles.length : 0,
+              warningCount: Array.isArray(rep?.warnings) ? rep.warnings.length : 0,
             };
+            if (this._storageAuditCache.size >= 8) {
+              const oldestKey = this._storageAuditCache.keys().next().value;
+              if (oldestKey !== undefined) this._storageAuditCache.delete(oldestKey);
+            }
+            this._storageAuditCache.set(cacheKey, {
+              expiresAt: nowMs + STORAGE_AUDIT_CACHE_TTL_MS,
+              data,
+            });
+            return { reqId, ok: true, data };
           } catch {
             return { reqId, ok: false, error: 'Storage audit failed' };
           }
@@ -1154,6 +1205,7 @@ export class SagWatchDaemon {
       let probedLocale = null;
 
       try {
+        let needsReinject = false;
         if (prev && prev.wsUrl === page.webSocketDebuggerUrl && prev.url === page.url) {
           const probe = await this.evalTarget(page.webSocketDebuggerUrl, PROBE_EXPRESSION);
           if (this._stopped) break;
@@ -1172,27 +1224,47 @@ export class SagWatchDaemon {
             continue;
           }
           // Window reloaded or agy-Sag was cleared -> re-inject cleanly below
+          needsReinject = true;
         }
 
         const bundle = getBundle(probedLocale);
         const res = await this.evalTarget(page.webSocketDebuggerUrl, bundle.expression);
         if (this._stopped) break;
-        changed = true;
         if (res?.yielded) {
           yielded += 1;
+          const nextStatus = res.removedByUser ? 'removed-by-user' : 'yielded';
+          if (
+            !prev ||
+            prev.status !== nextStatus ||
+            prev.wsUrl !== page.webSocketDebuggerUrl ||
+            prev.url !== page.url
+          ) {
+            changed = true;
+          }
           this.attachedTargets.set(key, {
             codeHash: bundle.codeHash,
             url: page.url,
             wsUrl: page.webSocketDebuggerUrl,
-            status: res.removedByUser ? 'removed-by-user' : 'yielded',
+            status: nextStatus,
             updatedAt: this.now(),
           });
           this._closeBridgeSession(key);
           this.emit('target-yielded', { port, targetId: key, title: page.title || '', url: page.url });
         } else if (res?.ok) {
           attached += 1;
+          const nextCodeHash = res.codeHash || bundle.codeHash;
+          if (
+            !prev ||
+            needsReinject ||
+            prev.status !== 'attached' ||
+            prev.codeHash !== nextCodeHash ||
+            prev.wsUrl !== page.webSocketDebuggerUrl ||
+            prev.url !== page.url
+          ) {
+            changed = true;
+          }
           this.attachedTargets.set(key, {
-            codeHash: res.codeHash || bundle.codeHash,
+            codeHash: nextCodeHash,
             url: page.url,
             wsUrl: page.webSocketDebuggerUrl,
             status: 'attached',
@@ -1204,7 +1276,7 @@ export class SagWatchDaemon {
             targetId: key,
             title: page.title || '',
             reused: Boolean(res.reused),
-            codeHash: res.codeHash || bundle.codeHash,
+            codeHash: nextCodeHash,
           });
         } else {
           errors += 1;
@@ -1280,10 +1352,21 @@ export class SagWatchDaemon {
     this.running = true;
     const tick = async () => {
       if (!this.running || this._stopped) return;
-      const res = await this.reconcileOnce();
-      if (!this.running || this._stopped) return;
-      this.timer = this.setTimer(tick, res.nextDelayMs);
-      this.timer?.unref?.();
+      let nextDelayMs = this.currentDelayMs;
+      try {
+        const res = await this.reconcileOnce();
+        if (res && typeof res.nextDelayMs === 'number' && Number.isFinite(res.nextDelayMs)) {
+          nextDelayMs = res.nextDelayMs;
+        }
+      } catch (err) {
+        nextDelayMs = this._bumpBackoff(2);
+        this.emit('error', { error: err?.message || String(err), nextDelayMs });
+      } finally {
+        if (this.running && !this._stopped) {
+          this.timer = this.setTimer(tick, nextDelayMs);
+          this.timer?.unref?.();
+        }
+      }
     };
     void tick();
   }

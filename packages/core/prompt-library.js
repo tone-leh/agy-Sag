@@ -461,6 +461,18 @@
       return sag?.[key] ?? fallback;
     };
     const getScope = () => (ctxSrc?.resolveActivePaneScope ? ctxSrc.resolveActivePaneScope(doc, activePaneEl) : doc);
+    const safeAppend = (parent, node) => {
+      if (typeof coexist?.safeAppendChild === 'function') return coexist.safeAppendChild(parent, node);
+      try { parent?.appendChild?.(node); return true; } catch { return false; }
+    };
+    const safeInsert = (parent, node, ref) => {
+      if (typeof coexist?.safeInsertBefore === 'function') return coexist.safeInsertBefore(parent, node, ref);
+      try {
+        if (ref && ref.parentElement === parent && typeof parent.insertBefore === 'function') parent.insertBefore(node, ref);
+        else parent?.appendChild?.(node);
+        return true;
+      } catch { return false; }
+    };
 
     function loadSnippets() {
       if (!storage || typeof storage.getItem !== 'function') return [];
@@ -493,7 +505,7 @@
       el.id = styles.STYLE_ID;
       el.textContent = styles.CORE_CSS;
       coexist?.markOwnedNoTranslate?.(el);
-      (doc.head || doc.documentElement || doc.body)?.appendChild?.(el);
+      safeAppend(doc.head || doc.documentElement || doc.body, el);
       createdStyleEl = el;
     }
 
@@ -738,12 +750,23 @@
 
     function findTriggerAnchor(scope = getScope()) {
       if (!doc) return null;
+      const isAux = (el) => Boolean(ctxSrc?.isSidebarOrAuxiliaryNode?.(el));
+      const pick = (root, sel) => {
+        if (!root || typeof root.querySelectorAll !== 'function') return null;
+        const list = root.querySelectorAll(sel) || [];
+        for (let i = 0; i < list.length; i += 1) {
+          if (list[i] && !isAux(list[i])) return list[i];
+        }
+        return null;
+      };
       const root = scope && scope.isConnected !== false ? scope : doc;
+      const mainBox = typeof ctxSrc?.findMainComposerBox === 'function' ? ctxSrc.findMainComposerBox(doc, root) : null;
       return (
-        root.querySelector?.('.agy-composer-footer') ||
-        doc.querySelector?.('.agy-composer-footer') ||
-        root.querySelector?.('[data-testid="agent-input-box"] .composer-foot') ||
-        doc.querySelector?.('[data-testid="agent-input-box"] .composer-foot') ||
+        pick(mainBox, '.agy-composer-footer, .composer-foot') ||
+        pick(root, '.agy-composer-footer') ||
+        (root !== doc ? pick(doc, '.agy-composer-footer') : null) ||
+        pick(root, '[data-testid="agent-input-box"] .composer-foot') ||
+        (root !== doc ? pick(doc, '[data-testid="agent-input-box"] .composer-foot') : null) ||
         null
       );
     }
@@ -778,15 +801,15 @@
         });
 
         const pillWrap = footer.querySelector?.('[data-testid="ag-sg-pill-wrap"]');
-        if (pillWrap && pillWrap.parentElement === footer && typeof footer.insertBefore === 'function') {
-          footer.insertBefore(btn, pillWrap);
+        if (pillWrap && pillWrap.parentElement === footer) {
+          safeInsert(footer, btn, pillWrap);
         } else {
           const kids = Array.from(footer.children || []);
           const trailing = kids.length > 1 ? kids[kids.length - 1] : null;
-          if (trailing && typeof footer.insertBefore === 'function') {
-            footer.insertBefore(btn, trailing);
+          if (trailing) {
+            safeInsert(footer, btn, trailing);
           } else {
-            footer.appendChild(btn);
+            safeAppend(footer, btn);
           }
         }
         triggerBtn = btn;
@@ -821,7 +844,7 @@
         modalEl.addEventListener('click', (ev) => ev?.stopPropagation?.());
 
         backdropEl.appendChild(modalEl);
-        doc.body.appendChild(backdropEl);
+        safeAppend(doc.body, backdropEl);
       }
       return modalEl;
     }
@@ -1259,7 +1282,7 @@
       el.setAttribute('role', 'status');
       el.setAttribute('aria-live', 'polite');
       el.textContent = String(msg);
-      doc.body.appendChild(el);
+      safeAppend(doc.body, el);
       ctxToastEl = el;
       ctxToastTimer = setTimeout(() => {
         ctxToastTimer = null;
@@ -1388,7 +1411,7 @@
 
       pill.appendChild(quoteBtn);
       pill.appendChild(tplBtn);
-      doc.body.appendChild(pill);
+      safeAppend(doc.body, pill);
       selPillEl = pill;
     }
 
@@ -1501,7 +1524,7 @@
         });
       }
 
-      doc.body.appendChild(menu);
+      safeAppend(doc.body, menu);
       ctxMenuEl = menu;
       return true;
     }
@@ -1683,12 +1706,26 @@
       addDocL('mouseup', onMouseUp, false);
       addDocL('click', onDocClick, true);
       addDocL('contextmenu', onContextMenu, false);
+      if (ctxSrc?.findPaneRootForNode) {
+        const onPaneFocus = (ev) => {
+          if (destroyed || !enabled || !ev?.target || isOwnedMutationNode(ev.target)) return;
+          const pane = ctxSrc.findPaneRootForNode(ev.target, doc);
+          if (pane && pane !== activePaneEl) {
+            activePaneEl = pane;
+            ensureTrigger();
+          }
+        };
+        addDocL('pointerdown', onPaneFocus, true);
+        addDocL('focusin', onPaneFocus, true);
+      }
 
       if (options.autoObserve !== false && typeof win?.MutationObserver === 'function' && doc.body) {
         domObserver = new win.MutationObserver((records) => {
           if (!enabled || destroyed) return;
           if (coexist?.isWindowHibernated?.(doc, win, false)) return;
-          if (Array.isArray(records) && records.length > 0) {
+          if (typeof coexist?.isMutationOwnedOnly === 'function') {
+            if (coexist.isMutationOwnedOnly(records)) return;
+          } else if (Array.isArray(records) && records.length > 0) {
             const hasExternal = records.some((rec) => {
               if (!isOwnedMutationNode(rec?.target)) {
                 const added = Array.from(rec?.addedNodes || []);

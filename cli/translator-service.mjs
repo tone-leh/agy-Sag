@@ -25,7 +25,10 @@ export const TRANSLATOR_ENGINES = Object.freeze(['mt', 'openai', 'anthropic', 'g
 export const MAX_TRANSLATE_TEXT_CHARS = 12000;
 export const MAX_CACHE_ENTRIES = 400;
 export const MAX_CONCURRENT_REQUESTS = 3;
+export const MAX_WAIT_QUEUE_SIZE = 32;
+export const MAX_RESPONSE_BYTES = 1024 * 1024;
 export const DEFAULT_TIMEOUT_MS = 25000;
+let secretsWriteCounter = 0;
 
 export const DEFAULT_PROVIDERS = Object.freeze({
   mt: Object.freeze({ endpoint: '' }),
@@ -230,7 +233,12 @@ export function writeProviderSecrets(nextStore, opts = {}) {
   assertNoSymlinkAncestors(filePath, { platform });
 
   const realDir = canonicalRealpathSync(dir);
-  const tmpPath = path.join(dir, `.translator-secrets.${process.pid}.${Date.now()}.tmp`);
+  secretsWriteCounter += 1;
+  const randomSuffix = crypto.randomBytes(6).toString('hex');
+  const tmpPath = path.join(
+    dir,
+    `.translator-secrets.${process.pid}.${Date.now()}.${secretsWriteCounter}.${randomSuffix}.tmp`
+  );
   if (!isPathWithinBase(tmpPath, dir, platform)) {
     throw new Error('Security violation: temp secrets path escapes config directory');
   }
@@ -377,7 +385,47 @@ function splitTextForMt(text, maxChunk = 1800) {
   return chunks;
 }
 
-async function fetchJsonSafe(fetchFn, url, init, timeoutMs = DEFAULT_TIMEOUT_MS) {
+async function readResponseTextBounded(res, maxBytes = MAX_RESPONSE_BYTES) {
+  const contentLengthRaw = typeof res?.headers?.get === 'function' ? res.headers.get('content-length') : null;
+  if (contentLengthRaw !== null && contentLengthRaw !== undefined && String(contentLengthRaw).trim() !== '') {
+    const contentLength = Number(contentLengthRaw);
+    if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+      try { await res.body?.cancel?.(); } catch {}
+      throw new Error(`Upstream response exceeds ${maxBytes} byte limit`);
+    }
+  }
+  if (res?.body && typeof res.body.getReader === 'function') {
+    const reader = res.body.getReader();
+    const chunks = [];
+    let totalBytes = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        const buf = Buffer.isBuffer(value)
+          ? value
+          : Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+        totalBytes += buf.length;
+        if (totalBytes > maxBytes) {
+          try { await reader.cancel(); } catch {}
+          throw new Error(`Upstream response exceeds ${maxBytes} byte limit`);
+        }
+        chunks.push(buf);
+      }
+    } finally {
+      try { reader.releaseLock(); } catch {}
+    }
+    return Buffer.concat(chunks, totalBytes).toString('utf8');
+  }
+  const text = await res.text();
+  if (Buffer.byteLength(String(text || ''), 'utf8') > maxBytes) {
+    throw new Error(`Upstream response exceeds ${maxBytes} byte limit`);
+  }
+  return text;
+}
+
+async function fetchJsonSafe(fetchFn, url, init, timeoutMs = DEFAULT_TIMEOUT_MS, maxBytes = MAX_RESPONSE_BYTES) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error('Request timed out')), timeoutMs);
   timer?.unref?.();
@@ -387,7 +435,7 @@ async function fetchJsonSafe(fetchFn, url, init, timeoutMs = DEFAULT_TIMEOUT_MS)
       redirect: 'error',
       signal: controller.signal,
     });
-    const text = await res.text();
+    const text = await readResponseTextBounded(res, maxBytes);
     if (!res.ok) {
       const preview = text.replace(/\s+/g, ' ').slice(0, 180);
       throw new Error(`HTTP ${res.status}${preview ? `: ${preview}` : ''}`);
@@ -621,6 +669,9 @@ export class TranslatorService {
 
   async _withSlot(fn) {
     if (this.inFlight >= MAX_CONCURRENT_REQUESTS) {
+      if (this.waitQueue.length >= MAX_WAIT_QUEUE_SIZE) {
+        throw new Error('Translator queue busy');
+      }
       await new Promise((resolve) => this.waitQueue.push(resolve));
     }
     this.inFlight += 1;

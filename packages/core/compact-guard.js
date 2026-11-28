@@ -404,17 +404,17 @@
       styleEl = el;
     };
 
+    const isAuxNode = (n) => Boolean(n && (ctxSrc.isSidebarOrAuxiliaryNode?.(n) || n.closest?.('aside,[data-testid="sidebar"],[data-testid="conversation-list-sidebar"],[data-testid*="floating-composer"]')));
     const findBannerAnchor = (scope = getScope()) => {
       if (!doc) return null;
-      return (
-        scope?.querySelector?.('[data-testid="agent-input-box"]') ||
-        scope?.querySelector?.('.surface-composer-card') ||
-        scope?.querySelector?.('[data-testid="conversation-view"]') ||
-        doc.querySelector?.('[data-testid="agent-input-box"]') ||
-        doc.querySelector?.('.surface-composer-card') ||
-        doc.querySelector?.('[data-testid="conversation-view"]') ||
-        null
-      );
+      const box = ctxSrc.findMainComposerBox?.(doc, scope);
+      if (box && !isAuxNode(box)) return box;
+      const pick = (r, s) => Array.from(r?.querySelectorAll?.(s) || []).find((n) => !isAuxNode(n)) || null;
+      for (const s of ['[data-testid="agent-input-box"]', '.surface-composer-card', '[data-testid="conversation-view"]']) {
+        const hit = pick(scope, s) || (scope !== doc ? pick(doc, s) : null);
+        if (hit) return hit;
+      }
+      return null;
     };
 
     const bindComposerDraftGuard = () => {
@@ -622,10 +622,14 @@
         'button[aria-label*="发送"]',
         'button[type="submit"]',
       ];
-      const inSidePanel = (node) =>
-        Boolean(node?.closest?.('[data-side-panel-focus-scope="true"], [data-testid="side-question-panel"]'));
-      const box = editor?.closest?.('[data-testid="agent-input-box"], .surface-composer-card') || null;
-      const formScope = editor?.closest?.('form') || null;
+      const isSendNowBtn = (b) => {
+        const lbl = `${b?.textContent || ''} ${b?.getAttribute?.('aria-label') || ''} ${b?.getAttribute?.('data-testid') || ''}`;
+        return /\bsend\s+now\b|立即发送|send-now/i.test(lbl);
+      };
+      const rawBox = editor?.closest?.('[data-testid="agent-input-box"], .surface-composer-card') || null;
+      const box = rawBox && !isAuxNode(rawBox) ? rawBox : null;
+      const rawForm = editor?.closest?.('form') || null;
+      const formScope = rawForm && !isAuxNode(rawForm) ? rawForm : null;
       const scopes = [box, formScope, scope && scope !== doc ? scope : null].filter(Boolean);
       const fallbackScopes = scopes.length ? scopes : [doc].filter(Boolean);
       const allowedSels = scopes.length ? sendSels : ['[data-testid="input-send-button"]', '[data-testid="send-button"]'];
@@ -636,7 +640,8 @@
           sendBtn = btns.find(
             (b) =>
               b &&
-              !inSidePanel(b) &&
+              !isAuxNode(b) &&
+              !isSendNowBtn(b) &&
               !b.disabled &&
               b.getAttribute?.('aria-disabled') !== 'true' &&
               !b.hasAttribute?.('disabled') &&
@@ -949,7 +954,7 @@
       ensureStyle();
       if (recoveryEl && recoveryEl.isConnected !== false) {
         if (recoveryEl.parentElement !== anchor.parentElement) {
-          anchor.parentElement.insertBefore(recoveryEl, anchor);
+          coexist.safeInsertBefore(anchor.parentElement, recoveryEl, anchor);
         }
         return recoveryEl;
       }
@@ -1004,7 +1009,7 @@
 
       bar.appendChild(left);
       bar.appendChild(acts);
-      anchor.parentElement.insertBefore(bar, anchor);
+      coexist.safeInsertBefore(anchor.parentElement, bar, anchor);
       recoveryEl = bar;
       return recoveryEl;
     };
@@ -1032,7 +1037,7 @@
       ensureStyle();
       if (bannerEl && bannerEl.isConnected !== false) {
         if (bannerEl.parentElement !== anchor.parentElement) {
-          anchor.parentElement.insertBefore(bannerEl, anchor);
+          coexist.safeInsertBefore(anchor.parentElement, bannerEl, anchor);
           bindComposerDraftGuard();
         }
         return bannerEl;
@@ -1103,7 +1108,7 @@
       wrap.appendChild(actionsEl);
       wrap.appendChild(toastEl);
 
-      anchor.parentElement.insertBefore(wrap, anchor);
+      coexist.safeInsertBefore(anchor.parentElement, wrap, anchor);
       bannerEl = wrap;
       bindComposerDraftGuard();
       return bannerEl;
@@ -1248,13 +1253,15 @@
       countdownRemaining = config.countdownSeconds;
       countdownTimer = setInterval(() => {
         if (destroyed) { stopCountdown(); return; }
+        const scope = getScope();
+        const draftLen = ctxSrc.readComposerDraft(doc, scope).length;
         if (
           coexist.isWindowHibernated(doc, win, blurred) ||
-          ctxSrc.isTurnStreaming(doc) ||
-          ctxSrc.readComposerDraft(doc).length > 0
+          ctxSrc.isTurnStreaming(doc, scope) ||
+          draftLen > 0
         ) {
           stopCountdown();
-          if (ctxSrc.readComposerDraft(doc).length > 0) {
+          if (draftLen > 0) {
             if (lastSnapshot?.cascadeId) countdownCanceledForSession.add(lastSnapshot.cascadeId);
             setToast(S().toastDraftProtected, 'warn');
           }

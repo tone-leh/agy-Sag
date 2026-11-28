@@ -629,6 +629,128 @@
     return res;
   }
 
+  function isOwnedNode(node) {
+    if (!node) return false;
+    const el = node.nodeType === 1 ? node : node.parentElement;
+    if (!el || el.nodeType !== 1) return false;
+    if (el.getAttribute?.('data-ag-sg-owned') === '1' || el.getAttribute?.('data-ag-sag-owned') === '1') return true;
+    return Boolean(el.closest?.('[data-ag-sg-owned="1"], [data-ag-sag-owned="1"]'));
+  }
+
+  function isMutationOwnedOnly(records) {
+    if (!Array.isArray(records) || records.length === 0) return true;
+    for (let i = 0; i < records.length; i += 1) {
+      const r = records[i];
+      if (!r) continue;
+      if (isOwnedNode(r.target)) continue;
+      if (r.type === 'childList') {
+        const added = r.addedNodes || [];
+        const removed = r.removedNodes || [];
+        if (added.length > 0 || removed.length > 0) {
+          let allOwned = true;
+          for (let j = 0; j < added.length; j += 1) {
+            if (!isOwnedNode(added[j])) { allOwned = false; break; }
+          }
+          if (allOwned) {
+            for (let j = 0; j < removed.length; j += 1) {
+              if (!isOwnedNode(removed[j])) { allOwned = false; break; }
+            }
+          }
+          if (allOwned) continue;
+        }
+      }
+      return false;
+    }
+    return true;
+  }
+
+  function safeInsertBefore(parent, node, ref) {
+    if (!parent || !node) return false;
+    try {
+      if (ref && ref.parentElement === parent && typeof parent.insertBefore === 'function') {
+        parent.insertBefore(node, ref);
+        return true;
+      }
+      if (typeof parent.appendChild === 'function') {
+        parent.appendChild(node);
+        return true;
+      }
+    } catch {}
+    return false;
+  }
+
+  function safeAppendChild(parent, node) {
+    if (!parent || !node || typeof parent.appendChild !== 'function') return false;
+    try {
+      parent.appendChild(node);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function safeRemoveNode(node) {
+    if (!node) return false;
+    try {
+      if (node.parentElement && typeof node.parentElement.removeChild === 'function') {
+        node.parentElement.removeChild(node);
+        return true;
+      }
+      if (typeof node.remove === 'function') {
+        node.remove();
+        return true;
+      }
+    } catch {}
+    return false;
+  }
+
+  function writeComposerTextSafely(doc, win, ed, text, { replace = true } = {}) {
+    if (!ed) return false;
+    try {
+      ed.focus?.();
+      const tag = String(ed.tagName || '').toUpperCase();
+      if (tag === 'TEXTAREA' || tag === 'INPUT') {
+        ed.value = text;
+        ed.dispatchEvent?.(new (win?.Event || Event)('input', { bubbles: true }));
+        return true;
+      }
+      if (replace) {
+        let selected = false;
+        if (typeof win?.getSelection === 'function' && typeof doc?.createRange === 'function') {
+          try {
+            const range = doc.createRange();
+            range.selectNodeContents(ed);
+            const sel = win.getSelection();
+            sel?.removeAllRanges?.();
+            sel?.addRange?.(range);
+            selected = true;
+          } catch {}
+        }
+        if (!selected && typeof doc?.execCommand === 'function') {
+          try { doc.execCommand('selectAll', false); } catch {}
+        }
+      }
+      if (text === '') {
+        if (typeof doc?.execCommand === 'function') {
+          try { doc.execCommand('delete', false); } catch {}
+        }
+        if (String(ed.textContent || '').replace(/\u200B/g, '').trim()) {
+          ed.textContent = '';
+          ed.dispatchEvent?.(new (win?.Event || Event)('input', { bubbles: true }));
+        }
+        return true;
+      }
+      if (typeof doc?.execCommand === 'function' && doc.execCommand('insertText', false, text)) {
+        return true;
+      }
+      ed.textContent = text;
+      ed.dispatchEvent?.(new (win?.Event || Event)('input', { bubbles: true }));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   return {
     OWNER_GLOBAL,
     LEGACY_OWNER_GLOBAL,
@@ -662,6 +784,12 @@
     shouldYieldToHostIntegrator,
     isWindowHibernated,
     markOwnedNoTranslate,
+    isOwnedNode,
+    isMutationOwnedOnly,
+    safeInsertBefore,
+    safeAppendChild,
+    safeRemoveNode,
+    writeComposerTextSafely,
     readStoredConfig,
     writeStoredConfig,
     clearStoredConfig,

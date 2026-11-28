@@ -206,6 +206,14 @@
     const getLang = () => (typeof options.getLang === 'function' ? i18n.normalizeLang(options.getLang()) : i18n.detectLang(doc, win));
     const S = () => i18n.getStrings(getLang());
     const getScope = () => (ctxSrc.resolveActivePaneScope ? ctxSrc.resolveActivePaneScope(doc, activePaneEl) : doc);
+    const safeInsert = (parent, node, ref) => {
+      if (typeof coexist?.safeInsertBefore === 'function') return coexist.safeInsertBefore(parent, node, ref);
+      try {
+        if (ref && ref.parentElement === parent && typeof parent.insertBefore === 'function') parent.insertBefore(node, ref);
+        else parent?.appendChild?.(node);
+        return true;
+      } catch { return false; }
+    };
 
     function ensureStyle() {
       if (!doc || !styles) return;
@@ -283,13 +291,19 @@
 
     function findBarAnchor(scope = getScope()) {
       if (!doc) return null;
-      return (
-        scope?.querySelector?.('[data-testid="agent-input-box"]') ||
-        scope?.querySelector?.('.surface-composer-card') ||
-        doc.querySelector?.('[data-testid="agent-input-box"]') ||
-        doc.querySelector?.('.surface-composer-card') ||
-        null
-      );
+      if (typeof ctxSrc?.findMainComposerBox === 'function') {
+        const mainBox = ctxSrc.findMainComposerBox(doc, scope);
+        if (mainBox) return mainBox;
+      }
+      const pick = (root) => {
+        if (!root || typeof root.querySelectorAll !== 'function') return null;
+        const list = root.querySelectorAll('[data-testid="agent-input-box"], .surface-composer-card') || [];
+        for (let i = 0; i < list.length; i += 1) {
+          if (!ctxSrc?.isSidebarOrAuxiliaryNode?.(list[i])) return list[i];
+        }
+        return null;
+      };
+      return pick(scope) || (scope !== doc ? pick(doc) : null);
     }
 
     function ensureBar() {
@@ -299,7 +313,7 @@
       ensureStyle();
       if (barEl && barEl.isConnected !== false) {
         if (barEl.parentElement !== anchor.parentElement) {
-          anchor.parentElement.insertBefore(barEl, anchor);
+          safeInsert(anchor.parentElement, barEl, anchor);
         }
         return barEl;
       }
@@ -348,7 +362,7 @@
       bar.appendChild(left);
       bar.appendChild(acts);
 
-      anchor.parentElement.insertBefore(bar, anchor);
+      safeInsert(anchor.parentElement, bar, anchor);
       barEl = bar;
       return barEl;
     }
@@ -415,16 +429,29 @@
       return null;
     }
 
-    function scheduleFlush() {
+    function scheduleFlush(cidOverride = null) {
       if (destroyed || !enabled) return;
       if (saveTimer) clearTimeout(saveTimer);
+      const scope = getScope();
+      const capturedCid = cidOverride || ctxSrc.detectCascadeId(doc, win, scope);
+      const capturedText = ctxSrc.readComposerDraft(doc, scope);
       if (debounceMs === 0) {
-        flushNow();
+        flushNow(capturedCid);
         return;
       }
       saveTimer = setTimeout(() => {
         saveTimer = null;
-        flushNow();
+        if (destroyed || !enabled) return;
+        const activeCid = ctxSrc.detectCascadeId(doc, win, getScope());
+        if (capturedCid && activeCid && activeCid !== capturedCid) {
+          // Tab switched during debounce: persist captured draft to original cid without clobbering the new tab
+          if (isSaveableDraft(capturedText)) {
+            lastLiveDraftByCid.set(capturedCid, capturedText);
+            saveDraft(storage, capturedCid, capturedText, nowFn());
+          }
+          return;
+        }
+        flushNow(capturedCid);
       }, debounceMs);
       saveTimer?.unref?.();
     }
@@ -531,7 +558,7 @@
         currentCid = cid;
         const txt = ctxSrc.readComposerDraft(doc, getScope());
         if (txt) hideBar();
-        scheduleFlush();
+        scheduleFlush(cid);
       };
       const onKeyDown = (ev) => {
         if (destroyed || !enabled || !ev) return;

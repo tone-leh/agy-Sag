@@ -19,6 +19,16 @@
     'script',
     'style',
     'noscript',
+    'math',
+    'svg',
+    'mjx-container',
+    '.katex',
+    '.katex-mathml',
+    '.katex-html',
+    '.MathJax',
+    '.math',
+    '.math-inline',
+    '.math-display',
     'textarea',
     'input',
     'select',
@@ -52,13 +62,27 @@
     'SCRIPT',
     'STYLE',
     'NOSCRIPT',
+    'MATH',
+    'SVG',
+    'MJX-CONTAINER',
     'SELECT',
     'OPTION',
   ]);
 
   const INPUT_CONTENT_SKIP_TAGS = new Set(['TEXTAREA', 'INPUT']);
 
-  const HARD_SKIP_CLASSES = ['monaco-editor', 'monaco-diff-editor', 'xterm'];
+  const HARD_SKIP_CLASSES = [
+    'monaco-editor',
+    'monaco-diff-editor',
+    'xterm',
+    'katex',
+    'katex-mathml',
+    'katex-html',
+    'MathJax',
+    'math',
+    'math-inline',
+    'math-display',
+  ];
 
   const HARD_SKIP_TESTIDS = new Set([
     'user-message-bubble',
@@ -732,91 +756,90 @@
     }
 
     function processTextNode(node) {
-      if (!node || node.nodeType !== 3) return;
+      if (!node || node.nodeType !== 3 || node.isConnected === false) return;
       const cur = node.nodeValue;
       if (typeof cur !== 'string' || !cur) return;
 
       const rec = textRecords.get(node);
-      if (rec) {
-        if (cur === rec.translated) {
-          // Host did not change text since our last translation; re-translate from original source
-          const next = translateIfMatched(rec.orig);
-          if (next === null) {
-            // New locale has no match for this original text -> restore original cleanly
-            node.nodeValue = rec.orig;
-            untrackTextNode(node);
-          } else if (next !== cur) {
-            node.nodeValue = next;
-            rec.translated = next;
-          }
-          return;
-        }
-        // Host (e.g. React) updated nodeValue to a fresh source string -> re-translate with new orig
-        const nextFromNew = translateIfMatched(cur);
-        if (nextFromNew !== null) {
-          node.nodeValue = nextFromNew;
-          trackTextNode(node, cur, nextFromNew);
-        } else {
-          // New text is untranslatable -> drop stale tracking record so restoreAll never reverts to old text
-          untrackTextNode(node);
-        }
-        return;
-      }
-
-      const translated = translateIfMatched(cur);
-      if (translated !== null && translated !== cur) {
-        node.nodeValue = translated;
-        trackTextNode(node, cur, translated);
-      }
-    }
-
-    function processElementAttributes(el) {
-      if (!el || el.nodeType !== 1 || typeof el.getAttribute !== 'function') return;
-      const attrMap = attrRecords.get(el);
-
-      for (let i = 0; i < ATTR_WHITELIST.length; i++) {
-        const attr = ATTR_WHITELIST[i];
-        const cur = getAttr(el, attr);
-        const rec = attrMap ? attrMap.get(attr) : undefined;
-
-        if (cur === null || cur === '') {
-          if (rec && attrMap) {
-            attrMap.delete(attr);
-            if (attrMap.size === 0) untrackAttrNode(el);
-          }
-          continue;
-        }
-
+      try {
         if (rec) {
           if (cur === rec.translated) {
             const next = translateIfMatched(rec.orig);
             if (next === null) {
-              el.setAttribute(attr, rec.orig);
-              attrMap.delete(attr);
-              if (attrMap.size === 0) untrackAttrNode(el);
+              node.nodeValue = rec.orig;
+              untrackTextNode(node);
             } else if (next !== cur) {
-              el.setAttribute(attr, next);
+              node.nodeValue = next;
               rec.translated = next;
             }
-          } else {
-            // Host updated attribute to a new value
-            const nextFromNew = translateIfMatched(cur);
-            if (nextFromNew !== null) {
-              el.setAttribute(attr, nextFromNew);
-              trackAttrNode(el, attr, cur, nextFromNew);
-            } else {
-              attrMap.delete(attr);
-              if (attrMap.size === 0) untrackAttrNode(el);
-            }
+            return;
           }
-          continue;
+          const nextFromNew = translateIfMatched(cur);
+          if (nextFromNew !== null) {
+            node.nodeValue = nextFromNew;
+            trackTextNode(node, cur, nextFromNew);
+          } else {
+            untrackTextNode(node);
+          }
+          return;
         }
 
         const translated = translateIfMatched(cur);
         if (translated !== null && translated !== cur) {
-          el.setAttribute(attr, translated);
-          trackAttrNode(el, attr, cur, translated);
+          node.nodeValue = translated;
+          trackTextNode(node, cur, translated);
         }
+      } catch {}
+    }
+
+    function processElementAttributes(el) {
+      if (!el || el.nodeType !== 1 || el.isConnected === false || typeof el.getAttribute !== 'function') return;
+      const attrMap = attrRecords.get(el);
+
+      for (let i = 0; i < ATTR_WHITELIST.length; i++) {
+        const attr = ATTR_WHITELIST[i];
+        try {
+          const cur = getAttr(el, attr);
+          const rec = attrMap ? attrMap.get(attr) : undefined;
+
+          if (cur === null || cur === '') {
+            if (rec && attrMap) {
+              attrMap.delete(attr);
+              if (attrMap.size === 0) untrackAttrNode(el);
+            }
+            continue;
+          }
+
+          if (rec) {
+            if (cur === rec.translated) {
+              const next = translateIfMatched(rec.orig);
+              if (next === null) {
+                el.setAttribute(attr, rec.orig);
+                attrMap.delete(attr);
+                if (attrMap.size === 0) untrackAttrNode(el);
+              } else if (next !== cur) {
+                el.setAttribute(attr, next);
+                rec.translated = next;
+              }
+            } else {
+              const nextFromNew = translateIfMatched(cur);
+              if (nextFromNew !== null) {
+                el.setAttribute(attr, nextFromNew);
+                trackAttrNode(el, attr, cur, nextFromNew);
+              } else {
+                attrMap.delete(attr);
+                if (attrMap.size === 0) untrackAttrNode(el);
+              }
+            }
+            continue;
+          }
+
+          const translated = translateIfMatched(cur);
+          if (translated !== null && translated !== cur) {
+            el.setAttribute(attr, translated);
+            trackAttrNode(el, attr, cur, translated);
+          }
+        } catch {}
       }
     }
 
@@ -843,12 +866,19 @@
       } catch {}
     }
 
-    function walkSubtree(node) {
+    function walkSubtree(node, ancestorChecked = false, budget = null) {
       if (!node) return;
+      if (budget) {
+        if (budget.remaining <= 0) {
+          budget.overflow.push(node);
+          return;
+        }
+        budget.remaining -= 1;
+      }
       const nt = node.nodeType;
 
       if (nt === 3) {
-        if (!hasSkippedAncestor(node, true)) {
+        if (ancestorChecked || !hasSkippedAncestor(node, true)) {
           processTextNode(node);
         }
         return;
@@ -857,31 +887,27 @@
       if (nt === 1) {
         if (isHardSkipAllElement(node)) return;
 
-        // Translate whitelisted UI attributes on this element
         processElementAttributes(node);
 
-        // Skip internal text & descendants for form controls and editable regions
         if (isEditableContentSkipElement(node)) return;
 
-        // Recurse into open Shadow DOM when host is not excluded
         if (node.shadowRoot && !isShadowHostSkipped(node)) {
           attachRootObserver(node.shadowRoot);
-          walkSubtree(node.shadowRoot);
+          walkSubtree(node.shadowRoot, true, budget);
         }
 
         const children = getChildList(node);
         for (let i = 0; i < children.length; i++) {
-          walkSubtree(children[i]);
+          walkSubtree(children[i], true, budget);
         }
         return;
       }
 
-      // Document (9) or DocumentFragment / ShadowRoot (11)
       if (nt === 9 || nt === 11 || node.childNodes || node.children) {
         if (node.host && isShadowHostSkipped(node.host)) return;
         const children = getChildList(node);
         for (let i = 0; i < children.length; i++) {
-          walkSubtree(children[i]);
+          walkSubtree(children[i], true, budget);
         }
       }
     }
@@ -981,7 +1007,24 @@
       if (pendingFullScan) {
         pendingFullScan = false;
         pendingNodes.clear();
-        scanNow();
+        const rootEl = doc?.body || doc?.documentElement || doc;
+        if (rootEl) {
+          const budget = { remaining: 600, overflow: [] };
+          const prevApplying = isApplying;
+          isApplying = true;
+          try {
+            walkSubtree(rootEl, true, budget);
+            syncHostMarkers(true);
+          } finally {
+            isApplying = prevApplying;
+          }
+          if (budget.overflow.length > 0) {
+            for (let i = 0; i < budget.overflow.length && pendingNodes.size < 2000; i += 1) {
+              pendingNodes.add(budget.overflow[i]);
+            }
+            scheduleFlush();
+          }
+        }
         return;
       }
 
@@ -989,27 +1032,39 @@
       pendingNodes.clear();
       if (batch.length === 0) return;
 
+      const budget = { remaining: 600, overflow: [] };
       const prevApplying = isApplying;
       isApplying = true;
       try {
         for (let i = 0; i < batch.length; i++) {
           const n = batch[i];
-          if (!n) continue;
+          if (!n || n.isConnected === false) continue;
+          if (budget.remaining <= 0) {
+            budget.overflow.push(n);
+            continue;
+          }
           if (n.nodeType === 3) {
             if (!hasSkippedAncestor(n, true)) {
+              budget.remaining -= 1;
               processTextNode(n);
             }
           } else if (n.nodeType === 1) {
             if (!hasSkippedAncestor(n, true)) {
-              walkSubtree(n);
+              walkSubtree(n, true, budget);
             }
           } else {
-            walkSubtree(n);
+            walkSubtree(n, true, budget);
           }
         }
         syncHostMarkers(true);
       } finally {
         isApplying = prevApplying;
+      }
+      if (budget.overflow.length > 0) {
+        for (let i = 0; i < budget.overflow.length && pendingNodes.size < 2000; i += 1) {
+          pendingNodes.add(budget.overflow[i]);
+        }
+        scheduleFlush();
       }
 
       flushesSinceSweep += 1;
@@ -1041,31 +1096,41 @@
 
     function handleMutations(records) {
       if (destroyed || !enabled || isApplying || !Array.isArray(records) || records.length === 0) return;
+      let queued = false;
       for (let i = 0; i < records.length; i++) {
         const rec = records[i];
         if (!rec) continue;
         if (rec.type === 'characterData' && rec.target) {
+          if (hasSkippedAncestor(rec.target, true)) continue;
           pendingNodes.add(rec.target);
+          queued = true;
         } else if (rec.type === 'attributes' && rec.target) {
+          if (hasSkippedAncestor(rec.target, true)) continue;
           pendingNodes.add(rec.target);
+          queued = true;
         } else if (rec.type === 'childList') {
           if (shadowObservers.length > 0 && rec.removedNodes && rec.removedNodes.length > 0) {
             pruneDetachedShadowObservers();
           }
+          if (rec.target && hasSkippedAncestor(rec.target, true)) continue;
           const added = rec.addedNodes;
           if (added && added.length) {
             for (let j = 0; j < added.length; j++) {
-              pendingNodes.add(added[j]);
+              const an = added[j];
+              if (!an || (an.nodeType === 1 && isHardSkipAllElement(an))) continue;
+              pendingNodes.add(an);
+              queued = true;
             }
           }
         }
-        if (pendingNodes.size > 200) {
+        if (pendingNodes.size > 400) {
           pendingFullScan = true;
           pendingNodes.clear();
+          queued = true;
           break;
         }
       }
-      scheduleFlush();
+      if (queued) scheduleFlush();
     }
 
     function handleHtmlAttrMutations(records) {

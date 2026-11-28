@@ -449,6 +449,7 @@ function defaultExecFile(file, args, options = {}) {
   return execFileAsync(file, args, {
     timeout: 5000,
     maxBuffer: 4 * 1024 * 1024,
+    killSignal: 'SIGKILL',
     windowsHide: true,
     ...options,
   });
@@ -661,6 +662,7 @@ export async function detectAntigravityProcesses({
   } else {
     try {
       const res = await execFileFn('ps', ['-eo', 'pid=,ppid=,etime=,lstart=,args='], {
+        maxBuffer: 16 * 1024 * 1024,
         env: { ...process.env, LANG: 'C', LC_ALL: 'C' },
       });
       const stdout = String(res?.stdout ?? res ?? '');
@@ -959,6 +961,7 @@ function defaultSpawnDetached(command, args) {
     shell: false,
     windowsHide: true,
   });
+  child.on('error', () => {});
   child.unref?.();
   return child;
 }
@@ -1509,13 +1512,16 @@ export class SagKeepaliveController {
       cooldownMs: this.cooldownMs,
     });
 
-    if (launchResult.executed) {
+    if (launchResult.updatedState) {
       this.sessionAttempts += 1;
+    }
+
+    if (launchResult.executed) {
+      if (!launchResult.updatedState) {
+        this.sessionAttempts += 1;
+      }
       const verifiedPort = launchResult.activePort || launchResult.port || this.port;
       this.activePort = verifiedPort;
-      if (!this._externalDaemon && this.daemon && this.daemon.explicitPort === null) {
-        this.daemon.port = verifiedPort;
-      }
       this.emit('keepalive-relaunched', {
         port: verifiedPort,
         sessionAttempts: this.sessionAttempts,
@@ -1523,9 +1529,6 @@ export class SagKeepaliveController {
       });
     } else if (launchResult.action === 'already-running-with-cdp' && launchResult.activePort) {
       this.activePort = launchResult.activePort;
-      if (!this._externalDaemon && this.daemon && this.daemon.explicitPort === null) {
-        this.daemon.port = launchResult.activePort;
-      }
     } else if (launchResult.prismYielded) {
       this.emit('keepalive-yielded', { reason: launchResult.reason });
     } else if (!launchResult.ok) {
@@ -1546,10 +1549,25 @@ export class SagKeepaliveController {
     this.running = true;
     const tick = async () => {
       if (!this.running || this._stopped) return;
-      const res = await this.reconcileOnce();
-      if (!this.running || this._stopped) return;
-      this.timer = this.setTimer(tick, res.nextDelayMs);
-      this.timer?.unref?.();
+      let nextDelayMs = this.daemon?.currentDelayMs || 3000;
+      try {
+        const res = await this.reconcileOnce();
+        if (res && typeof res.nextDelayMs === 'number' && Number.isFinite(res.nextDelayMs)) {
+          nextDelayMs = res.nextDelayMs;
+        }
+      } catch (err) {
+        if (typeof this.daemon?._bumpBackoff === 'function') {
+          nextDelayMs = this.daemon._bumpBackoff(2);
+        } else {
+          nextDelayMs = Math.min(30000, Math.round(nextDelayMs * 2));
+        }
+        this.emit('keepalive-error', { error: err?.message || String(err), nextDelayMs });
+      } finally {
+        if (this.running && !this._stopped) {
+          this.timer = this.setTimer(tick, nextDelayMs);
+          this.timer?.unref?.();
+        }
+      }
     };
     void tick();
   }

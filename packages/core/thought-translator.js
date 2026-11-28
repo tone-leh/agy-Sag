@@ -15,6 +15,8 @@
   const BOX_CLASS = 'ag-sag-thought-box';
   const BAR_CLASS = 'ag-sag-thought-bar';
   const MAX_CACHE = 200;
+  const MAX_AUTO_PANELS_PER_SCAN = 5;
+  const MAX_AUTO_CONCURRENT = 2;
 
   function resolveDep(globalKey, relPath) {
     if (globalRoot && globalRoot[globalKey]) return globalRoot[globalKey];
@@ -117,6 +119,51 @@
     const panelState = new WeakMap(); // panel -> { sourceText, translated, showOriginal, boxEl, hiddenOriginalNodes }
     const titleOriginals = new WeakMap(); // textNode -> { orig, translated }
     const modifiedTitles = new Set(); // track Text nodes for 100% lossless restore
+    const autoQueue = [];
+    const autoQueuedSet = new WeakSet();
+    let autoInFlight = 0;
+
+    const safeAppend = (parent, node) => {
+      if (typeof coexist?.safeAppendChild === 'function') return coexist.safeAppendChild(parent, node);
+      try { parent?.appendChild?.(node); return true; } catch { return false; }
+    };
+
+    const pruneDetachedTitles = () => {
+      for (const tn of Array.from(modifiedTitles)) {
+        if (!tn || tn.isConnected === false || tn.parentElement?.isConnected === false) {
+          modifiedTitles.delete(tn);
+        }
+      }
+    };
+
+    const clearAutoQueue = () => {
+      while (autoQueue.length) {
+        const p = autoQueue.pop();
+        if (p) autoQueuedSet.delete(p);
+      }
+    };
+
+    const drainAutoQueue = () => {
+      while (autoInFlight < MAX_AUTO_CONCURRENT && autoQueue.length > 0 && !destroyed && enabled && triggerMode === 'auto') {
+        const panel = autoQueue.shift();
+        if (!panel || panel.isConnected === false) continue;
+        autoQueuedSet.delete(panel);
+        autoInFlight += 1;
+        void Promise.resolve(translatePanel(panel, { force: false }))
+          .catch(() => {})
+          .finally(() => {
+            autoInFlight = Math.max(0, autoInFlight - 1);
+            if (!destroyed && enabled && triggerMode === 'auto') drainAutoQueue();
+          });
+      }
+    };
+
+    const enqueueAutoPanel = (panel) => {
+      if (!panel || autoQueuedSet.has(panel)) return;
+      if (autoQueue.length >= MAX_AUTO_PANELS_PER_SCAN) return;
+      autoQueuedSet.add(panel);
+      autoQueue.push(panel);
+    };
 
     const getEffectiveTargetLang = () => {
       if (targetLang && targetLang !== 'auto') return targetLang;
@@ -168,7 +215,7 @@
         box = coexist.markOwnedNoTranslate(doc.createElement('div'));
         box.className = BOX_CLASS;
         box.setAttribute('data-testid', 'ag-sag-thought-box');
-        panel.appendChild(box);
+        if (!safeAppend(panel, box)) return;
         st.boxEl = box;
       }
 
@@ -270,10 +317,10 @@
         ev?.stopPropagation?.();
         void translatePanel(panel, { force: false });
       });
-      if (btn.insertAdjacentElement) {
+      if (typeof btn.insertAdjacentElement === 'function') {
         try { btn.insertAdjacentElement('afterend', chip); return; } catch {}
       }
-      btn.parentElement?.appendChild?.(chip);
+      safeAppend(btn.parentElement, chip);
     };
 
     const translatePanel = async (panel, { force = false } = {}) => {
@@ -350,7 +397,7 @@
           } else {
             tracked.translated = hit;
           }
-          textNode.nodeValue = hit;
+          try { textNode.nodeValue = hit; } catch {}
           continue;
         }
         if (inFlightKeys.has(key)) continue;
@@ -366,7 +413,7 @@
               setCache(key, tr);
               titleOriginals.set(textNode, { orig: origText, translated: tr });
               modifiedTitles.add(textNode);
-              textNode.nodeValue = tr;
+              try { textNode.nodeValue = tr; } catch {}
             }
           })
           .catch(() => {})
@@ -422,34 +469,46 @@
       if (destroyed || !doc) return;
       if (!enabled) {
         yieldedToPrism = false;
+        clearAutoQueue();
         cleanupDom();
         return;
       }
       if (isPrismThoughtActive()) {
-        yieldedToPrism = true;
-        cleanupDom();
+        if (!yieldedToPrism) {
+          yieldedToPrism = true;
+          clearAutoQueue();
+          cleanupDom();
+        }
         return;
       }
       yieldedToPrism = false;
+      pruneDetachedTitles();
 
       const triggers = Array.from(doc.querySelectorAll?.(TRIGGER_SEL) || []);
-      for (const btn of triggers) {
+      let autoEligibleSeen = 0;
+      for (let i = triggers.length - 1; i >= 0; i -= 1) {
+        const btn = triggers[i];
         const panel = findThoughtPanel(btn);
         if (!panel) continue;
         ensureTriggerButton(btn, panel);
+        const prev = panelState.get(panel);
         if (triggerMode === 'auto' && !isTriggerStreaming(btn)) {
-          const text = extractThoughtText(panel);
-          const prev = panelState.get(panel);
-          if (text && (!prev || prev.sourceText !== text)) {
-            void translatePanel(panel, { force: false });
+          autoEligibleSeen += 1;
+          if (autoEligibleSeen <= MAX_AUTO_PANELS_PER_SCAN) {
+            const text = extractThoughtText(panel);
+            if (text && (!prev || prev.sourceText !== text)) {
+              enqueueAutoPanel(panel);
+            } else if (prev) {
+              applyViewModeToPanel(panel, prev);
+            }
           } else if (prev) {
             applyViewModeToPanel(panel, prev);
           }
-        } else {
-          const prev = panelState.get(panel);
-          if (prev) applyViewModeToPanel(panel, prev);
+        } else if (prev) {
+          applyViewModeToPanel(panel, prev);
         }
       }
+      if (triggerMode === 'auto') drainAutoQueue();
       if (translateTitles) {
         scanTitles();
       } else if (modifiedTitles.size > 0) {
@@ -462,6 +521,8 @@
       if (scanTimer) clearTimeout(scanTimer);
       scanTimer = setTimeout(() => {
         scanTimer = null;
+        if (destroyed || !enabled) return;
+        if (coexist?.isWindowHibernated?.(doc, win, false)) return;
         scanNow();
       }, 600);
       scanTimer?.unref?.();
@@ -473,6 +534,12 @@
       if (!MO || !doc.body) return;
       observer = new MO((records) => {
         if (!enabled || destroyed) return;
+        if (coexist?.isWindowHibernated?.(doc, win, false)) return;
+        if (typeof coexist?.isMutationOwnedOnly === 'function') {
+          if (coexist.isMutationOwnedOnly(records)) return;
+          scheduleScan();
+          return;
+        }
         for (const rec of records) {
           const target = rec.target;
           if (target?.closest?.('[data-ag-sag-owned="1"], [data-ag-sg-owned="1"]')) continue;
@@ -506,6 +573,7 @@
 
       if (!enabled) {
         stopObserver();
+        clearAutoQueue();
         cleanupDom();
       } else {
         if (!prevEnabled) startObserver();
@@ -518,6 +586,7 @@
       destroyed = true;
       enabled = false;
       stopObserver();
+      clearAutoQueue();
       cleanupDom();
       cache.clear();
       inFlightKeys.clear();

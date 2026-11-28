@@ -32,6 +32,9 @@
     let currentCid = '';
     let bookmarks = new Set();
     let observer = null;
+    let observerTimer = null;
+    let vaultSyncTimer = null;
+    let lastVaultBubbleCount = -1;
     let dockEl = null;
     let chipBtn = null;
     let drawerEl = null;
@@ -39,11 +42,53 @@
     let pulseTimer = null;
     let pulsedEl = null;
     let activePaneEl = null;
+    let decoratedBubbles = new WeakSet();
+    const bubbleMeta = new WeakMap();
+    const MAX_DECORATE_PER_SYNC = 120;
+    const VAULT_SYNC_DEBOUNCE_MS = 2500;
+    const OBSERVER_DEBOUNCE_MS = 220;
     const ownedNodes = new Set();
     const listeners = [];
 
+    const safeAppend = (parent, node) => {
+      if (typeof coexist?.safeAppendChild === 'function') return coexist.safeAppendChild(parent, node);
+      try { parent?.appendChild?.(node); return true; } catch { return false; }
+    };
+    const safeInsert = (parent, node, ref) => {
+      if (typeof coexist?.safeInsertBefore === 'function') return coexist.safeInsertBefore(parent, node, ref);
+      try {
+        if (ref && ref.parentElement === parent && typeof parent.insertBefore === 'function') parent.insertBefore(node, ref);
+        else parent?.appendChild?.(node);
+        return true;
+      } catch { return false; }
+    };
+    const safeRemove = (node) => {
+      if (typeof coexist?.safeRemoveNode === 'function') return coexist.safeRemoveNode(node);
+      try { node?.remove?.(); return true; } catch { return false; }
+    };
+
+    function clearVaultSyncTimer() {
+      if (vaultSyncTimer) {
+        clearTimeout(vaultSyncTimer);
+        vaultSyncTimer = null;
+      }
+    }
+
+    function clearObserverTimer() {
+      if (observerTimer) {
+        clearTimeout(observerTimer);
+        observerTimer = null;
+      }
+    }
+
+    function pruneDetachedOwnedNodes() {
+      for (const n of Array.from(ownedNodes)) {
+        if (!n || n.isConnected === false) ownedNodes.delete(n);
+      }
+    }
+
     function closeRewindMenu() {
-      try { rewindMenuEl?.remove?.(); } catch {}
+      safeRemove(rewindMenuEl);
       rewindMenuEl = null;
     }
 
@@ -108,7 +153,7 @@
         }
       });
 
-      doc.body.appendChild(menu);
+      safeAppend(doc.body, menu);
       rewindMenuEl = menu;
       return true;
     }
@@ -129,6 +174,34 @@
       }
     }
 
+    function syncVaultMetaNow(bubbleCount = -1) {
+      clearVaultSyncTimer();
+      if (destroyed || !enabled || !vault || bookmarks.size === 0) return;
+      try {
+        const turns = exporter.extractConversationTurns(doc, getScope());
+        const title = vault.detectConversationTitle(doc, currentCid);
+        vault.syncSessionMeta({ storage, cascadeId: currentCid, bookmarks, turns, title });
+        lastVaultBubbleCount = bubbleCount >= 0 ? bubbleCount : getUserBubbles().length;
+      } catch {}
+    }
+
+    function scheduleVaultSync(bubbleCount) {
+      if (destroyed || !enabled || !vault || bookmarks.size === 0) {
+        clearVaultSyncTimer();
+        return;
+      }
+      if (bubbleCount === lastVaultBubbleCount) return;
+      clearVaultSyncTimer();
+      vaultSyncTimer = setTimeout(() => {
+        vaultSyncTimer = null;
+        if (destroyed || !enabled || !vault || bookmarks.size === 0) return;
+        if (coexist?.isWindowHibernated?.(doc, win, false)) return;
+        syncVaultMetaNow(getUserBubbles().length);
+      }, VAULT_SYNC_DEBOUNCE_MS);
+      vaultSyncTimer?.unref?.();
+    }
+
+    let lastCascadeChanged = false;
     function refreshCascade() {
       const nextCid = ctxSrc.detectCascadeId(doc, win, getScope());
       if (nextCid !== currentCid) {
@@ -136,6 +209,11 @@
         bookmarks = exporter.loadBookmarks(storage, currentCid);
         onlyBookmarkedFilter = false;
         drawerOpen = false;
+        lastVaultBubbleCount = -1;
+        clearVaultSyncTimer();
+        lastCascadeChanged = true;
+      } else {
+        lastCascadeChanged = false;
       }
       return currentCid;
     }
@@ -154,9 +232,11 @@
       if (bookmarks.size === 0) drawerOpen = false;
       exporter.saveBookmarks(storage, currentCid, bookmarks);
       if (vault) {
+        clearVaultSyncTimer();
         const turns = exporter.extractConversationTurns(doc, getScope());
         const title = vault.detectConversationTitle(doc, currentCid);
         vault.syncSessionMeta({ storage, cascadeId: currentCid, bookmarks, turns, title });
+        lastVaultBubbleCount = getUserBubbles().length;
       }
       sync();
       if (typeof options.onBookmarksChange === 'function') {
@@ -249,10 +329,13 @@
     function clearOwned() {
       clearPulse();
       closeRewindMenu();
+      clearVaultSyncTimer();
       for (const n of ownedNodes) {
-        try { n.remove?.(); } catch {}
+        safeRemove(n);
       }
       ownedNodes.clear();
+      decoratedBubbles = new WeakSet();
+      lastVaultBubbleCount = -1;
       dockEl = chipBtn = drawerEl = null;
       drawerOpen = false;
       // Unhide any outline rows filtered by onlyBookmarkedFilter
@@ -309,10 +392,10 @@
         inner.appendChild(drawerEl);
         dockEl.appendChild(inner);
 
-        if (typeof dockHost.insertBefore === 'function' && dockHost.firstChild) {
-          dockHost.insertBefore(dockEl, dockHost.firstChild);
+        if (dockHost.firstChild) {
+          safeInsert(dockHost, dockEl, dockHost.firstChild);
         } else {
-          dockHost.appendChild(dockEl);
+          safeAppend(dockHost, dockEl);
         }
         ownedNodes.add(dockEl);
       }
@@ -482,12 +565,60 @@
       const bubbles = getUserBubbles();
       if (bubbles.length === 0) {
         renderNativeJumpDock(bubbles);
-        return;
+        return 0;
       }
+      const lang = getLang();
       const strings = S();
-      bubbles.forEach((bubble, idx) => {
+      const sagStr = typeof i18n?.getSagStrings === 'function' ? i18n.getSagStrings(lang) : {};
+      const rollbackEnabled =
+        typeof options.onRollbackTurn === 'function' &&
+        (typeof options.isRollbackAvailable !== 'function' || Boolean(options.isRollbackAvailable()));
+      let newDecorated = 0;
+
+      // Process newest turns first and cap new mounts per pass to avoid blocking 3,000-step sessions
+      for (let idx = bubbles.length - 1; idx >= 0; idx -= 1) {
+        const bubble = bubbles[idx];
+        if (!bubble) continue;
         const turnNum = idx + 1;
         const starred = bookmarks.has(turnNum);
+
+        if (decoratedBubbles.has(bubble)) {
+          const meta = bubbleMeta.get(bubble);
+          const lateActionSlot = meta && meta.host === bubble ? resolveTurnActionSlot(bubble) : null;
+          if (
+            meta &&
+            !lateActionSlot &&
+            meta.btn &&
+            meta.btn.isConnected !== false &&
+            meta.host &&
+            meta.host.isConnected !== false &&
+            meta.btn.parentElement === meta.host &&
+            meta.rollbackEnabled === rollbackEnabled
+          ) {
+            if (meta.turnNum === turnNum && meta.starred === starred && meta.lang === lang) {
+              continue;
+            }
+            meta.btn.setAttribute('data-ag-sg-turn', String(turnNum));
+            meta.btn.setAttribute('aria-pressed', String(starred));
+            meta.btn.setAttribute('data-starred', starred ? '1' : '0');
+            const tip = starred ? strings.bmUnstarTitle : strings.bmStarTitle;
+            meta.btn.title = tip;
+            meta.btn.setAttribute('aria-label', tip);
+            meta.btn.setAttribute('data-tip', tip);
+            renderBookmarkIcon(meta.btn, starred);
+            if (meta.rbBtn) meta.rbBtn.setAttribute('data-ag-sag-rollback-turn', String(turnNum));
+            if (meta.rwBtn) meta.rwBtn.setAttribute('data-ag-sag-rewind-turn', String(turnNum));
+            meta.turnNum = turnNum;
+            meta.starred = starred;
+            meta.lang = lang;
+            continue;
+          }
+          decoratedBubbles.delete(bubble);
+        }
+
+        if (newDecorated >= MAX_DECORATE_PER_SYNC) continue;
+        newDecorated += 1;
+
         const actionSlot = resolveTurnActionSlot(bubble);
         const host = actionSlot || bubble;
         // Migrate away from legacy in-bubble placement if a native action row exists
@@ -497,7 +628,7 @@
           const legacyRewinds = bubble.querySelectorAll?.('.ag-sag-turn-rewind') || [];
           for (const legacyBtn of new Set([...legacyStars, ...legacyRollbacks, ...legacyRewinds])) {
             if (legacyBtn.parentElement === actionSlot) continue;
-            try { legacyBtn.remove?.(); } catch {}
+            safeRemove(legacyBtn);
             ownedNodes.delete(legacyBtn);
           }
         }
@@ -520,7 +651,7 @@
             const liveTurn = Number(btn.getAttribute('data-ag-sg-turn')) || turnNum;
             toggleBookmark(liveTurn);
           });
-          host.appendChild(btn);
+          safeAppend(host, btn);
           ownedNodes.add(btn);
         }
         if (actionSlot) btn.setAttribute('data-inline-action', '1');
@@ -535,10 +666,7 @@
         renderBookmarkIcon(btn, starred);
 
         // Optional dual-star agy-NOV guard rollback prompt filler (visible only when NOV guard connected)
-        const rollbackEnabled =
-          typeof options.onRollbackTurn === 'function' &&
-          (typeof options.isRollbackAvailable !== 'function' || Boolean(options.isRollbackAvailable()));
-        let rbBtn = host.querySelector?.('.ag-sag-turn-rollback');
+        let rbBtn = host.querySelector?.('.ag-sag-turn-rollback') || null;
         if (rollbackEnabled) {
           if (!rbBtn) {
             rbBtn = coexist.markOwnedNoTranslate(doc.createElement('button'));
@@ -556,7 +684,7 @@
               const snippet = exporter.redactSecrets(rawSnippet).replace(/\s+/g, ' ').trim().slice(0, 64);
               options.onRollbackTurn({ turnNum: liveTurn, snippet });
             });
-            host.appendChild(rbBtn);
+            safeAppend(host, rbBtn);
             ownedNodes.add(rbBtn);
           } else {
             rbBtn.setAttribute('data-ag-sag-rollback-turn', String(turnNum));
@@ -564,19 +692,19 @@
           if (actionSlot) rbBtn.setAttribute('data-inline-action', '1');
           else rbBtn.removeAttribute?.('data-inline-action');
         } else if (rbBtn) {
-          try { rbBtn.remove?.(); } catch {}
+          safeRemove(rbBtn);
           ownedNodes.delete(rbBtn);
+          rbBtn = null;
         }
 
         // Per-turn 3-way Rewind / Compact / Handoff micro-menu button (works with or without agy-NOV)
-        let rwBtn = host.querySelector?.('.ag-sag-turn-rewind');
+        let rwBtn = host.querySelector?.('.ag-sag-turn-rewind') || null;
         if (!rwBtn) {
           rwBtn = coexist.markOwnedNoTranslate(doc.createElement('button'));
           rwBtn.type = 'button';
           rwBtn.className = 'ag-sag-turn-rewind';
           rwBtn.setAttribute('data-ag-sag-rewind-turn', String(turnNum));
           rwBtn.textContent = '⤺';
-          const sagStr = typeof i18n?.getSagStrings === 'function' ? i18n.getSagStrings(getLang()) : {};
           rwBtn.title = sagStr.rewindBtnTitle || 'Turn recovery options (Compact / Handoff / Rollback)';
           rwBtn.setAttribute('aria-label', rwBtn.title);
           rwBtn.addEventListener('click', (ev) => {
@@ -591,15 +719,19 @@
               openTurnRewindMenu(liveTurn, snippet, rwBtn);
             }
           });
-          host.appendChild(rwBtn);
+          safeAppend(host, rwBtn);
           ownedNodes.add(rwBtn);
         } else {
           rwBtn.setAttribute('data-ag-sag-rewind-turn', String(turnNum));
         }
         if (actionSlot) rwBtn.setAttribute('data-inline-action', '1');
         else rwBtn.removeAttribute?.('data-inline-action');
-      });
+
+        decoratedBubbles.add(bubble);
+        bubbleMeta.set(bubble, { btn, rbBtn, rwBtn, host, turnNum, starred, rollbackEnabled, lang });
+      }
       renderNativeJumpDock(bubbles);
+      return bubbles.length;
     }
 
     function decoratePrismOutlinePopover() {
@@ -621,7 +753,7 @@
             onlyBookmarkedFilter = !onlyBookmarkedFilter;
             sync();
           });
-          head.appendChild(filterBtn);
+          safeAppend(head, filterBtn);
           ownedNodes.add(filterBtn);
         }
         filterBtn.setAttribute('aria-pressed', String(onlyBookmarkedFilter));
@@ -645,7 +777,7 @@
             ev?.stopPropagation?.();
             toggleBookmark(turnNum);
           });
-          row.appendChild(star);
+          safeAppend(row, star);
           ownedNodes.add(star);
         }
         star.setAttribute('data-starred', starred ? '1' : '0');
@@ -667,15 +799,21 @@
         clearOwned();
         return;
       }
+      pruneDetachedOwnedNodes();
       refreshCascade();
       bookmarks = exporter.loadBookmarks(storage, currentCid);
       if (bookmarks.size === 0) drawerOpen = false;
-      decorateUserTurns();
+      const bubbleCount = decorateUserTurns();
       decoratePrismOutlinePopover();
       if (vault && bookmarks.size > 0) {
-        const turns = exporter.extractConversationTurns(doc, getScope());
-        const title = vault.detectConversationTitle(doc, currentCid);
-        vault.syncSessionMeta({ storage, cascadeId: currentCid, bookmarks, turns, title });
+        if (lastCascadeChanged) {
+          lastCascadeChanged = false;
+          syncVaultMetaNow(bubbleCount);
+        } else if (bubbleCount !== lastVaultBubbleCount) {
+          scheduleVaultSync(bubbleCount);
+        }
+      } else {
+        clearVaultSyncTimer();
       }
     }
 
@@ -715,22 +853,31 @@
     function startObserver() {
       if (observer || !doc || typeof win?.MutationObserver !== 'function') return;
       try {
-        let scheduled = false;
         observer = new win.MutationObserver((muts) => {
-          if (destroyed || !enabled || scheduled) return;
-          const relevant = muts.some((m) => {
-            const t = m.target;
-            if (t?.getAttribute?.('data-ag-sg-owned') === '1' || t?.closest?.('[data-ag-sg-owned="1"]')) return false;
-            return true;
-          });
-          if (!relevant) return;
-          scheduled = true;
-          const run = () => {
-            scheduled = false;
-            if (!destroyed && enabled) sync();
-          };
-          if (typeof win.requestAnimationFrame === 'function') win.requestAnimationFrame(run);
-          else setTimeout(run, 16);
+          if (destroyed || !enabled) return;
+          if (coexist?.isWindowHibernated?.(doc, win, false)) return;
+          if (typeof coexist?.isMutationOwnedOnly === 'function') {
+            if (coexist.isMutationOwnedOnly(muts)) return;
+          } else {
+            const relevant = muts.some((m) => {
+              const t = m?.target;
+              if (
+                t?.getAttribute?.('data-ag-sg-owned') === '1' ||
+                t?.getAttribute?.('data-ag-sag-owned') === '1' ||
+                t?.closest?.('[data-ag-sg-owned="1"], [data-ag-sag-owned="1"]')
+              ) {
+                return false;
+              }
+              return true;
+            });
+            if (!relevant) return;
+          }
+          clearObserverTimer();
+          observerTimer = setTimeout(() => {
+            observerTimer = null;
+            if (!destroyed && enabled && !coexist?.isWindowHibernated?.(doc, win, false)) sync();
+          }, OBSERVER_DEBOUNCE_MS);
+          observerTimer?.unref?.();
         });
         const rootNode = doc.body || doc.documentElement;
         if (rootNode) observer.observe(rootNode, { childList: true, subtree: true });
@@ -741,6 +888,8 @@
       if (destroyed) return;
       enabled = Boolean(v);
       if (!enabled) {
+        clearObserverTimer();
+        clearVaultSyncTimer();
         clearOwned();
       } else {
         sync();
@@ -757,6 +906,8 @@
       if (destroyed) return;
       destroyed = true;
       enabled = false;
+      clearObserverTimer();
+      clearVaultSyncTimer();
       closeRewindMenu();
       while (listeners.length) {
         try { listeners.pop()(); } catch {}

@@ -285,13 +285,14 @@ export function assertNoSymlinkAncestors(
 }
 
 let atomicCopyCounter = 0;
+const ATOMIC_COPY_CHUNK_BYTES = 256 * 1024;
 
 /**
  * Safely copies `srcPath` to `destPath` inside an already-verified `realDestRoot` using an
- * exclusive same-directory temp file (`wx`) followed by atomic rename.
- * Refuses destination symlinks/hardlinks (nlink > 1) and verifies parent realpath containment
- * immediately before temp creation and rename to narrow TOCTOU windows and avoid overwriting
- * hardlinked inodes outside the destination tree.
+ * exclusive same-directory temp file (`O_WRONLY | O_CREAT | O_EXCL`, mode `0o600`) with
+ * fixed-size 256 KiB chunked streaming copy followed by atomic rename.
+ * Refuses destination symlinks/hardlinks and verifies parent realpath containment
+ * immediately before temp creation and rename to narrow TOCTOU windows and avoid OOM on large files.
  */
 export function copyFileSafeAtomic(srcPath, destPath, realDestRoot, { platform = process.platform } = {}) {
   const destDir = path.dirname(destPath);
@@ -317,11 +318,37 @@ export function copyFileSafeAtomic(srcPath, destPath, realDestRoot, { platform =
   atomicCopyCounter += 1;
   const tmpName = `.sag-tmp.${process.pid}.${Date.now()}.${atomicCopyCounter}.${Math.random().toString(16).slice(2)}`;
   const tmpPath = path.join(realParent, tmpName);
-  const srcBuf = fs.readFileSync(srcPath);
+  let srcFd = null;
+  let tmpFd = null;
   let createdTmp = false;
   try {
-    fs.writeFileSync(tmpPath, srcBuf, { flag: 'wx' });
+    srcFd = fs.openSync(srcPath, 'r');
+    tmpFd = fs.openSync(
+      tmpPath,
+      fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL,
+      0o600
+    );
     createdTmp = true;
+
+    const chunkBuf = Buffer.allocUnsafe(ATOMIC_COPY_CHUNK_BYTES);
+    while (true) {
+      const bytesRead = fs.readSync(srcFd, chunkBuf, 0, chunkBuf.length, null);
+      if (bytesRead <= 0) break;
+      let offset = 0;
+      while (offset < bytesRead) {
+        const written = fs.writeSync(tmpFd, chunkBuf, offset, bytesRead - offset);
+        if (written <= 0) {
+          throw new Error(`Short write while copying ${srcPath}`);
+        }
+        offset += written;
+      }
+    }
+
+    fs.closeSync(tmpFd);
+    tmpFd = null;
+    fs.closeSync(srcFd);
+    srcFd = null;
+
     const recheckParent = canonicalRealpathSync(destDir);
     if (!isPathWithinBase(recheckParent, realDestRoot, platform)) {
       throw new Error(`Security violation: destination parent moved outside root (${destPath})`);
@@ -336,11 +363,34 @@ export function copyFileSafeAtomic(srcPath, destPath, realDestRoot, { platform =
     }
     atomicRenameWithRetry(tmpPath, destPath, { platform });
   } catch (err) {
+    if (tmpFd !== null) {
+      try {
+        fs.closeSync(tmpFd);
+      } catch {}
+      tmpFd = null;
+    }
+    if (srcFd !== null) {
+      try {
+        fs.closeSync(srcFd);
+      } catch {}
+      srcFd = null;
+    }
     if (createdTmp) {
       try {
         fs.unlinkSync(tmpPath);
       } catch {}
     }
     throw err;
+  } finally {
+    if (tmpFd !== null) {
+      try {
+        fs.closeSync(tmpFd);
+      } catch {}
+    }
+    if (srcFd !== null) {
+      try {
+        fs.closeSync(srcFd);
+      } catch {}
+    }
   }
 }

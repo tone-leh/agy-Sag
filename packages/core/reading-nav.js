@@ -101,11 +101,38 @@
     let activePaneEl = null;
 
     const userToggleState = new WeakMap(); // preEl -> boolean (true = expanded by user, false = folded by user)
+    const preLineCache = new WeakMap(); // preEl -> { len, lines }
     const enhancedPres = new Set(); // track pre elements for lossless teardown
     const codeBars = new WeakMap(); // preEl -> barEl
     const mermaidBtns = new Map(); // svgEl -> btnEl
     const originalDetailsOpen = new WeakMap(); // detailsEl -> original boolean open state
     const modifiedDetails = new Set(); // track modified host <details> for lossless restore
+    let lastRailSig = '';
+
+    const safeInsert = (parent, node, ref) => {
+      if (typeof coexist?.safeInsertBefore === 'function') return coexist.safeInsertBefore(parent, node, ref);
+      try {
+        if (ref && ref.parentElement === parent && typeof parent.insertBefore === 'function') parent.insertBefore(node, ref);
+        else parent?.appendChild?.(node);
+        return true;
+      } catch { return false; }
+    };
+
+    const pruneDetachedDetails = () => {
+      for (const det of Array.from(modifiedDetails)) {
+        if (!det || det.isConnected === false) {
+          originalDetailsOpen.delete(det);
+          modifiedDetails.delete(det);
+        }
+      }
+    };
+
+    function extractCodeCopyText(pre) {
+      const srcEl = pre?.querySelector?.('code') || pre;
+      if (!srcEl) return '';
+      if (typeof srcEl.innerText === 'string' && srcEl.innerText.length > 0) return srcEl.innerText;
+      return String(srcEl.textContent || '');
+    }
 
     const isStreamingNow = () => {
       if (typeof options.isStreaming === 'function') {
@@ -328,14 +355,16 @@
       if (!containers.length) return { enhanced: 0, folded: 0 };
       ensureStyle();
 
-      // Prune detached pre elements
+      // Prune detached pre elements & modifiedDetails
       for (const pre of Array.from(enhancedPres)) {
         if (pre.isConnected === false) {
           try { codeBars.get(pre)?.remove?.(); } catch {}
           codeBars.delete(pre);
+          preLineCache.delete(pre);
           enhancedPres.delete(pre);
         }
       }
+      pruneDetachedDetails();
 
       const streaming = isStreamingNow();
       let curEnhanced = 0;
@@ -349,14 +378,26 @@
           const pre = pres[idx];
           if (!pre || seenPres.has(pre) || isOwnedNode(pre)) continue;
           seenPres.add(pre);
+          const isStreamingTail = streaming && isConv && idx === lastIdx;
           // Streaming guard: never interrupt the active tail code block while assistant is still generating
-          if (streaming && isConv && idx === lastIdx && !enhancedPres.has(pre)) continue;
+          if (isStreamingTail && !enhancedPres.has(pre)) continue;
 
-          const lines = countCodeLines(pre.textContent || '');
+          const rawText = String(pre.textContent || '');
+          const textLen = rawText.length;
+          let lines;
+          const cached = !isStreamingTail && enhancedPres.has(pre) ? preLineCache.get(pre) : null;
+          if (cached && cached.len === textLen) {
+            lines = cached.lines;
+          } else {
+            lines = countCodeLines(rawText);
+            if (!isStreamingTail) preLineCache.set(pre, { len: textLen, lines });
+          }
+
           if (lines < collapseLines) {
             if (enhancedPres.has(pre)) {
               try { codeBars.get(pre)?.remove?.(); } catch {}
               codeBars.delete(pre);
+              preLineCache.delete(pre);
               pre.removeAttribute?.(CODE_FOLDED_ATTR);
               pre.removeAttribute?.(CODE_ENHANCED_ATTR);
               pre.removeAttribute?.(CODE_WRAP_ATTR);
@@ -418,7 +459,7 @@
             copyBtn.addEventListener('click', (ev) => {
               ev?.preventDefault?.();
               ev?.stopPropagation?.();
-              copyCodeText(pre.textContent || '', copyBtn);
+              copyCodeText(extractCodeCopyText(pre), copyBtn);
             });
 
             acts.appendChild(toggleBtn);
@@ -427,8 +468,8 @@
             bar.appendChild(meta);
             bar.appendChild(acts);
 
-            if (pre.parentElement && typeof pre.parentElement.insertBefore === 'function') {
-              pre.parentElement.insertBefore(bar, pre);
+            if (pre.parentElement) {
+              safeInsert(pre.parentElement, bar, pre);
             }
             codeBars.set(pre, bar);
             enhancedPres.add(pre);
@@ -633,8 +674,8 @@
             ev?.stopPropagation?.();
             openMermaidZoom(svg);
           });
-          if (svg.parentElement && typeof svg.parentElement.insertBefore === 'function') {
-            svg.parentElement.insertBefore(btn, svg);
+          if (svg.parentElement) {
+            safeInsert(svg.parentElement, btn, svg);
           }
           mermaidBtns.set(svg, btn);
         }
@@ -659,6 +700,7 @@
     function removeRail() {
       try { railEl?.remove?.(); } catch {}
       railEl = null;
+      lastRailSig = '';
       removeOutline();
     }
 
@@ -806,6 +848,32 @@
       return new Set();
     }
 
+    function sampleRailIndices(total, activeIdx, starredSet) {
+      const MAX_DOTS = 80;
+      if (total <= MAX_DOTS) {
+        const all = new Array(total);
+        for (let i = 0; i < total; i += 1) all[i] = i;
+        return all;
+      }
+      const keep = new Set([0, total - 1]);
+      for (const tn of starredSet) {
+        const idx = Number(tn) - 1;
+        if (idx >= 0 && idx < total) keep.add(idx);
+      }
+      const anchor = activeIdx >= 0 && activeIdx < total ? activeIdx : total - 1;
+      const winStart = Math.max(0, anchor - 20);
+      const winEnd = Math.min(total - 1, anchor + 20);
+      for (let i = winStart; i <= winEnd; i += 1) keep.add(i);
+      const remaining = MAX_DOTS - keep.size;
+      if (remaining > 0) {
+        const step = (total - 1) / (remaining + 1);
+        for (let k = 1; k <= remaining && keep.size < MAX_DOTS; k += 1) {
+          keep.add(Math.min(total - 1, Math.max(0, Math.round(k * step))));
+        }
+      }
+      return Array.from(keep).sort((a, b) => a - b);
+    }
+
     function renderRail() {
       if (destroyed || !enabled || !doc || !doc.body) {
         removeRail();
@@ -826,6 +894,13 @@
         return;
       }
 
+      const starred = getStarredTurnSet();
+      const starredSig = [...starred].sort((a, b) => a - b).join(',');
+      const railSig = `${turns.length}:${currentTurnIndex}:${starredSig}`;
+      if (railEl && railEl.isConnected !== false && railSig === lastRailSig) {
+        return;
+      }
+
       ensureStyle();
       if (!railEl || railEl.isConnected === false) {
         railEl = coexist?.markOwnedNoTranslate
@@ -837,7 +912,7 @@
         doc.body.appendChild(railEl);
       }
 
-      const starred = getStarredTurnSet();
+      lastRailSig = railSig;
       while (railEl.firstChild) railEl.removeChild(railEl.firstChild);
 
       const outlineBtn = doc.createElement('button');
@@ -874,8 +949,9 @@
 
       const dotsWrap = doc.createElement('div');
       dotsWrap.className = 'ag-sag-rnav-dots';
-      // Uncapped scrollable turn dots (no 30-turn truncation)
-      for (let i = 0; i < turns.length; i += 1) {
+      const dotIndices = sampleRailIndices(turns.length, currentTurnIndex, starred);
+      for (let d = 0; d < dotIndices.length; d += 1) {
+        const i = dotIndices[d];
         const turnNum = i + 1;
         const snippet = String(turns[i]?.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 64);
         const dot = doc.createElement('button');
@@ -930,7 +1006,21 @@
       };
       if (conv) {
         if (canScroll(conv)) return conv;
-        for (const el of conv.querySelectorAll?.('*') || []) if (canScroll(el)) return el;
+        // Bounded BFS (depth <= 4, max 60 nodes) instead of unbounded conv.querySelectorAll('*')
+        const queue = [];
+        const kids = conv.children || [];
+        for (let i = 0; i < kids.length; i += 1) queue.push([kids[i], 1]);
+        let visited = 0;
+        while (queue.length > 0 && visited < 60) {
+          const [el, depth] = queue.shift();
+          visited += 1;
+          if (canScroll(el)) return el;
+          if (depth < 4 && el?.children?.length) {
+            for (let j = 0; j < el.children.length && visited + queue.length < 120; j += 1) {
+              queue.push([el.children[j], depth + 1]);
+            }
+          }
+        }
         return conv;
       }
       return scope && scope !== doc ? scope : null;
@@ -982,7 +1072,7 @@
           ev.preventDefault?.();
           ev.stopPropagation?.();
         }
-      } else if (key.toLowerCase() === 'f') {
+      } else if (key.toLowerCase() === 'f' || String(ev?.code || '') === 'KeyF') {
         if (openOutlineSearch()) {
           ev.preventDefault?.();
           ev.stopPropagation?.();
