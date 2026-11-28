@@ -562,6 +562,28 @@
     ['Toggle planning mode', '切换规划模式', '切換規劃模式', '計画モードを切り替えます', '계획 모드 전환', 'Alterna el modo de planificación', 'Basculer le mode planification', 'Planungsmodus umschalten', 'Переключить режим планирования', 'Alternar modo de planejamento'],
     ['Undo the last change', '撤销上一步更改', '復原上一步變更', '直前の変更を元に戻します', '마지막 변경 사항 실행 취소', 'Deshace el último cambio', 'Annuler la dernière modification', 'Letzte Änderung rückgängig machen', 'Отменить последнее изменение', 'Desfazer a última alteração'],
     ['Restore checkpoint', '恢复检查点', '還原檢查點', 'チェックポイントを復元します', '체크포인트 복원', 'Restaura un punto de control', 'Restaurer le point de contrôle', 'Prüfpunkt wiederherstellen', 'Восстановить контрольную точку', 'Restaurar ponto de verificação'],
+
+    // ── 6. Antigravity 2.35+ Desktop Surfaces & Execution Policies ───────────
+    ['Scheduled Tasks', '定时任务', '排程任務', 'スケジュールタスク', '예약된 작업', 'Tareas programadas', 'Tâches planifiées', 'Geplante Aufgaben', 'Запланированные задачи', 'Tarefas agendadas'],
+    ['Background Tasks', '后台任务', '背景任務', 'バックグラウンドタスク', '백그라운드 작업', 'Tareas en segundo plano', 'Tâches en arrière-plan', 'Hintergrundaufgaben', 'Фоновые задачи', 'Tarefas em segundo plano'],
+    ['Project-Level Settings', '项目级设置', '專案層級設定', 'プロジェクト設定', '프로젝트 수준 설정', 'Configuración del proyecto', 'Paramètres du projet', 'Projekteinstellungen', 'Настройки проекта', 'Configurações do projeto'],
+    ['Workspace Settings', '工作区设置', '工作區設定', 'ワークスペース設定', '작업 공간 설정', 'Ajustes del espacio', 'Paramètres de l’espace', 'Arbeitsbereich-Einstellungen', 'Настройки пространства', 'Configurações do espaço'],
+    ['Tool Execution Policy', '工具执行策略', '工具執行原則', 'ツール実行ポリシー', '도구 실행 정책', 'Política de herramientas', 'Politique d’exécution', 'Werkzeugrichtlinie', 'Политика инструментов', 'Política de ferramentas'],
+    ['Terminal Sandbox', '终端沙箱', '終端機沙箱', 'ターミナルサンドボックス', '터미널 샌드박스', 'Sandbox de terminal', 'Bac à sable terminal', 'Terminal-Sandbox', 'Песочница терминала', 'Sandbox do terminal'],
+    ['Non-Workspace File Access', '工作区外文件访问', '非工作區檔案存取', '外部ファイルアクセス', '외부 파일 접근', 'Acceso fuera del espacio', 'Accès hors espace', 'Externer Dateizugriff', 'Внешний доступ к файлам', 'Acesso fora do espaço'],
+    ['Internet Access Policy', '联网访问策略', '網路存取原則', 'インターネット接続ポリシー', '인터넷 접근 정책', 'Política de Internet', 'Politique d’accès réseau', 'Internetzugriffsrichtlinie', 'Политика доступа в сеть', 'Política de Internet'],
+    ['Permission Grants', '权限授予', '權限授與', '権限の付与', '권한 부여', 'Concesiones de permisos', 'Autorisations accordées', 'Berechtigungen', 'Выданные разрешения', 'Permissões concedidas'],
+    ['Command Allowlist', '命令白名单', '指令允許清單', '許可コマンド一覧', '명령 허용 목록', 'Lista de comandos permitidos', 'Commandes autorisées', 'Befehls-Positivliste', 'Разрешённые команды', 'Lista de comandos permitidos'],
+    ['Command Denylist', '命令黑名单', '指令封鎖清單', '拒否コマンド一覧', '명령 차단 목록', 'Lista de comandos bloqueados', 'Commandes interdites', 'Befehls-Sperrliste', 'Запрещённые команды', 'Lista de comandos bloqueados'],
+    ['Browser Allowlist', '浏览器白名单', '瀏覽器允許清單', 'ブラウザ許可一覧', '브라우저 허용 목록', 'Sitios permitidos', 'Sites autorisés', 'Browser-Positivliste', 'Разрешённые сайты', 'Sites permitidos'],
+    ['Auxiliary Pane', '辅助侧栏', '輔助面板', '補助ペイン', '보조 패널', 'Panel auxiliar', 'Volet auxiliaire', 'Hilfsbereich', 'Дополнительная панель', 'Painel auxiliar'],
+    ['Files Changed', '已更改文件', '已變更檔案', '変更されたファイル', '변경된 파일', 'Archivos modificados', 'Fichiers modifiés', 'Geänderte Dateien', 'Изменённые файлы', 'Arquivos alterados'],
+    ['Terminals', '终端列表', '終端機清單', 'ターミナル一覧', '터미널 목록', 'Terminales', 'Terminaux', 'Terminals-Liste', 'Терминалы', 'Terminais'],
+    ['Agent Activity', '智能体动态', '代理動態', 'エージェント活動', '에이전트 활동', 'Actividad del agente', 'Activité de l’agent', 'Agentenaktivität', 'Активность агента', 'Atividade do agente'],
+    ['Run in background', '后台运行', '背景執行', 'バックグラウンドで実行', '백그라운드에서 실행', 'Ejecutar en segundo plano', 'Exécuter en arrière-plan', 'Im Hintergrund ausführen', 'Выполнить в фоне', 'Executar em segundo plano'],
+    ['Allowlist', '白名单', '允許清單', '許可リスト', '허용 목록', 'Lista permitida', 'Liste autorisée', 'Positivliste', 'Белый список', 'Lista de permissão'],
+    ['Denylist', '黑名单', '封鎖清單', '拒否リスト', '차단 목록', 'Lista bloqueada', 'Liste bloquée', 'Sperrliste', 'Чёрный список', 'Lista de bloqueio'],
+    ['Sandbox', '沙箱', '沙箱', 'サンドボックス', '샌드박스', 'Entorno aislado', 'Bac à sable', 'Sandbox-Modus', 'Песочница', 'Ambiente isolado'],
   ];
 
   // Pattern tuple order: [regexSource, flags, zh-CN, zh-TW, ja, ko, es, fr, de, ru, pt-BR]

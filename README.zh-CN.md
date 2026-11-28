@@ -6,7 +6,7 @@
 
 内置 **10 国语言原生界面实时翻译**（每语种约 5,400 词条）、**统一 6-Tab 控制中心与 `Ctrl/Cmd+Alt+,` 全局设置抽屉**、**分段式状态胶囊 HUD**、**`Ctrl/Cmd+Alt+P` 提示词库与命令面板**、自定义阈值静默 `/compact` 防爆与视口滚动盾、流式运行中 **提示词排队**、防丢 **草稿保护**、轮次书签与跨会话档案库、带不可绕过高危黑名单的 **安全自动审批**、零 `:has()` **光学主题与中文字体排版**、零封号风险的 **只读配额脉冲**，以及离线 **本地存储体检与脱敏备份 CLI**——**全部模块独立开关，按需启用**。
 
-> **当前版本：** `v1.3.0` · **开源协议：** [MIT](./LICENSE) · **运行环境：** Node.js >= 22 · **外部依赖：** 零 npm 运行依赖 · **架构路线：** Zero-ASAR 无损 CDP · **双星搭档：** [`agy-NOV`](https://github.com/tone-leh/agy-NOV)
+> **当前版本：** `v1.4.0` · **开源协议：** [MIT](./LICENSE) · **运行环境：** Node.js >= 22 · **外部依赖：** 零 npm 运行依赖 · **架构路线：** Zero-ASAR 无损 CDP · **双星搭档：** [`agy-NOV`](https://github.com/tone-leh/agy-NOV)
 
 > **非官方社区项目与商标免责声明：** `agy-Sag` 为独立的开源社区项目，与 Google LLC 无任何隶属、赞助或官方背书关系；文中提及的 “Antigravity” 与 “Google” 仅作软件兼容性说明用途。
 
@@ -27,9 +27,9 @@
 
 同时安装 **`agy-Sag`** 与 **`agy-NOV`** 后，`agy-Sag` 统一控制中心（内嵌于 **Settings → Appearance** 或通过 `Ctrl/Cmd+Alt+,` 打开右侧抽屉）自动解锁 **`双星 NOV`** 面板，并与 `agy-NOV` 保持统一视觉设计 Token（`--sag-*` 对齐 `--nov-*`）：
 
-- **在 Antigravity 原生设置里直接热控 `agy-NOV`（`v0.5–v1.0+`）**：按 5 大分类一键开关全部 **13 个 `agy-NOV` 纯原生模块** 并切换 **5 档场景预设**（`minimal` 6 / `core` 12 / `power` 32 / `local-all` 43 / `full` 47 工具）。通信复用 CDP `Runtime.addBinding`（零额外 HTTP 端口）通知 Sidecar 原子更新 `agy-NOV` 的 `config.json`（`0600`），`agy-NOV` 服务端通过原生文件签名热同步刷新 `tools/list`，全程保持 `agy-NOV` 零 CDP 纯净。
-- **提示词库只读消费 `agy-NOV` 工程模板（`promptLibrary` × `agy-NOV ops`）**：通过零端口 `sag:nov_templates` 只读通道读取 `agy-NOV` 的 `ops/prompts.json`（严格 symlink 拒止、`<= 256 KB` 上限、零磁盘写入），在 `Ctrl/Cmd+Alt+P` 命令面板中一键填表填入输入框。
-- **双星只读数据流与按轮回滚联动（`sag:nov_feed` × `guard` / `spec` / `mem` / `radar`）**：通过零端口只读通道聚合 `agy-NOV` 快照摘要（单文件 `<= 256 KB`、symlink 拒止、零写入）：`spec` 写锁激活时自动暂停 `promptQueue` 出队，底栏 HUD 与 `双星 NOV` 面板实时展示 `NOV 🔒` / `NOV · ΔN` 记忆漂移与 Guard 拦截数，并在每轮消息栏提供按需 `↺` 回滚提示词填充按钮（仅 `agy-NOV guard` 开启时可见，安全追加不覆盖草稿）。
+- **在 Antigravity 原生设置里直接热控 `agy-NOV`（`v0.5–v1.2+`）**：按 5 大分类一键开关全部 **13 个 `agy-NOV` 纯原生模块**、切换 **5 档场景预设**（`minimal` 6 / `core` 12 / `power` 32 / `local-all` 43 / `full` 47 工具），并在切换界面语言时自动同步 8 语种交集。通信复用 CDP `Runtime.addBinding`（零额外 HTTP 端口）通知 Sidecar 原子更新 `agy-NOV` 的 `config.json`（`0600`），`agy-NOV` 服务端通过原生文件签名热同步刷新 `tools/list`，全程保持 `agy-NOV` 零 CDP 纯净。
+- **提示词库只读消费 `agy-NOV` 工程模板（`promptLibrary` × `agy-NOV ops`）**：通过零端口 `sag:nov_templates` 只读通道读取 `agy-NOV` 的 `ops/prompts.json`（严格 symlink 拒止、`<= 256 KB` 上限、零磁盘写入），并在 `Ctrl/Cmd+Alt+P` 命令面板自动透出 5 条原生 Playbook（`/nov-spec`、`/nov-debug`、`/nov-review`、`/nov-handoff`、`/nov-workflow`）。
+- **双星只读数据流与按轮回滚联动（`sag:nov_feed` × `guard` / `verify` / `spec` / `mem` / `radar` / `xray`）**：通过零端口只读通道聚合 `agy-NOV` 快照（兼容 `feed-snapshot.json` 嵌套 `summary` 与 `health-sweep.json`，单文件 `<= 256 KB`、symlink 拒止、零写入）：`spec` 写锁激活时自动暂停 `promptQueue` 出队，底栏 HUD 与 `双星 NOV` 面板实时展示 `NOV 🔒` / `NOV ⛔`（Verify 阻断）/ `NOV · ΔN` 记忆漂移、健康分与 Guard 拦截数，并在每轮消息栏提供按需 `↺` 回滚提示词填充按钮（仅 `agy-NOV guard` 开启时可见，安全追加不覆盖草稿）。
 - **多层安全护盾协同（`safeAutoAccept` × `agy-NOV guard` / `verify`）**：前端铁壁黑名单自动审批与后端 PreToolUse 密钥防火墙、改前文件快照及 Stop 实测校验门形成多层防护。
 - **压缩护航 × 记忆与透视（`compactGuard` × `agy-NOV mem` / `xray`）**：上下文自动压缩与代码锚定长期记忆、Token 透视形成闭环。
 - **通知防重礼让（`sessionRadar` × `agy-NOV radar`）**：自动识别双侧提醒同时开启并提供一键去重。
@@ -58,21 +58,21 @@
 
 | 层级 | 模块 | 默认状态 | 隔离与风险分级 | 核心能力 |
 | :---: | :--- | :---: | :--- | :--- |
-| **L1** | **原生界面翻译**（`hostI18n`） | **开启** | 100% 离线 · 无损热切 | 实时翻译 Antigravity 2.x 原生桌面界面，内置 **10 国语言**（简中、繁中、日、韩、西、法、德、俄、葡、英文还原）。每语种覆盖约 5,400 词条（465 核心 + 分层扩展词库 + 424 正则模板），物理豁免代码块/输入框/对话正文/斜杠命令名，穿透 Shadow DOM，支持自定义 JSON 词典热导入。 |
+| **L1** | **原生界面翻译**（`hostI18n`） | **开启** | 100% 离线 · 无损热切 | 实时翻译 Antigravity 2.35+ 原生桌面界面，内置 **10 国语言**（简中、繁中、日、韩、西、法、德、俄、葡、英文还原）。每语种覆盖约 5,400–5,510 词条（484 核心 + 分层扩展词库 + 424 正则模板），物理豁免代码块/输入框/对话正文/斜杠命令名，穿透 Shadow DOM，支持自定义 JSON 词典热导入。 |
 | **L1** | **思考与标题翻译**（`thoughtTranslate`） | 关闭 | **高敏默认关** · Sidecar 代理 | 实时翻译 Agent 思考块与可选侧栏/面包屑标题。支持 **5 类引擎**：免 Key 轻量机器翻译（及自定义端点）、用户自填 API Key **OpenAI 兼容接口**（OpenAI / DeepSeek / OpenRouter / Groq / LM Studio）、**Anthropic**、**Gemini** 与本机离线 **Ollama**。全部请求经零端口 Node Sidecar 代理转发，API Key 独立存放在 `0600` 本地文件（自动排除在配置导出与备份之外），内置 SSRF/重定向防线、LRU 缓存、双语对照/沉浸译文切换与 Prism 礼让。 |
-| **L1** | **光学主题与美学皮肤**（`themeStudio`） | 关闭 | 100% 离线 | 零 `:has()` 全表面视觉与动效引擎：内置 **15 套精选深浅与风格皮肤**（经典深色 7 套含黑曜深空/暖炭玄岩/午夜墨蓝/北欧冰霜/纯黑 OLED/东京之夜/摩卡可可、经典浅色 3 套含白昼冷晶/暖白画册/玫瑰晨曦、风格美学 5 套含抹茶手帐/怪盗猩红/线稿素描/像素极客/极光玻璃）、**8 套一键外观方案**、跟随宿主明暗自动配对、7 档强调色覆写、4 档表面材质（含黑曜切面/纸墨手帐/极光玻璃）、4 档全局圆角、6 档代码字体栈（含更纱黑体）与连字、CJK 调优、`CSS.highlights` 五级水墨流式淡入、FastDOM 丝滑输入光标、0fps 底缘语义微光（避让 Browser Hole）、净化自定义 CSS，以及向 `plugin://` 扩展面板（含 `agy-NOV`）同步主题变量。 |
-| **L1** | **阅读导航**（`readingNav`） | 关闭 | 100% 离线 | 流式保护的长代码块折叠（默认 `>= 40` 行，支持 `20/40/60/80`，同时覆盖对话区与 `artifact-view`），收起自动 `scrollTop` 补偿、吸顶行数/展开/换行/复制条、`Alt+↑/↓` 跳轮、无上限可滚动迷你导轨与一键顺滑滚底（`⤓`）、`Alt+F` 本会话大纲实时搜索、一键折展全部代码与步骤，以及零 `innerHTML` Mermaid 缩放与 SVG 导出模态（遇 Prism 自动礼让）。 |
+| **L1** | **光学主题与美学皮肤**（`themeStudio`） | 关闭 | 100% 离线 | 零 `:has()` 全表面视觉与动效引擎：内置 **15 套精选深浅与风格皮肤**、**8 套一键外观方案**、跟随宿主明暗自动配对、右侧 **Auxiliary Pane**（子代理/后台任务/变更文件/终端面板）视觉融合、7 档强调色覆写、4 档表面材质（含黑曜切面/纸墨手帐/极光玻璃）、4 档全局圆角、6 档代码字体栈（含更纱黑体）与连字、CJK 调优、`CSS.highlights` 五级水墨流式淡入、FastDOM 丝滑输入光标、0fps 底缘语义微光（避让 Browser Hole）、净化自定义 CSS，以及向 `plugin://` 扩展面板（含 `agy-NOV`）同步主题变量。 |
+| **L1** | **阅读导航**（`readingNav`） | 关闭 | 100% 离线 | 流式保护的长代码块折叠（默认 `>= 40` 行，支持 `20/40/60/80`，同时覆盖对话区、`artifact-view`、`auxiliary-pane` 与 `terminal-panel`），收起自动 `scrollTop` 补偿、吸顶行数/展开/换行/复制条、`Alt+↑/↓` 跳轮、无上限可滚动迷你导轨与一键顺滑滚底（`⤓`）、`Alt+F` 本会话大纲实时搜索、一键折展全部代码与步骤，以及零 `innerHTML` Mermaid 缩放与 SVG 导出模态（遇 Prism 自动礼让）。 |
 | **L2** | **自动压缩保护**（`compactGuard`） | **开启** | 100% 离线 | 自定义预警与触发阈值（`关闭` 或 `50%–98%`，默认 `80%`），默认静默自动压缩并启用视口滚动盾（阅读历史消息时不跳屏）；兼容 Lexical 两步斜杠选择、`/clear` 轻量重开与压缩后锚点续接条。 |
 | **L2** | **压缩前导出**（`precompactExport`） | **开启** | 100% 离线 | 内嵌于 `compactGuard` 卡片下的子开关：压缩前一键复制或下载 `.md` 复盘档案，自动脱敏 PEM 私钥、API Key、Bearer Token 与 JWT，支持去噪结论版精简导出。 |
-| **L2** | **草稿防丢**（`draftGuard`） | **开启** | 100% 离线 | 按会话自动防抖暂存未发送草稿（7 天有效期、16 KB 上限）单行恢复，并自动维护最近 30 条脱敏已发提示词历史，空输入框按 `Ctrl+↑/↓` 随时召回微调。 |
+| **L2** | **草稿防丢**（`draftGuard`） | **开启** | 100% 离线 | 按会话自动防抖暂存未发送草稿（7 天有效期、16 KB 上限）单行恢复，自动记录输入区图片/文件附件数量并在恢复条提醒重新粘贴；同步维护最近 30 条脱敏已发提示词历史，空输入框按 `Ctrl+↑/↓` 随时召回微调。 |
 | **L2** | **提示词排队**（`promptQueue`） | **开启** | 100% 离线 | Agent 流式执行长任务时预先排队 1–20 条后续指令，支持行内双击/按钮编辑与一键置顶插队（`⏫`）；回合空闲后自动发送，内置**四重安全熔断**（流式中、输入框有草稿、待审批卡片或 `agy-NOV spec` 写锁生效时绝不盲发）。 |
-| **L2** | **提示词库**（`promptLibrary`） | 关闭 | 100% 离线 · 只读 NOV | 输入区按钮、`Ctrl/Cmd+Alt+P` 命令面板与空框 `//` 速唤：斜杠指令、6 套双语 `{{变量=默认值}}` 模板、自定义片段增删改与 128 KB 导入导出、只读 `agy-NOV ops` 模板与 v0.9 原生 Playbook（连接 NOV 时自动透出 `/nov-spec`、`/nov-debug`、`/nov-review`、`/nov-handoff`）、对话选区浮动引用胶囊，以及遇 Prism 自动礼让的独立对话/路径右键菜单（含 `/btw` 侧边快问、`/plan`、`/compact`、引用模板与跨平台 POSIX/Windows `@路径` 插入）；安全追加绝不自动发送。 |
-| **L2** | **轮次书签与档案库**（`outlineBookmarks`） | 关闭 | 100% 离线 | 消息操作栏收藏星标、每轮 `⤺` 三选一恢复微菜单（NOV 文件回滚 / `/compact` 聚焦 / 复制截至此轮交接稿）、悬浮 `★ N` 快速回跳抽屉，以及 `Ctrl/Cmd+Shift+B` 跨会话可搜索档案库与脱敏合集导出。 |
+| **L2** | **提示词库**（`promptLibrary`） | 关闭 | 100% 离线 · 只读 NOV | 输入区按钮、`Ctrl/Cmd+Alt+P` 命令面板与空框 `//` 速唤：斜杠指令、6 套双语 `{{变量=默认值}}` 模板、自定义片段增删改与 128 KB 导入导出、只读 `agy-NOV ops` 模板与 5 条原生 Playbook（连接 NOV 时自动透出 `/nov-spec`、`/nov-debug`、`/nov-review`、`/nov-handoff`、`/nov-workflow`）、对话选区浮动引用胶囊，以及遇 Prism 自动礼让的独立对话/路径右键菜单（含 `/btw` 侧边快问、`/plan`、`/compact`、引用模板与跨平台 POSIX/Windows `@路径` 插入）；安全追加绝不自动发送。 |
+| **L2** | **轮次书签与档案库**（`outlineBookmarks`） | 关闭 | 100% 离线 · 只读检索 | 消息操作栏收藏星标、每轮 `⤺` 三选一恢复微菜单（NOV 文件回滚 / `/compact` 聚焦 / 复制截至此轮交接稿）、悬浮 `★ N` 快速回跳抽屉，以及 `Ctrl/Cmd+Shift+B` 档案库（支持切换 `★ 书签` 与零端口只读 `🔍 全部会话` 脱敏历史检索）。 |
 | **L3** | **卡死与燃尽监测**（`sessionWatchdog`） | **开启** | 100% 离线 | 估算到达阈值的剩余轮数（展示于状态胶囊 HUD）、标记单轮突增，并在流式输出长时间静默（默认 3 分钟）时轻提醒并支持一键 `+5m` 延后。 |
 | **L3** | **侧栏聚光与提醒**（`sessionRadar`） | 关闭 | 100% 离线 | 左侧会话列表顶部增加 `全部 / 运行中 / 待确认` 快捷筛选，支持窗口切后台时的桌面通知、零外发 WebAudio 合成提示音、浏览器本地语音播报（TTS）与 `HH:MM-HH:MM` 静音时段。 |
-| **L3** | **安全自动审批**（`safeAutoAccept`） | 关闭 | **高敏默认关** · 本地 | 针对低风险内联审批卡片按策略自动放行（`readonly-safe` 只读安全 / `dev-flow` 研发闭环 / `custom` 自定义），内置**任何模式下均不可绕过的铁壁黑名单**（拦截 `rm -rf`、`git push --force`、`reset --hard`、`DROP TABLE`、`curl\|sh`、`sudo`、`.env`、`~/.ssh` 等），支持演练 Dry-Run、一键急停与 50 条审计日志。 |
+| **L3** | **安全自动审批**（`safeAutoAccept`） | 关闭 | **高敏默认关** · 本地 | 针对低风险内联审批卡片按策略自动放行（`readonly-safe` 只读安全 / `dev-flow` 研发闭环 / `custom` 自定义），内置**任何模式下均不可绕过的铁壁黑名单**（拦截 `rm -rf`、`git push --force`、`reset --hard`、`DROP TABLE`、`curl\|sh`、`sudo`、`.env`、`~/.ssh` 及 Windows PowerShell/CMD 破坏性命令），支持演练 Dry-Run、一键急停与 50 条审计日志。 |
 | **L3** | **配额脉冲**（`quotaPulse`） | 关闭 | 100% 离线 · 纯只读 | 零凭据接触、零网络请求的只读额度观测器：记录本地 5 小时与 7 天活动估算，并捕获页面中出现的 429 / 限流 / `Resets in ...` 倒计时提示，严格区分页面实测与本地估算，杜绝号池封号风险。 |
-| **CLI** | **本地存储体检**（`storage-doctor`） | CLI | 只读审计 | 独立命令行工具（`agy-sag storage audit\|backup\|export`），扫描 `~/.gemini/antigravity/` 空间占用、孤儿目录、SQLite `.db-wal` 活跃写锁状态，并支持密钥脱敏后的 Markdown/JSON 会话导出与安全备份。 |
+| **CLI** | **本地存储体检**（`storage-doctor`） | CLI | 只读审计 | 独立命令行工具（`agy-sag storage audit\|backup\|export\|search`），扫描 `~/.gemini/antigravity/` 空间占用、孤儿目录、SQLite `.db-wal` 活跃写锁状态，支持只读脱敏跨会话关键词检索与 Markdown/JSON 导出及安全备份。 |
 
 ### 4 档一键场景预设
 
@@ -148,8 +148,9 @@ node cli/sag-cli.mjs doctor
 node cli/sag-cli.mjs i18n validate
 node cli/sag-cli.mjs i18n list
 
-# 本地存储体检、WAL 写锁检测、安全备份与脱敏会话导出
+# 本地存储体检、WAL 写锁检测、脱敏跨会话检索、安全备份与会话导出
 node cli/sag-cli.mjs storage audit
+node cli/sag-cli.mjs storage search --q="Auxiliary Pane" --limit=10
 node cli/sag-cli.mjs storage backup --out=/tmp/agy-backup --dry-run
 node cli/sag-cli.mjs storage export --session=<SESSION_ID> --format=md
 
@@ -206,7 +207,7 @@ Antigravity 2.0 宿主（Electron 44 + language_server 本地渲染界面）
 ## 本地开发与验证
 
 ```bash
-npm test                 # 运行全量原生 node:test 单测套件（243/243 通过，零外部依赖）
+npm test                 # 运行全量原生 node:test 单测套件（249/249 通过，零外部依赖）
 npm run i18n:validate    # 校验全部 10 国内置 + 9 扩展界面翻译词典与正则模板（0 错误）
 npm run workbench:smoke  # 对离线沙盒执行自动化 HTTP 烟雾校验（22 markers）
 npm run doctor           # 只读本机环境与双星共存诊断

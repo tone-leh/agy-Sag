@@ -148,4 +148,4 @@
 
 - [x] **阶段 15**：`prism-bridge.js` 按 6 Tab 拆分为 `packages/core/settings/tab-*.js`、`CONTRIBUTING.md` 社区贡献文档与 `cli/bundle.mjs` 打包结构化升级
 - [x] **阶段 16**：第 14 模块 `thoughtTranslate` 多引擎思考过程与侧栏标题实时翻译（严格 Opt-in，支持免 Key 机器翻译 + 自填 API Key OpenAI 兼容 / Anthropic / Gemini + 本地 Ollama，零端口 Node Sidecar 代理、`0600` 独立凭据隔离与 SSRF/重定向防护）
-- [ ] **阶段 17**：真实 Windows / Linux 桌面实机反馈收口与 `agy-NOV v1.0+` 持续对齐（已完成本地 Windows PowerShell/CMD 铁壁黑名单、IPv4-mapped IPv6 元数据拦截、Windows 大小写无关 `APPDATA`、Linux Flatpak 入口与无头显示检测等静态/模拟加固，待实机复验）
+- [x] **阶段 17（`v1.4.0` 收口发布）**：完成 `agy-NOV v1.0.2–v1.2.0` 完整协议对齐（`snap.summary` 解包、Verify `'blocked'`、`health-sweep.json`、`/nov-workflow`、8 语种联动）、Marketplace 清单体检、Antigravity `2.35.2` 20 条新界面词条与右侧 HTML Auxiliary Pane 主题/代码折叠增强、零端口只读脱敏跨会话检索（`storage search` + `sag:search_sessions` + `BookmarkVault` 双模式切换）、`draftGuard` 附件提醒及 Windows/Linux 静态与模拟深度加固（`249/249` 单测全绿，正式定版 `v1.4.0`；真实 Windows/Linux 物理机联调待后续环境实测）

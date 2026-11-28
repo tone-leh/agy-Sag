@@ -287,12 +287,13 @@
       const conv = getConversationContainer();
       if (conv) out.push({ el: conv, isConv: true });
       const scope = getScope();
-      const artNodes =
-        scope?.querySelectorAll?.('[data-testid="artifact-view"]') ||
-        doc?.querySelectorAll?.('[data-testid="artifact-view"]') ||
+      const sel = '[data-testid="artifact-view"], [data-testid="auxiliary-pane"], [data-testid="terminal-panel"]';
+      const auxNodes =
+        scope?.querySelectorAll?.(sel) ||
+        doc?.querySelectorAll?.(sel) ||
         [];
-      for (const art of artNodes) {
-        if (art && !out.some((x) => x.el === art)) out.push({ el: art, isConv: false });
+      for (const node of auxNodes) {
+        if (node && !out.some((x) => x.el === node)) out.push({ el: node, isConv: false });
       }
       return out;
     }
@@ -339,13 +340,15 @@
       const streaming = isStreamingNow();
       let curEnhanced = 0;
       let curFolded = 0;
+      const seenPres = new Set();
 
       for (const { el: rootEl, isConv } of containers) {
         const pres = Array.from(rootEl.querySelectorAll?.('pre') || []);
         const lastIdx = pres.length - 1;
         for (let idx = 0; idx < pres.length; idx += 1) {
           const pre = pres[idx];
-          if (!pre || isOwnedNode(pre)) continue;
+          if (!pre || seenPres.has(pre) || isOwnedNode(pre)) continue;
+          seenPres.add(pre);
           // Streaming guard: never interrupt the active tail code block while assistant is still generating
           if (streaming && isConv && idx === lastIdx && !enhancedPres.has(pre)) continue;
 

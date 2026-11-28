@@ -1,4 +1,4 @@
-# agy-Sag Project Handoff Baseline (v1.3.0)
+# agy-Sag Project Handoff Baseline (v1.4.0)
 
 > This handoff document summarizes the verified architecture, module boundaries, dual-star synergy contract, and next priorities for dedicated `agy-Sag` agents.
 
@@ -68,6 +68,11 @@
   - Wired `spec.writeLockActive` into `promptQueue` dispatch circuit-breaker (`spec-write-lock`), surfaced `NOV 🔒` / `NOV · ΔN` on the HUD `nov` segment and Live NOV Feed in Settings `nov`, and added a per-turn `↺` rollback prompt filler (only when `agy-NOV guard` is connected; appends safely, never overwrites drafts or auto-submits).
   - *Phase 7 Evaluation*: Kept cross-session bookmark search in `BookmarkVault` (`Ctrl/Cmd+Shift+B`) and full offline session archival in `storage-doctor` CLI without adding extra renderer bloat, keeping `ru` injection comfortably under the 1.6 MiB hard cap.
   - *IA Simplification Check (PASS)*: Still 13 modules in `Overview`, zero duplicate controls, zero `:has()` / `.ag-cs-` rules, zero `"Prism"` leaks, `186/186` tests passing, and `ru` bundle size `1,604,340 B` (`<= 1,677,721 B`).
+- **v1.4.0 Phase 17 — `agy-NOV v1.2` Alignment, Antigravity `2.35.2` Parity, Cross-Session Search & Draft Attachment Guard (`cli/nov-bridge.mjs`, `cli/doctor.mjs`, `cli/storage-doctor.mjs`, `cli/sag-cli.mjs`, `cli/watch-daemon.mjs`, `cli/bundle.mjs`, `packages/core/*`, `plugin.json`, `workbench/server.mjs`, `test/v14-antigravity-parity.test.mjs`)**:
+  - Unwrapped nested `feed-snapshot.json` `summary` + parsed `health-sweep.json`, Verify `'blocked'`, `xray`, `/nov-workflow` playbook, 8-locale dual-star sync, and `inspectMarketplaceCompliance()` (`plugin.json` description 138 chars).
+  - Added 20 Antigravity `2.35.2` UI terms across all 9 target locales (484 core entries/locale) plus Auxiliary Pane theme styling and deduplicated long code-block folding.
+  - Added read-only symlink-guarded redacted `searchSanitizedSessions()` (`storage search`, `sag:search_sessions`, `BookmarkVault` `★ Bookmarks / 🔍 All Sessions` toggle), `draftGuard` attachment count recovery hint, and lossless `EXACT_ROWS` dictionary packing.
+  - *Verification Baseline*: `249/249` tests passing, `i18n:validate` 0 errors (484 core + 9 ext packs), `workbench:smoke` HTTP 200 (22 markers), `ru` sync bundle `1,497,317 B` (`<= 1,540,000 B`), Watch deferred `956,274 B` (`< 960,000 B`), `readmeImages = 0`.
 - **v1.4 Phase 15–16 & Windows/Linux Deep Compatibility Pass (`packages/core/settings/tab-*.js`, `packages/core/thought-translator.js`, `cli/translator-service.mjs`, `packages/core/safe-auto-accept.js`, `cli/launcher.mjs`, `CONTRIBUTING.md`, `test/thought-translator.test.mjs`, `test/cross-platform-audit-fixes.test.mjs`)**:
   - Split `prism-bridge.js` (3,366 → 1,331 lines) into 6 UMD tab modules under `packages/core/settings/` and added `CONTRIBUTING.md`.
   - Delivered the 14th module `thoughtTranslate` (strict opt-in, default OFF across all 4 presets) with zero-port Node `TranslatorService` supporting 5 engines (`mt`, `openai`, `anthropic`, `gemini`, `ollama`), `0600` isolated secrets outside `~/.gemini/antigravity/`, SSRF/IPv4-mapped IPv6/redirect guards, LRU cache, and Prism yield.
@@ -105,9 +110,10 @@
 
 Run inside repository root:
 ```bash
-npm test                                  # 238/238 tests passing (node --test)
-npm run i18n:validate                     # 10 built-in + 9 extended packs, 0 errors
-npm run workbench:smoke                   # HTTP 200, 1261876 B, 22 markers verified
+npm test                                  # 249/249 tests passing (node --test)
+npm run i18n:validate                     # 10 built-in (484 core) + 9 extended packs, 0 errors
+npm run workbench:smoke                   # HTTP 200, 22 markers verified
+npm run doctor                            # Marketplace manifest + environment diagnostics
 node cli/sag-cli.mjs launch --dry-run --json  # Read-only launch plan + Prism yield check
 ```
 

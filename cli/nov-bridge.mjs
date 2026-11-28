@@ -849,11 +849,12 @@ export function computeNovFeedSignature(opts = {}) {
   const dataDir = paths.dataDir;
   if (!dataDir || findSymlinkViolation(dataDir, homeDir)) return 'invalid-dir';
   const dirStat = safeLstat(dataDir);
-  if (!dirStat) return ['missing', ...NOV_FEED_FILES.map(() => 'missing')].join('|');
+  if (!dirStat) return ['missing', 'missing', ...NOV_FEED_FILES.map(() => 'missing')].join('|');
   if (dirStat.isSymbolicLink() || !dirStat.isDirectory()) return 'invalid-dir';
 
   const snapSig = statOneFeedPath(dataDir, ['feed-snapshot.json']);
-  const parts = [snapSig];
+  const sweepSig = statOneFeedPath(dataDir, ['health-sweep.json']);
+  const parts = [snapSig, sweepSig];
   for (const [subDir, fileName] of NOV_FEED_FILES) {
     const modSig = statOneFeedPath(dataDir, ['modules', subDir, fileName]);
     parts.push(modSig !== 'missing' ? modSig : statOneFeedPath(dataDir, [subDir, fileName]));
@@ -870,7 +871,21 @@ export function readNovFeed(opts = {}) {
   const homeDir = opts.homeDir || os.homedir();
   const paths = resolveNovPaths(opts);
 
-  // Fast path: unified agy-NOV v0.7+ dataDir/feed-snapshot.json (<= 64 KiB, already redacted)
+  // Optional read-only agy-NOV v1.2+ health-sweep.json (<= 64 KiB, zero writes)
+  const sweepRes = readSafeNovRootJson(paths.dataDir, homeDir, 'health-sweep.json', 64 * 1024);
+  const parseHealthSweep = (raw) => {
+    if (!raw || typeof raw !== 'object') return null;
+    const scoreRaw = Number(raw.score ?? raw.healthScore ?? raw.summary?.score);
+    const score = Number.isFinite(scoreRaw) ? Math.max(0, Math.min(100, Math.round(scoreRaw))) : null;
+    const grade = typeof raw.grade === 'string' ? redactNovFeedText(raw.grade, 12) : null;
+    const status = typeof raw.status === 'string' ? redactNovFeedText(raw.status, 24).toLowerCase() : null;
+    const warningsCount = toSafeNonNegInt(raw.warningsCount ?? (Array.isArray(raw.warnings) ? raw.warnings.length : 0));
+    if (score === null && !grade && !status) return null;
+    return { score, grade, status, warningsCount };
+  };
+  const healthSweep = sweepRes.ok && sweepRes.exists ? parseHealthSweep(sweepRes.data) : null;
+
+  // Fast path: unified agy-NOV v0.7–v1.2+ dataDir/feed-snapshot.json (<= 64 KiB, already redacted)
   const snapFeedRes = readSafeNovRootJson(paths.dataDir, homeDir, 'feed-snapshot.json', 64 * 1024);
   if (!snapFeedRes.ok) {
     return {
@@ -883,27 +898,33 @@ export function readNovFeed(opts = {}) {
         mem: { totalCount: 0, driftedCount: 0 },
         spec: { writeLockActive: false, activeSpecId: null, activeSpecTitle: '' },
         verify: { enforceOnStop: false, lastStatus: null, dirtyFilesCount: 0 },
+        xray: null,
+        healthSweep,
         alerts: [],
       },
     };
   }
   const ALLOWED_PERM_MODES = new Set(['readonly-audit', 'balanced-dev', 'strict-gate']);
-  const ALLOWED_VERIFY_STATUS = new Set(['pass', 'fail', 'warn', 'skipped', 'running', 'idle']);
+  const ALLOWED_VERIFY_STATUS = new Set(['pass', 'fail', 'blocked', 'warn', 'skipped', 'running', 'idle']);
   if (snapFeedRes.exists && snapFeedRes.data && typeof snapFeedRes.data === 'object') {
     const snap = snapFeedRes.data;
-    const g = snap.guard && typeof snap.guard === 'object' ? snap.guard : {};
-    const r = snap.radar && typeof snap.radar === 'object' ? snap.radar : {};
-    const m = snap.mem && typeof snap.mem === 'object' ? snap.mem : {};
-    const sp = snap.spec && typeof snap.spec === 'object' ? snap.spec : {};
-    const vf = snap.verify && typeof snap.verify === 'object' ? snap.verify : {};
+    // Unwrap agy-NOV v1.0.2–v1.2.0 `snap.summary` while staying 100% compatible with flat top-level snapshots
+    const s = snap.summary && typeof snap.summary === 'object' ? snap.summary : snap;
+    const g = s.guard && typeof s.guard === 'object' ? s.guard : {};
+    const r = s.radar && typeof s.radar === 'object' ? s.radar : {};
+    const m = s.mem && typeof s.mem === 'object' ? s.mem : {};
+    const sp = s.spec && typeof s.spec === 'object' ? s.spec : {};
+    const vf = s.verify && typeof s.verify === 'object' ? s.verify : {};
+    const xr = s.xray && typeof s.xray === 'object' ? s.xray : null;
     const lastEv = g.lastEvent && typeof g.lastEvent === 'object' ? g.lastEvent : null;
     const lastEvDecision = typeof lastEv?.decision === 'string' ? lastEv.decision.trim().toLowerCase().slice(0, 24) : '';
     const permMode = typeof g.permissionMode === 'string' && ALLOWED_PERM_MODES.has(g.permissionMode.trim()) ? g.permissionMode.trim() : null;
-    const verifyStatus = typeof vf.lastStatus === 'string' && ALLOWED_VERIFY_STATUS.has(vf.lastStatus.trim().toLowerCase()) ? vf.lastStatus.trim().toLowerCase() : null;
+    const rawVerifyStatus = vf.lastStatus ?? vf.status;
+    const verifyStatus = typeof rawVerifyStatus === 'string' && ALLOWED_VERIFY_STATUS.has(rawVerifyStatus.trim().toLowerCase()) ? rawVerifyStatus.trim().toLowerCase() : null;
     const forceAskCount = toSafeNonNegInt(
       g.forceAskCount ?? (lastEvDecision === 'force_ask' ? 1 : 0)
     );
-    const rawAlerts = Array.isArray(snap.alerts) ? snap.alerts : [];
+    const rawAlerts = Array.isArray(snap.alerts) ? snap.alerts : Array.isArray(s.alerts) ? s.alerts : [];
     const alerts = rawAlerts
       .slice(0, 4)
       .map((a) => {
@@ -912,6 +933,16 @@ export function readNovFeed(opts = {}) {
         return '';
       })
       .filter(Boolean);
+    const lastEvTs = typeof lastEv?.timestamp === 'string' ? lastEv.timestamp : typeof lastEv?.ts === 'string' ? lastEv.ts : '';
+    const lastEvTool = lastEv?.toolName ?? lastEv?.tool ?? '';
+    const lastEvReason = lastEv?.reason ?? lastEv?.summary ?? '';
+    const xraySummary = xr
+      ? {
+          totalTokens: toSafeNonNegInt(xr.totalTokens),
+          cacheHitPct: Number.isFinite(Number(xr.cacheHitPct)) ? Math.max(0, Math.min(100, Math.round(Number(xr.cacheHitPct)))) : null,
+          sessionCount: toSafeNonNegInt(xr.sessionCount),
+        }
+      : null;
     return {
       ok: true,
       available: true,
@@ -927,10 +958,10 @@ export function readNovFeed(opts = {}) {
           latestSnapshotId: typeof g.latestSnapshotId === 'string' ? redactNovFeedText(g.latestSnapshotId, 64) : null,
           latestBlocked: lastEv
             ? {
-                ts: typeof lastEv.ts === 'string' ? lastEv.ts.slice(0, 40) : '',
-                tool: redactNovFeedText(lastEv.tool, 48),
+                ts: lastEvTs.slice(0, 40),
+                tool: redactNovFeedText(lastEvTool, 48),
                 decision: lastEvDecision || 'deny',
-                reason: redactNovFeedText(lastEv.reason || lastEv.summary, 120),
+                reason: redactNovFeedText(lastEvReason, 120),
               }
             : null,
         },
@@ -953,6 +984,8 @@ export function readNovFeed(opts = {}) {
           lastStatus: verifyStatus,
           dirtyFilesCount: toSafeNonNegInt(vf.dirtyFilesCount),
         },
+        xray: xraySummary,
+        healthSweep,
         alerts,
       },
     };
@@ -1040,10 +1073,10 @@ export function readNovFeed(opts = {}) {
         latestSnapshotId: typeof latestSnap?.id === 'string' ? redactNovFeedText(latestSnap.id, 64) : null,
         latestBlocked: latestBlk
           ? {
-              ts: typeof latestBlk.ts === 'string' ? latestBlk.ts.slice(0, 40) : '',
-              tool: redactNovFeedText(latestBlk.tool, 48),
+              ts: (typeof latestBlk.timestamp === 'string' ? latestBlk.timestamp : typeof latestBlk.ts === 'string' ? latestBlk.ts : '').slice(0, 40),
+              tool: redactNovFeedText(latestBlk.toolName ?? latestBlk.tool, 48),
               decision: String(latestBlk.decision || latestBlk.action || 'deny').toLowerCase().slice(0, 24),
-              reason: redactNovFeedText(latestBlk.reason, 120),
+              reason: redactNovFeedText(latestBlk.reason ?? latestBlk.summary, 120),
             }
           : null,
       },
@@ -1066,6 +1099,8 @@ export function readNovFeed(opts = {}) {
         lastStatus: null,
         dirtyFilesCount: 0,
       },
+      xray: null,
+      healthSweep,
       alerts: [],
     },
   };

@@ -268,19 +268,163 @@
 
     let isOpen = false;
     let query = '';
+    let scope = 'bookmarks'; // 'bookmarks' | 'sessions'
+    let sessionSearchState = { loading: false, offline: false, query: '', results: [], scanned: 0 };
+    let searchTimer = null;
+    let searchSeq = 0;
     let destroyed = false;
     let overlayEl = null;
     let searchEl = null;
     let bodyEl = null;
     let statsEl = null;
     let statusEl = null;
+    let tabBmBtn = null;
+    let tabSessBtn = null;
     const listeners = [];
+    const hasSessionSearch = typeof options.onSearchSessions === 'function';
 
     const getLang = () => (typeof options.getLang === 'function' ? i18n.normalizeLang(options.getLang()) : i18n.detectLang(doc, win));
     const S = () => i18n.getStrings(getLang());
+    const isZh = () => /^zh/i.test(getLang());
+
+    function updateScopeTabs() {
+      if (!tabBmBtn || !tabSessBtn) return;
+      tabBmBtn.className = scope === 'bookmarks' ? 'ag-sg-btn ag-sg-btn-primary' : 'ag-sg-btn';
+      tabSessBtn.className = scope === 'sessions' ? 'ag-sg-btn ag-sg-btn-primary' : 'ag-sg-btn';
+      tabBmBtn.setAttribute('aria-pressed', String(scope === 'bookmarks'));
+      tabSessBtn.setAttribute('aria-pressed', String(scope === 'sessions'));
+    }
+
+    async function runSessionSearch(immediate = false) {
+      if (!hasSessionSearch || destroyed || scope !== 'sessions') return;
+      if (searchTimer) { clearTimeout(searchTimer); searchTimer = null; }
+      const q = String(query || '').trim();
+      if (q.length < 2) {
+        sessionSearchState = { loading: false, offline: false, query: q, results: [], scanned: 0 };
+        renderBody();
+        return;
+      }
+      const exec = async () => {
+        const seq = ++searchSeq;
+        sessionSearchState = { loading: true, offline: false, query: q, results: [], scanned: 0 };
+        renderBody();
+        try {
+          const res = await options.onSearchSessions(q);
+          if (destroyed || seq !== searchSeq || scope !== 'sessions') return;
+          if (!res || res.offline || !res.ok) {
+            sessionSearchState = { loading: false, offline: true, query: q, results: [], scanned: 0 };
+          } else {
+            sessionSearchState = {
+              loading: false,
+              offline: false,
+              query: q,
+              results: Array.isArray(res.results) ? res.results : [],
+              scanned: Number(res.scannedSessions) || 0,
+            };
+          }
+        } catch {
+          if (destroyed || seq !== searchSeq || scope !== 'sessions') return;
+          sessionSearchState = { loading: false, offline: true, query: q, results: [], scanned: 0 };
+        }
+        renderBody();
+      };
+      if (immediate) return exec();
+      searchTimer = setTimeout(() => { searchTimer = null; void exec(); }, 220);
+      searchTimer?.unref?.();
+    }
+
+    function renderSessionResults() {
+      const zh = isZh();
+      const st = sessionSearchState;
+      if (statsEl) {
+        statsEl.textContent = st.loading
+          ? (zh ? '检索中…' : 'Searching…')
+          : st.offline
+            ? (zh ? '离线' : 'Offline')
+            : zh
+              ? `${st.results.length} 个会话 · 已扫 ${st.scanned}`
+              : `${st.results.length} session(s) · ${st.scanned} scanned`;
+      }
+      if (!st.query || st.query.length < 2) {
+        const empty = doc.createElement('div');
+        empty.className = 'ag-sg-vault-empty';
+        empty.textContent = zh
+          ? '输入至少 2 个字符以只读检索最近脱敏历史会话'
+          : 'Type 2+ chars to search sanitized local sessions (read-only)';
+        bodyEl.appendChild(empty);
+        return;
+      }
+      if (st.loading) {
+        const el = doc.createElement('div');
+        el.className = 'ag-sg-vault-empty';
+        el.textContent = zh ? '正在只读检索本地历史会话…' : 'Searching sanitized transcripts…';
+        bodyEl.appendChild(el);
+        return;
+      }
+      if (st.offline) {
+        const el = doc.createElement('div');
+        el.className = 'ag-sg-vault-empty';
+        el.textContent = zh
+          ? '跨会话全文检索需连接 agy-sag watch 守护进程，或在终端运行：agy-sag storage search --q=<关键词>'
+          : 'Connect agy-sag watch daemon for in-app search, or run: agy-sag storage search --q=<keyword>';
+        bodyEl.appendChild(el);
+        return;
+      }
+      if (!st.results.length) {
+        const el = doc.createElement('div');
+        el.className = 'ag-sg-vault-empty';
+        el.textContent = S().vaultNoMatch;
+        bodyEl.appendChild(el);
+        return;
+      }
+      for (const s of st.results) {
+        const card = doc.createElement('div');
+        card.className = 'ag-sg-vault-card';
+        card.setAttribute('data-ag-sg-session-hit', s.sessionId);
+        const chead = doc.createElement('div');
+        chead.className = 'ag-sg-vault-card-head';
+        const left = doc.createElement('div');
+        left.textContent = `Session ${String(s.sessionId || '').slice(0, 12)}`;
+        chead.appendChild(left);
+        card.appendChild(chead);
+        for (const m of s.matches || []) {
+          const row = doc.createElement('div');
+          row.className = 'ag-sg-vault-turn';
+          const txt = doc.createElement('div');
+          txt.className = 'ag-sg-vault-turn-text';
+          const badge = doc.createElement('span');
+          badge.className = 'ag-sg-bm-num';
+          badge.textContent = `#${m.index} · ${m.role} `;
+          const sp = doc.createElement('span');
+          sp.textContent = m.snippet || '';
+          txt.appendChild(badge);
+          txt.appendChild(sp);
+          const cp = doc.createElement('button');
+          cp.type = 'button';
+          cp.className = 'ag-sg-btn';
+          cp.textContent = zh ? '复制' : 'Copy';
+          cp.addEventListener('click', async (ev) => {
+            ev?.preventDefault?.();
+            ev?.stopPropagation?.();
+            await exporter?.copyRecapToClipboard?.(m.snippet || '', win);
+            if (statusEl) statusEl.textContent = zh ? '已复制命中片段' : 'Snippet copied';
+          });
+          row.appendChild(txt);
+          row.appendChild(cp);
+          card.appendChild(row);
+        }
+        bodyEl.appendChild(card);
+      }
+    }
 
     function renderBody() {
       if (!overlayEl || !bodyEl || destroyed) return;
+      updateScopeTabs();
+      while (bodyEl.firstChild) bodyEl.removeChild(bodyEl.firstChild);
+      if (scope === 'sessions' && hasSessionSearch) {
+        renderSessionResults();
+        return;
+      }
       const strings = S();
       const all = listAllSessions(storage);
       const matched = searchVault(storage, query);
@@ -289,8 +433,6 @@
       if (statsEl) {
         statsEl.textContent = i18n.formatTemplate(strings.vaultStats, { sessions: matched.length, items: totalItems });
       }
-
-      while (bodyEl.firstChild) bodyEl.removeChild(bodyEl.firstChild);
 
       if (matched.length === 0) {
         const empty = doc.createElement('div');
@@ -459,8 +601,37 @@
       searchEl.value = query;
       searchEl.addEventListener('input', () => {
         query = searchEl.value || '';
-        renderBody();
+        if (scope === 'sessions' && hasSessionSearch) void runSessionSearch(false);
+        else renderBody();
       });
+
+      let scopeBar = null;
+      if (hasSessionSearch) {
+        scopeBar = doc.createElement('div');
+        scopeBar.className = 'ag-sg-actions';
+        scopeBar.style.margin = '0 0 8px 0';
+        const zh = isZh();
+        tabBmBtn = doc.createElement('button');
+        tabBmBtn.type = 'button';
+        tabBmBtn.className = 'ag-sg-btn ag-sg-btn-primary';
+        tabBmBtn.setAttribute('data-ag-sg-vault-tab', 'bookmarks');
+        tabBmBtn.textContent = zh ? '★ 书签' : '★ Bookmarks';
+        tabBmBtn.addEventListener('click', () => {
+          scope = 'bookmarks';
+          renderBody();
+        });
+        tabSessBtn = doc.createElement('button');
+        tabSessBtn.type = 'button';
+        tabSessBtn.className = 'ag-sg-btn';
+        tabSessBtn.setAttribute('data-ag-sg-vault-tab', 'sessions');
+        tabSessBtn.textContent = zh ? '🔍 全部会话' : '🔍 All Sessions';
+        tabSessBtn.addEventListener('click', () => {
+          scope = 'sessions';
+          void runSessionSearch(true);
+        });
+        scopeBar.appendChild(tabBmBtn);
+        scopeBar.appendChild(tabSessBtn);
+      }
 
       bodyEl = doc.createElement('div');
       bodyEl.className = 'ag-sg-vault-body';
@@ -510,6 +681,7 @@
       foot.appendChild(footBtns);
 
       modal.appendChild(head);
+      if (scopeBar) modal.appendChild(scopeBar);
       modal.appendChild(searchEl);
       modal.appendChild(bodyEl);
       modal.appendChild(foot);
@@ -561,21 +733,33 @@
       if (destroyed) return;
       destroyed = true;
       isOpen = false;
+      if (searchTimer) { clearTimeout(searchTimer); searchTimer = null; }
       while (listeners.length) {
         try { listeners.pop()(); } catch {}
       }
       try { overlayEl?.remove?.(); } catch {}
-      overlayEl = searchEl = bodyEl = statsEl = statusEl = null;
+      overlayEl = searchEl = bodyEl = statsEl = statusEl = tabBmBtn = tabSessBtn = null;
     }
 
     return {
       open,
       close,
       toggle: () => (isOpen ? close() : open()),
+      setScope: (next) => {
+        if (next === 'sessions' && hasSessionSearch) {
+          scope = 'sessions';
+          return runSessionSearch(true);
+        }
+        scope = 'bookmarks';
+        renderBody();
+        return Promise.resolve();
+      },
       setQuery: (q) => {
         query = String(q || '');
         if (searchEl) searchEl.value = query;
+        if (scope === 'sessions' && hasSessionSearch) return runSessionSearch(true);
         renderBody();
+        return Promise.resolve();
       },
       listAllSessions: () => listAllSessions(storage),
       search: (q) => searchVault(storage, q),
@@ -583,6 +767,7 @@
         isOpen,
         destroyed,
         query,
+        scope,
         sessionCount: listAllSessions(storage).length,
       }),
       destroy,

@@ -59,10 +59,12 @@
         try { storage.removeItem(DRAFT_STORAGE_PREFIX + cascadeId); } catch {}
         return null;
       }
+      const attCount = Number.isInteger(parsed.attachmentCount) && parsed.attachmentCount > 0 ? parsed.attachmentCount : 0;
       return {
         cascadeId,
         text: parsed.text,
         charCount: parsed.text.length,
+        attachmentCount: attCount,
         savedAt: parsed.savedAt || new Date(savedAtMs || nowTs).toISOString(),
         savedAtMs: savedAtMs || nowTs,
       };
@@ -71,15 +73,18 @@
     }
   }
 
-  function saveDraft(storage, cascadeId, text, nowTs = Date.now()) {
+  function saveDraft(storage, cascadeId, text, nowTs = Date.now(), meta = null) {
     if (!storage || !cascadeId) return null;
     const normalized = String(text || '').replace(/\u200B/g, '').trim();
     if (!isSaveableDraft(normalized)) return null;
     const clipped = normalized.length > MAX_DRAFT_CHARS ? normalized.slice(0, MAX_DRAFT_CHARS) : normalized;
+    const rawAtt = Number(meta?.attachmentCount);
+    const attachmentCount = Number.isFinite(rawAtt) && rawAtt > 0 ? Math.min(99, Math.floor(rawAtt)) : 0;
     const payload = {
       cascadeId,
       text: clipped,
       charCount: clipped.length,
+      ...(attachmentCount > 0 ? { attachmentCount } : {}),
       savedAt: new Date(nowTs).toISOString(),
       savedAtMs: nowTs,
     };
@@ -352,6 +357,20 @@
       if (barEl) barEl.hidden = true;
     }
 
+    function countComposerAttachments(scope) {
+      const box = findBarAnchor(scope);
+      if (!box || typeof box.querySelectorAll !== 'function') return 0;
+      const nodes = box.querySelectorAll(
+        '[data-testid*="attachment"],[data-testid*="image-preview"],[data-testid*="media-chip"],[data-attachment-id],img[src^="blob:"],img[src^="data:image/"]'
+      );
+      let count = 0;
+      for (const n of nodes || []) {
+        if (!n || n.closest?.('[data-ag-sg-owned="1"],[data-ag-sag-owned="1"]')) continue;
+        count += 1;
+      }
+      return Math.min(99, count);
+    }
+
     function flushNow(explicitCid = null) {
       if (saveTimer) {
         clearTimeout(saveTimer);
@@ -371,7 +390,9 @@
         lastLiveDraftByCid.set(cid, liveText);
         lastTurnCountByCid.set(cid, turnCount);
         dismissedCids.delete(cid);
-        const saved = saveDraft(storage, cid, liveText, nowFn());
+        const saved = saveDraft(storage, cid, liveText, nowFn(), {
+          attachmentCount: countComposerAttachments(scope),
+        });
         hideBar();
         return saved;
       }
@@ -561,10 +582,17 @@
       const strings = S();
       const safeRaw = (exporter ? exporter.redactSecrets(saved.text) : saved.text).replace(/\s+/g, ' ').trim();
       const preview = safeRaw.length > 48 ? `${safeRaw.slice(0, 48)}…` : safeRaw;
-      msgEl.textContent = i18n.formatTemplate(strings.draftFoundMsg, {
+      const baseMsg = i18n.formatTemplate(strings.draftFoundMsg, {
         chars: saved.charCount,
         preview,
       });
+      const attHint =
+        saved.attachmentCount > 0
+          ? /^zh/i.test(getLang())
+            ? `（另含 ${saved.attachmentCount} 个附件需重新粘贴）`
+            : ` (+${saved.attachmentCount} attachment(s) — re-attach manually)`
+          : '';
+      msgEl.textContent = baseMsg + attHint;
       restoreBtn.textContent = strings.draftRestoreBtn;
       discardBtn.textContent = strings.draftDiscardBtn;
       bar.hidden = false;
@@ -623,7 +651,9 @@
       if (isSaveableDraft(liveText)) {
         lastLiveDraftByCid.set(cid, liveText);
         lastTurnCountByCid.set(cid, turnCount);
-        saveDraft(storage, cid, liveText, nowFn());
+        saveDraft(storage, cid, liveText, nowFn(), {
+          attachmentCount: countComposerAttachments(scope),
+        });
       } else if (!liveText && cid === prevCid && (streaming || (prevTurns !== undefined && turnCount > prevTurns))) {
         markCurrentSent(cid);
       }

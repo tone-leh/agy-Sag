@@ -35,7 +35,7 @@ import {
   readNovOpsTemplates,
   readNovState,
 } from './nov-bridge.mjs';
-import { auditAntigravityStorage } from './storage-doctor.mjs';
+import { auditAntigravityStorage, searchSanitizedSessions } from './storage-doctor.mjs';
 import { TranslatorService } from './translator-service.mjs';
 
 export const HOST_BRIDGE_BINDING_NAME = '__agSagHostBridge';
@@ -776,6 +776,22 @@ export class SagWatchDaemon {
             return { reqId, ok: false, error: (feedRes.errors || ['Failed to read agy-NOV feed']).join('; ') };
           }
           return { reqId, ok: true, data: { available: feedRes.available, feed: feedRes.feed } };
+        }
+        if (parsed && typeof parsed === 'object' && parsed.type === 'sag:search_sessions') {
+          const reqId = typeof parsed.reqId === 'string' && parsed.reqId.length <= 128 ? parsed.reqId : null;
+          try {
+            const q = String(parsed.payload?.query || '').trim().slice(0, 120);
+            const rawLimit = Number(parsed.payload?.limit);
+            const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(20, Math.floor(rawLimit))) : 20;
+            const res = searchSanitizedSessions({
+              ...(this.storageDataDir ? { dataDir: this.storageDataDir } : {}),
+              query: q,
+              limit,
+            });
+            return { reqId, ok: true, data: res };
+          } catch {
+            return { reqId, ok: false, error: 'Session search failed' };
+          }
         }
         if (parsed && typeof parsed === 'object' && parsed.type === 'sag:storage_audit') {
           const reqId = typeof parsed.reqId === 'string' && parsed.reqId.length <= 128 ? parsed.reqId : null;

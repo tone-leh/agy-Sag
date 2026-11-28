@@ -189,10 +189,15 @@
       const blocked = Math.max(0, Number(nov.guardBlocked) || 0);
       const forceAsk = Math.max(0, Number(nov.guardForceAsk) || 0);
       const verifyFail = Boolean(nov.verifyFailed);
+      const verifyBlocked = Boolean(nov.verifyBlocked);
+      const healthScore = typeof nov.healthScore === 'number' && Number.isFinite(nov.healthScore) ? nov.healthScore : null;
       let text = 'NOV';
       let tone = 'accent';
       if (locked) {
         text = 'NOV 🔒';
+        tone = 'warn';
+      } else if (verifyBlocked) {
+        text = 'NOV ⛔';
         tone = 'warn';
       } else if (verifyFail) {
         text = 'NOV !';
@@ -203,10 +208,12 @@
       }
       const extras = [];
       if (locked) extras.push('Spec Lock');
-      if (verifyFail) extras.push('Verify fail');
+      if (verifyBlocked) extras.push('Verify blocked');
+      else if (verifyFail) extras.push('Verify fail');
       if (drifted > 0) extras.push(`Mem drift ${drifted}`);
       if (blocked > 0) extras.push(`Guard blocked ${blocked}`);
       if (forceAsk > 0) extras.push(`Guard force_ask ${forceAsk}`);
+      if (healthScore !== null) extras.push(`Health ${healthScore}`);
       const baseTitle = formatTpl(strings.hudNovTitle || 'agy-NOV connected · {on}/{total} modules', { on, total });
       segs.push({
         id: 'nov',

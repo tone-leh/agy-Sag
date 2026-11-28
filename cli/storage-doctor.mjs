@@ -21,6 +21,10 @@ export const DEFAULT_DATA_DIR = path.join(os.homedir(), '.gemini', 'antigravity'
 
 const MAX_WALK_DEPTH = 16;
 const MAX_METADATA_SCAN_BYTES = 512 * 1024;
+const MAX_SEARCH_SESSIONS = 40;
+const MAX_SEARCH_FILE_BYTES = 512 * 1024;
+const MAX_SEARCH_LIMIT = 20;
+const MAX_SEARCH_MATCHES_PER_SESSION = 3;
 const SESSION_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const BACKUP_PRIORITY_ROOTS = new Set(['conversations', 'annotations', 'brain']);
 
@@ -127,14 +131,16 @@ export function parseStorageArgs(argv = [], homeDir = os.homedir()) {
     dryRun: false,
     sessionId: null,
     format: 'md',
+    query: '',
+    limit: MAX_SEARCH_LIMIT,
     help: false,
   };
 
   let idx = 0;
   if (args.length > 0 && !args[0].startsWith('-')) {
     const cmd = args[0].trim().toLowerCase();
-    if (!['audit', 'backup', 'export', 'help'].includes(cmd)) {
-      throw new Error(`Unknown command: ${args[0]} (expected audit | backup | export)`);
+    if (!['audit', 'backup', 'export', 'search', 'help'].includes(cmd)) {
+      throw new Error(`Unknown command: ${args[0]} (expected audit | backup | export | search)`);
     }
     if (cmd === 'help') {
       opts.help = true;
@@ -209,6 +215,24 @@ export function parseStorageArgs(argv = [], homeDir = os.homedir()) {
       if (val !== 'md' && val !== 'json') throw new Error(`Invalid --format value: ${val} (expected md | json)`);
       opts.format = val;
       idx += 1;
+    } else if (a.startsWith('--q=') || a.startsWith('--query=')) {
+      const val = a.slice(a.indexOf('=') + 1).trim();
+      if (!val) throw new Error('Invalid --q value');
+      opts.query = val.slice(0, 120);
+    } else if (a === '--q' || a === '--query') {
+      const val = args[idx + 1];
+      if (!val || val.startsWith('--')) throw new Error(`Missing value for ${a}`);
+      opts.query = String(val).trim().slice(0, 120);
+      idx += 1;
+    } else if (a.startsWith('--limit=')) {
+      const n = Number(a.slice('--limit='.length));
+      if (!Number.isInteger(n) || n < 1 || n > MAX_SEARCH_LIMIT) throw new Error(`Invalid --limit value: ${a}`);
+      opts.limit = n;
+    } else if (a === '--limit') {
+      const n = Number(args[idx + 1]);
+      if (!Number.isInteger(n) || n < 1 || n > MAX_SEARCH_LIMIT) throw new Error(`Invalid --limit value: ${args[idx + 1]}`);
+      opts.limit = n;
+      idx += 1;
     } else {
       throw new Error(`Unknown argument: ${a}`);
     }
@@ -223,6 +247,10 @@ export function parseStorageArgs(argv = [], homeDir = os.homedir()) {
     opts.outFile = rawOutFile || rawOut;
     if (!opts.help && !opts.sessionId) {
       throw new Error('export command requires --session=<id>');
+    }
+  } else if (opts.command === 'search') {
+    if (!opts.help && !opts.query) {
+      throw new Error('search command requires --q=<keyword>');
     }
   }
 
@@ -845,6 +873,237 @@ export function exportSanitizedSession({
   return output;
 }
 
+function buildSearchSnippet(text, queryLower, maxLen = 160) {
+  const flat = redactSecrets(String(text || '')).replace(/\s+/g, ' ').trim();
+  if (!flat) return '';
+  const idx = flat.toLowerCase().indexOf(queryLower);
+  if (idx < 0) return flat.slice(0, maxLen);
+  const start = Math.max(0, idx - 48);
+  const end = Math.min(flat.length, start + maxLen);
+  const prefix = start > 0 ? '…' : '';
+  const suffix = end < flat.length ? '…' : '';
+  return `${prefix}${flat.slice(start, end)}${suffix}`;
+}
+
+export function searchSanitizedSessions({
+  dataDir = DEFAULT_DATA_DIR,
+  query = '',
+  limit = MAX_SEARCH_LIMIT,
+  maxSessions = MAX_SEARCH_SESSIONS,
+} = {}) {
+  const resolvedDataDir = path.resolve(expandTildePath(dataDir || DEFAULT_DATA_DIR));
+  const cleanQuery = String(query ?? '').trim().slice(0, 120);
+  const maxResults = Math.max(1, Math.min(MAX_SEARCH_LIMIT, Number.isFinite(Number(limit)) ? Math.floor(Number(limit)) : MAX_SEARCH_LIMIT));
+  const sessionCap = Math.max(1, Math.min(MAX_SEARCH_SESSIONS, Number.isFinite(Number(maxSessions)) ? Math.floor(Number(maxSessions)) : MAX_SEARCH_SESSIONS));
+
+  if (!cleanQuery) {
+    return {
+      ok: true,
+      exists: false,
+      dataDir: resolvedDataDir,
+      query: '',
+      scannedSessions: 0,
+      skippedSymlinks: 0,
+      skippedLargeFiles: 0,
+      totalMatches: 0,
+      results: [],
+    };
+  }
+
+  const brainDir = path.join(resolvedDataDir, 'brain');
+  const brainStat = safeLstat(brainDir);
+  if (!brainStat || brainStat.isSymbolicLink() || !brainStat.isDirectory()) {
+    return {
+      ok: true,
+      exists: false,
+      dataDir: resolvedDataDir,
+      query: cleanQuery,
+      scannedSessions: 0,
+      skippedSymlinks: brainStat?.isSymbolicLink?.() ? 1 : 0,
+      skippedLargeFiles: 0,
+      totalMatches: 0,
+      results: [],
+    };
+  }
+
+  let realDataDir;
+  let realBrainDir;
+  try {
+    realDataDir = canonicalRealpathSync(resolvedDataDir);
+    realBrainDir = canonicalRealpathSync(brainDir);
+  } catch {
+    return {
+      ok: true,
+      exists: false,
+      dataDir: resolvedDataDir,
+      query: cleanQuery,
+      scannedSessions: 0,
+      skippedSymlinks: 0,
+      skippedLargeFiles: 0,
+      totalMatches: 0,
+      results: [],
+    };
+  }
+  if (!isPathWithinBase(realBrainDir, realDataDir)) {
+    return {
+      ok: true,
+      exists: false,
+      dataDir: resolvedDataDir,
+      query: cleanQuery,
+      scannedSessions: 0,
+      skippedSymlinks: 1,
+      skippedLargeFiles: 0,
+      totalMatches: 0,
+      results: [],
+    };
+  }
+
+  let dirEntries = [];
+  try {
+    dirEntries = fs.readdirSync(brainDir, { withFileTypes: true });
+  } catch {
+    dirEntries = [];
+  }
+
+  let skippedSymlinks = 0;
+  let skippedLargeFiles = 0;
+  const sessionCandidates = [];
+  for (const entry of dirEntries) {
+    if (!SESSION_ID_RE.test(entry.name)) continue;
+    const sessionDir = path.join(brainDir, entry.name);
+    const st = safeLstat(sessionDir);
+    if (!st) continue;
+    if (st.isSymbolicLink()) {
+      skippedSymlinks += 1;
+      continue;
+    }
+    if (!st.isDirectory()) continue;
+    sessionCandidates.push({ sessionId: entry.name, sessionDir, mtimeMs: Math.round(st.mtimeMs || 0) });
+  }
+  sessionCandidates.sort((a, b) => b.mtimeMs - a.mtimeMs || a.sessionId.localeCompare(b.sessionId));
+
+  const queryLower = cleanQuery.toLowerCase();
+  const results = [];
+  let scannedSessions = 0;
+  let totalMatches = 0;
+
+  for (const cand of sessionCandidates.slice(0, sessionCap)) {
+    if (results.length >= maxResults) break;
+    const transcriptCandidates = [
+      path.join(cand.sessionDir, '.system_generated', 'logs', 'transcript.jsonl'),
+      path.join(cand.sessionDir, 'transcript.jsonl'),
+    ];
+    let chosenPath = null;
+    let chosenStat = null;
+    for (const tp of transcriptCandidates) {
+      const st = safeLstat(tp);
+      if (!st) continue;
+      if (st.isSymbolicLink()) {
+        skippedSymlinks += 1;
+        continue;
+      }
+      if (!st.isFile()) continue;
+      let cur = path.dirname(tp);
+      let hasSymParent = false;
+      while (cur.startsWith(cand.sessionDir) && cur !== cand.sessionDir) {
+        const pst = safeLstat(cur);
+        if (pst && pst.isSymbolicLink()) {
+          hasSymParent = true;
+          break;
+        }
+        cur = path.dirname(cur);
+      }
+      if (hasSymParent) {
+        skippedSymlinks += 1;
+        continue;
+      }
+      chosenPath = tp;
+      chosenStat = st;
+      break;
+    }
+    if (!chosenPath || !chosenStat) continue;
+    if (chosenStat.size > MAX_SEARCH_FILE_BYTES) {
+      skippedLargeFiles += 1;
+      continue;
+    }
+    let realTranscript;
+    try {
+      realTranscript = canonicalRealpathSync(chosenPath);
+    } catch {
+      continue;
+    }
+    if (!isPathWithinBase(realTranscript, realBrainDir) || !isPathWithinBase(realTranscript, realDataDir)) {
+      skippedSymlinks += 1;
+      continue;
+    }
+
+    scannedSessions += 1;
+    let rawText;
+    try {
+      rawText = fs.readFileSync(realTranscript, 'utf8');
+    } catch {
+      continue;
+    }
+    if (!rawText.toLowerCase().includes(queryLower)) continue;
+
+    const { entries } = parseTranscriptJsonl(rawText);
+    const matches = [];
+    for (const entry of entries) {
+      if (!entry.text || !entry.text.toLowerCase().includes(queryLower)) continue;
+      totalMatches += 1;
+      if (matches.length < MAX_SEARCH_MATCHES_PER_SESSION) {
+        matches.push({
+          index: entry.index,
+          role: entry.role,
+          timestamp: entry.timestamp,
+          snippet: buildSearchSnippet(entry.text, queryLower, 160),
+        });
+      }
+    }
+    if (matches.length > 0) {
+      results.push({
+        sessionId: cand.sessionId,
+        mtimeMs: Math.round(chosenStat.mtimeMs || cand.mtimeMs || 0),
+        matchCount: matches.length,
+        matches,
+      });
+    }
+  }
+
+  return {
+    ok: true,
+    exists: true,
+    dataDir: resolvedDataDir,
+    query: cleanQuery,
+    scannedSessions,
+    skippedSymlinks,
+    skippedLargeFiles,
+    totalMatches,
+    results,
+  };
+}
+
+export function formatStorageSearchHuman(report) {
+  const lines = [
+    'agy-Sag · Read-Only Session Search (Sanitized)',
+    '==============================================',
+    `Data Dir: ${report.dataDir}`,
+    `Query:    "${report.query}" | Scanned: ${report.scannedSessions} session(s) | Matches: ${report.totalMatches}`,
+  ];
+  if (!report.results || report.results.length === 0) {
+    lines.push('ℹ No matching sanitized entries found.');
+    return lines.join('\n');
+  }
+  for (const r of report.results) {
+    lines.push('');
+    lines.push(`• Session ${r.sessionId} (${r.matches.length} snippet(s))`);
+    for (const m of r.matches) {
+      lines.push(`  [#${m.index} · ${m.role}] ${m.snippet}`);
+    }
+  }
+  return lines.join('\n');
+}
+
 export function createStorageBackup({
   dataDir = DEFAULT_DATA_DIR,
   outDir,
@@ -1111,6 +1370,7 @@ function formatUsage() {
     '  node cli/storage-doctor.mjs audit [--data-dir=<dir>] [--top=<n>] [--json]',
     '  node cli/storage-doctor.mjs backup --out=<dir> [--data-dir=<dir>] [--dry-run] [--json]',
     '  node cli/storage-doctor.mjs export --session=<id> [--data-dir=<dir>] [--format=md|json] [--out=<file>]',
+    '  node cli/storage-doctor.mjs search --q=<keyword> [--data-dir=<dir>] [--limit=<1..20>] [--json]',
   ].join('\n');
 }
 
@@ -1145,6 +1405,17 @@ async function runCli() {
       for (const w of res.warnings) console.log(`  • ${w}`);
     }
     if (!res.ok) process.exitCode = 1;
+    return;
+  }
+
+  if (opts.command === 'search') {
+    const report = searchSanitizedSessions({
+      dataDir: opts.dataDir,
+      query: opts.query,
+      limit: opts.limit,
+    });
+    if (opts.json) console.log(JSON.stringify(report, null, 2));
+    else console.log(formatStorageSearchHuman(report));
     return;
   }
 

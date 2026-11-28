@@ -132,6 +132,16 @@
       tags: ['nov', 'slash', 'handoff'],
       body: '/nov-handoff ',
     }),
+    Object.freeze({
+      id: 'nov-playbook-workflow',
+      source: 'nov',
+      titleZh: '/nov-workflow · Spec 编译为 Swarm / Workflow',
+      titleEn: '/nov-workflow · Compile Spec to Swarm / Workflow',
+      descZh: 'agy-NOV v1.1+ 原生 Playbook：将 Spec 任务图编排导出为 /run-workflow 或 /swarm 计划',
+      descEn: 'agy-NOV v1.1+ native playbook: compile Spec DAG to /run-workflow Python or /swarm plan.json',
+      tags: ['nov', 'slash', 'workflow', 'swarm'],
+      body: '/nov-workflow ',
+    }),
   ]);
 
   const BUILTIN_TEMPLATES = Object.freeze([

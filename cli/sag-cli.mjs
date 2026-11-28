@@ -37,7 +37,9 @@ import {
   createStorageBackup,
   exportSanitizedSession,
   formatStorageAuditHuman,
+  formatStorageSearchHuman,
   parseStorageArgs,
+  searchSanitizedSessions,
 } from './storage-doctor.mjs';
 import { runKeepaliveCli, runLaunchCli } from './launcher.mjs';
 import { isCliEntry } from './platform-utils.mjs';
@@ -80,7 +82,7 @@ export function formatHelpText() {
     '  presets [--json]             List essential / i18n-only / power / full-auto presets & enabled modules',
     '  i18n list [--json]           List all 10 native host UI translation locales with pack counts',
     '  i18n validate [--json]       Validate all built-in host i18n packs (exit 0 on pass, 1 on error)',
-    '  storage <cmd> [...]          Offline storage doctor: audit | backup | export (read-only & redacted)',
+    '  storage <cmd> [...]          Offline storage doctor: audit | backup | export | search (read-only & redacted)',
     '  attach [...]                 Attach agy-Sag to Antigravity CDP windows (--preset=, --lang=, --port=)',
     '  status [...]                 Inspect mounted agy-Sag state on Antigravity CDP windows',
     '  remove [...]                 Losslessly detach & clean agy-Sag from Antigravity CDP windows',
@@ -309,9 +311,20 @@ function runStorageForward(rest, out) {
         '  agy-sag storage audit [--data-dir=<dir>] [--top=<n>] [--json]',
         '  agy-sag storage backup --out=<dir> [--data-dir=<dir>] [--dry-run] [--json]',
         '  agy-sag storage export --session=<id> [--data-dir=<dir>] [--format=md|json] [--out=<file>]',
+        '  agy-sag storage search --q=<keyword> [--data-dir=<dir>] [--limit=<1..20>] [--json]',
       ].join('\n')
     );
     return { ok: true, exitCode: 0 };
+  }
+
+  if (opts.command === 'search') {
+    const report = searchSanitizedSessions({
+      dataDir: opts.dataDir,
+      query: opts.query,
+      limit: opts.limit,
+    });
+    out.stdout(opts.json ? JSON.stringify(report, null, 2) : formatStorageSearchHuman(report));
+    return { ok: true, exitCode: 0, data: report };
   }
 
   if (opts.command === 'audit') {

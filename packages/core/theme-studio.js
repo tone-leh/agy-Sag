@@ -781,7 +781,8 @@
       blocks.push(
         `${HC} body:not([data-has-browser-hole="true"]){background-color:var(--body-background,var(--background));color:var(--foreground);}` +
           `${HC} body[data-has-browser-hole="true"],${HC} [data-has-browser-hole="true"]{background-color:transparent!important;background-image:none!important;}` +
-          `${HC} aside,${HC} [data-testid="sidebar"]{background-color:var(--sidebar,var(--background));}`
+          `${HC} aside,${HC} [data-testid="sidebar"]{background-color:var(--sidebar,var(--background));}` +
+          `${HC} [data-testid="auxiliary-pane"],${HC} [data-testid="subagents-panel"],${HC} [data-testid="background-tasks-panel"],${HC} [data-testid="files-changed-panel"],${HC} [data-testid="terminal-panel"]{background-color:var(--sidebar,var(--card,var(--background)));border-color:var(--border);}`
       );
     }
 
@@ -790,7 +791,7 @@
       `${H}{--ag-sag-r-sm:${cornerSpec.sm};--ag-sag-r-md:${cornerSpec.md};--ag-sag-r-lg:${cornerSpec.lg};--ag-sag-r-bubble:${cornerSpec.bubble};--ag-sag-r-input:${cornerSpec.input};}` +
         `${H} [data-testid="user-message-bubble"]{border-radius:var(--ag-sag-r-bubble);}` +
         `${H} [data-testid="agent-input-box"]{border-radius:var(--ag-sag-r-input);}` +
-        `${H} [data-testid="conversation-view"] pre{border-radius:var(--ag-sag-r-md);}`
+        `${H} [data-testid="conversation-view"] pre,${H} [data-testid="auxiliary-pane"] pre,${H} [data-testid="terminal-panel"] pre{border-radius:var(--ag-sag-r-md);}`
     );
 
     // 3. Surface polish (Smoked Obsidian / Paper Ink / Aurora Glass / Clean)
@@ -808,6 +809,7 @@
           `${S} [data-testid="agent-input-box"]:focus-within{border-color:color-mix(in srgb,var(--primary) 54%,var(--border));box-shadow:0 0 0 2px color-mix(in srgb,var(--primary) 18%,transparent),${cardSh};}` +
           `${S} [data-testid="thinking-collapsible-trigger"]{background:transparent;border:0;border-left:2px solid color-mix(in srgb,var(--primary) 42%,transparent);padding-left:8px;color:var(--muted-foreground);}` +
           `${S} [data-testid="changed-files-card"],${S} [data-testid="artifact-view"]{border:1px solid var(--card-border,var(--border));border-radius:var(--ag-sag-r-lg);box-shadow:${cardSh};}` +
+          `${S} [data-testid="auxiliary-pane"],${S} [data-testid="terminal-panel"]{border-left:1px solid var(--card-border,var(--border));}` +
           `${S} ::selection{background-color:color-mix(in srgb,var(--primary) 26%,transparent);}`
       );
     } else if (settings.surface === 'paper' && !colorsYielded) {
@@ -827,8 +829,8 @@
 
     // Thin unobtrusive scrollbars
     blocks.push(
-      `${H} pre::-webkit-scrollbar,${H} aside::-webkit-scrollbar,${H} [data-testid="conversation-view"]::-webkit-scrollbar{width:6px;height:6px;}` +
-        `${H} pre::-webkit-scrollbar-thumb,${H} aside::-webkit-scrollbar-thumb,${H} [data-testid="conversation-view"]::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--foreground,#94a3b8) 20%,transparent);border-radius:999px;}`
+      `${H} pre::-webkit-scrollbar,${H} aside::-webkit-scrollbar,${H} [data-testid="conversation-view"]::-webkit-scrollbar,${H} [data-testid="auxiliary-pane"]::-webkit-scrollbar{width:6px;height:6px;}` +
+        `${H} pre::-webkit-scrollbar-thumb,${H} aside::-webkit-scrollbar-thumb,${H} [data-testid="conversation-view"]::-webkit-scrollbar-thumb,${H} [data-testid="auxiliary-pane"]::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--foreground,#94a3b8) 20%,transparent);border-radius:999px;}`
     );
 
     // 4. Typography: CJK + Code Font + Ligatures

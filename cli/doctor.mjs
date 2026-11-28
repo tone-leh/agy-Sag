@@ -221,6 +221,59 @@ export function inspectPrismInstall({
   };
 }
 
+export function inspectMarketplaceCompliance(repoRoot = REPO_ROOT) {
+  const ALLOWED_MANIFEST_KEYS = new Set([
+    'name',
+    'displayName',
+    'description',
+    'version',
+    'logo',
+    'author',
+    'homepage',
+    'repository',
+    'license',
+    'keywords',
+  ]);
+  const issues = [];
+  const manifestPath = path.join(repoRoot, 'plugin.json');
+  let manifest = null;
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  } catch {
+    issues.push('plugin.json missing or invalid JSON');
+  }
+  if (manifest && typeof manifest === 'object') {
+    for (const key of Object.keys(manifest)) {
+      if (!ALLOWED_MANIFEST_KEYS.has(key)) {
+        issues.push(`Unsupported plugin.json field: ${key}`);
+      }
+    }
+    if (typeof manifest.name !== 'string' || !/^[a-z0-9-]+$/.test(manifest.name)) {
+      issues.push('plugin.json name must be lowercase kebab-case');
+    }
+    if (typeof manifest.version !== 'string' || !/^\d+\.\d+\.\d+/.test(manifest.version)) {
+      issues.push('plugin.json version must be semver');
+    }
+    const desc = String(manifest.description || '');
+    if (!desc || desc.length > 160) {
+      issues.push(`plugin.json description length (${desc.length}) should be 1..160 chars`);
+    }
+    if (manifest.logo && !fs.existsSync(path.join(repoRoot, String(manifest.logo)))) {
+      issues.push(`plugin.json logo asset not found: ${manifest.logo}`);
+    }
+  }
+  const sidecarPath = path.join(repoRoot, 'sidecars', 'daemon', 'sidecar.json');
+  try {
+    const sc = JSON.parse(fs.readFileSync(sidecarPath, 'utf8'));
+    if (!sc || typeof sc.command !== 'string' || !Array.isArray(sc.args)) {
+      issues.push('sidecars/daemon/sidecar.json missing command/args');
+    }
+  } catch {
+    issues.push('sidecars/daemon/sidecar.json missing or invalid JSON');
+  }
+  return { ok: issues.length === 0, issues, version: manifest?.version || null };
+}
+
 export function inspectNovInstall({ homeDir = os.homedir(), env = process.env, explicitDataDir = null } = {}) {
   const defaultDir = path.join(homeDir, '.gemini', 'config', 'plugins', 'agy-nov');
   const state = readNovState({ homeDir, env, explicitDataDir });
@@ -260,11 +313,12 @@ export function buildRemediationHints(report, platform = process.platform) {
   }
   if (!report.cdp?.port || !report.cdp?.reachable) {
     if (platform === 'darwin') {
-      hints.push('Start Antigravity with CDP enabled: open -a Antigravity --args --remote-debugging-port=0');
+      hints.push('Start Antigravity with CDP enabled: open -a Antigravity --args --remote-debugging-port=0 (or fixed port for 2.33+: open -na Antigravity --args --remote-debugging-port=9222)');
+      hints.push('Or run the built-in launcher/keepalive: node cli/sag-cli.mjs launch --dry-run');
     } else if (platform === 'win32') {
-      hints.push('Launch Antigravity with --remote-debugging-port=0 (or enable Obsidian Prism daemon which exposes CDP automatically).');
+      hints.push('Launch Antigravity with --remote-debugging-port=0 or --remote-debugging-port=9222 (run: node cli/sag-cli.mjs launch --dry-run for exact Windows shortcut guidance).');
     } else {
-      hints.push('Launch Antigravity with --remote-debugging-port=0 and re-run: npm run doctor');
+      hints.push('Launch Antigravity with --remote-debugging-port=0 or --remote-debugging-port=9222 (add to .desktop Exec= or run: node cli/sag-cli.mjs launch --dry-run).');
     }
     hints.push('If Antigravity uses a custom port, run: npm run doctor -- --port=<PORT>');
     appendNovCompanionHint();
@@ -369,11 +423,13 @@ export async function runDoctor(options = {}) {
   const yieldedCount = windows.filter((w) => (w.probe?.sag || w.probe?.sessionGuard)?.state === 'yielded').length;
   const ok = Boolean(nodeInfo.ok && cdp.reachable && cdp.hostWindowCount > 0 && mountedCount + yieldedCount > 0);
 
+  const marketplace = options.marketplace || inspectMarketplaceCompliance(options.repoRoot || REPO_ROOT);
   const report = {
     ok,
     checkedAt: new Date().toISOString(),
     platform,
     node: nodeInfo,
+    marketplace,
     prismInstall,
     novInstall,
     cdp,
@@ -391,6 +447,13 @@ export function formatDoctorHuman(report) {
 
   const n = report.node;
   lines.push(`${n.ok ? '✔' : '✖'} Node.js: ${n.version} (WebSocket: ${n.hasWebSocket ? 'available' : 'missing'})`);
+  if (report.marketplace) {
+    lines.push(
+      report.marketplace.ok
+        ? `✔ Marketplace Manifest: plugin.json v${report.marketplace.version || '?'} + sidecar.json compliant`
+        : `⚠ Marketplace Manifest: ${report.marketplace.issues.join('; ')}`
+    );
+  }
 
   const pi = report.prismInstall?.installed;
   const pd = report.prismInstall?.devCheckout;

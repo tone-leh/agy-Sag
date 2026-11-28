@@ -9,7 +9,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : this, function (globalRoot) {
   'use strict';
 
-  const VERSION = '1.3.0';
+  const VERSION = '1.4.0';
 
   function resolveDep(globalKey, relPath) {
     if (globalRoot && globalRoot[globalKey]) return globalRoot[globalKey];
@@ -129,6 +129,8 @@
           guardBlocked: Number(novFeed?.guard?.blockedCount) || 0,
           guardForceAsk: Number(novFeed?.guard?.forceAskCount) || 0,
           verifyFailed: novFeed?.verify?.lastStatus === 'fail',
+          verifyBlocked: novFeed?.verify?.lastStatus === 'blocked',
+          healthScore: typeof novFeed?.healthSweep?.score === 'number' ? novFeed.healthSweep.score : null,
           radarAwaiting: Number(novFeed?.radar?.awaitingCount) || 0,
         },
         hostLocale: hiState?.locale || 'en',
@@ -157,10 +159,24 @@
 
       if (hostI18n) {
         syncExtPacks();
+        const prevHostLoc = hostI18n.getDebugState?.()?.locale || '';
         hostI18n.setConflictPolicy?.(nextCfg.hostI18nConflictPolicy || 'yield');
         hostI18n.setCollectMissing?.(Boolean(nextCfg.hostI18nCollectMissing));
         hostI18n.setLocale?.(nextCfg.hostI18nLocale || 'auto');
         hostI18n.setEnabled?.(Boolean(nextCfg.modules?.hostI18n));
+        // Optional dual-star 8-locale sync: when host locale changes inside agy-NOV's supported set, sync NOV too
+        const nextLoc = nextCfg.hostI18nLocale || 'auto';
+        const novAllowedLocs = novSynergyMod?.ALLOWED_NOV_LOCALES || ['auto', 'en', 'zh-CN', 'zh-TW', 'ja', 'ko', 'es', 'fr', 'de'];
+        if (
+          prevHostLoc &&
+          nextLoc !== prevHostLoc &&
+          novAllowedLocs.includes(nextLoc) &&
+          novSynergy?.isConnected?.() &&
+          typeof novSynergy.setLocale === 'function' &&
+          novSynergy.getState?.()?.config?.locale !== nextLoc
+        ) {
+          void novSynergy.setLocale(nextLoc).catch?.(() => {});
+        }
       }
 
       if (promptQueue) {
@@ -379,6 +395,17 @@
       },
     });
 
+    const requestSearchSessions = async (query) => {
+      if (typeof options.onSearchSessions === 'function') return options.onSearchSessions(query);
+      if (novSynergy && typeof novSynergy.requestRaw === 'function' && novSynergy.isBridgeAvailable?.()) {
+        try {
+          const res = await novSynergy.requestRaw('sag:search_sessions', { query, limit: 20 });
+          if (res?.ok && res?.raw?.data) return { ok: true, ...res.raw.data };
+        } catch {}
+      }
+      return { ok: false, offline: true, results: [] };
+    };
+
     bookmarkVault = vaultMod?.createBookmarkVaultController
       ? vaultMod.createBookmarkVaultController({
           win,
@@ -387,6 +414,7 @@
           coexist,
           getLang: options.getLang,
           bindShortcut: options.bindVaultShortcut,
+          onSearchSessions: requestSearchSessions,
           onVaultMutated: () => {
             outlineBookmarks?.sync?.();
             void compactGuard.evaluateNow().then(syncStatusPill);

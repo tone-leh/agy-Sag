@@ -1,7 +1,7 @@
 {
   "name": "agy-sag",
   "displayName": "agy-Sag",
-  "description": "Modular Zero-ASAR CDP deep-enhancement suite for Antigravity 2.0: 10-language native UI translation, auto /compact guard, prompt queue, draft vault, turn bookmarks, policy-gated auto-accept, optical themes, read-only quota pulse & storage doctor.",
-  "version": "1.3.0",
+  "description": "Modular Zero-ASAR CDP suite for Antigravity 2.0: 10-language UI, opt-in thought translator, auto /compact, queue, themes & storage doctor.",
+  "version": "1.4.0",
   "logo": "assets/logo.svg"
 }

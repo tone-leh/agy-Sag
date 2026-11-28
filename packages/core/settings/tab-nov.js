@@ -263,8 +263,13 @@
         if (feed.spec?.writeLockActive) {
           parts.push(isZh ? `Spec 写锁激活（队列已暂停）` : `Spec write-lock active (queue paused)`);
         }
-        if (feed.verify?.lastStatus === 'fail') {
+        if (feed.verify?.lastStatus === 'blocked') {
+          parts.push(isZh ? `Verify 门禁阻断` : `Verify gate blocked`);
+        } else if (feed.verify?.lastStatus === 'fail') {
           parts.push(isZh ? `Verify 门禁未通过` : `Verify gate failed`);
+        }
+        if (feed.healthSweep && typeof feed.healthSweep.score === 'number') {
+          parts.push(isZh ? `健康分 ${feed.healthSweep.score}` : `Health ${feed.healthSweep.score}`);
         }
         if (feed.mem?.driftedCount > 0) {
           parts.push(isZh ? `记忆漂移 ${feed.mem.driftedCount}` : `Memory drift ${feed.mem.driftedCount}`);

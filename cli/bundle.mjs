@@ -646,10 +646,10 @@ function minifyThemeCssTemplates(code) {
 
 function packExtExactLossless(exactObj) {
   const rawJson = JSON.stringify(exactObj || {});
-  // Frequency-driven lossless dictionary substitution using Private Use Area codepoints (U+E000..U+E03F).
+  // Frequency-driven lossless dictionary substitution using Private Use Area codepoints (U+E000..U+E0BF).
   // Verified round-trip identical at bundle time; falls back to plain JSON if any collision occurs.
   const freq = new Map();
-  const wordRe = /[A-Za-zА-Яа-яЁё0-9_-]{7,24}/g;
+  const wordRe = /[A-Za-zА-Яа-яЁё0-9_-]{6,28}/g;
   let m;
   while ((m = wordRe.exec(rawJson)) !== null) {
     const tok = m[0];
@@ -657,9 +657,9 @@ function packExtExactLossless(exactObj) {
   }
   const candidates = Array.from(freq.entries())
     .map(([tok, cnt]) => ({ tok, cnt, gain: (cnt - 1) * (Buffer.byteLength(tok, 'utf8') - 3) - 6 }))
-    .filter((x) => x.gain > 60)
+    .filter((x) => x.gain > 36)
     .sort((a, b) => b.gain - a.gain)
-    .slice(0, 64);
+    .slice(0, 192);
 
   let packed = rawJson;
   const dict = [];
@@ -681,6 +681,116 @@ function packExtExactLossless(exactObj) {
   return { d: dict, s: packed };
 }
 
+function parsePureString2DArray(arrSrc) {
+  const rows = [];
+  let i = 0;
+  const n = arrSrc.length;
+  const skipWs = () => { while (i < n && (arrSrc[i] === ' ' || arrSrc[i] === '\n' || arrSrc[i] === '\t' || arrSrc[i] === '\r')) i += 1; };
+  skipWs();
+  if (arrSrc[i] !== '[') return null;
+  i += 1;
+  while (i < n) {
+    skipWs();
+    if (arrSrc[i] === ']') { i += 1; return rows; }
+    if (arrSrc[i] !== '[') return null;
+    i += 1;
+    const row = [];
+    while (i < n) {
+      skipWs();
+      if (arrSrc[i] === ']') { i += 1; break; }
+      const q = arrSrc[i];
+      if (q !== "'" && q !== '"') return null;
+      i += 1;
+      let val = '';
+      while (i < n && arrSrc[i] !== q) {
+        if (arrSrc[i] === '\\' && i + 1 < n) {
+          const esc = arrSrc[i + 1];
+          val += esc === 'n' ? '\n' : esc === 'r' ? '\r' : esc === 't' ? '\t' : esc;
+          i += 2;
+        } else {
+          val += arrSrc[i];
+          i += 1;
+        }
+      }
+      if (arrSrc[i] !== q) return null;
+      i += 1;
+      row.push(val);
+      skipWs();
+      if (arrSrc[i] === ',') i += 1;
+    }
+    rows.push(row);
+    skipWs();
+    if (arrSrc[i] === ',') i += 1;
+  }
+  return null;
+}
+
+function packHostI18nExactRows(code) {
+  const marker = 'const EXACT_ROWS=';
+  const start = code.indexOf(marker);
+  if (start < 0) return code;
+  const arrStart = start + marker.length;
+  if (code[arrStart] !== '[') return code;
+  let depth = 0;
+  let quote = '';
+  let arrEnd = -1;
+  for (let i = arrStart; i < code.length; i += 1) {
+    const c = code[i];
+    if (quote) {
+      if (c === '\\') { i += 1; continue; }
+      if (c === quote) quote = '';
+      continue;
+    }
+    if (c === "'" || c === '"') { quote = c; continue; }
+    if (c === '[') depth += 1;
+    else if (c === ']') {
+      depth -= 1;
+      if (depth === 0) { arrEnd = i + 1; break; }
+    }
+  }
+  if (arrEnd < 0) return code;
+  const parsed = parsePureString2DArray(code.slice(arrStart, arrEnd));
+  if (!parsed || !parsed.length) return code;
+  // Pick two 1-byte unescaped ASCII separators guaranteed absent from parsed cells (fallback to 2-byte ¦/§)
+  const sepCandidates = ['~', '^', '`', '|', '¦', '§'];
+  const allText = parsed.map((r) => r.join('')).join('');
+  const freeSeps = sepCandidates.filter((ch) => !allText.includes(ch));
+  if (freeSeps.length < 2) return code;
+  const colSep = freeSeps[0];
+  const rowSep = freeSeps[1];
+  const flat = parsed.map((row) => row.join(colSep)).join(rowSep);
+  const freq = new Map();
+  const wordRe = /[\u4e00-\u9fff]{2,5}|[A-Za-zА-Яа-яЁёÀ-ÿ0-9_-]{5,24}/g;
+  let m;
+  while ((m = wordRe.exec(flat)) !== null) {
+    freq.set(m[0], (freq.get(m[0]) || 0) + 1);
+  }
+  const candidates = Array.from(freq.entries())
+    .map(([tok, cnt]) => ({ tok, cnt, gain: (cnt - 1) * (Buffer.byteLength(tok, 'utf8') - 3) - 6 }))
+    .filter((x) => x.gain > 16)
+    .sort((a, b) => b.gain - a.gain)
+    .slice(0, 224);
+  let packed = flat;
+  const dict = [];
+  for (const { tok } of candidates) {
+    const ch = String.fromCharCode(0xe000 + dict.length);
+    if (flat.includes(ch)) continue;
+    const parts = packed.split(tok);
+    if (parts.length > 3 && (parts.length - 1) * (Buffer.byteLength(tok, 'utf8') - 3) > Buffer.byteLength(tok, 'utf8') + 10) {
+      packed = parts.join(ch);
+      dict.push(tok);
+    }
+  }
+  let check = packed;
+  for (let i = dict.length - 1; i >= 0; i -= 1) {
+    check = check.split(String.fromCharCode(0xe000 + i)).join(dict[i]);
+  }
+  if (check !== flat) return code;
+  const replacement = `(()=>{const _d=${JSON.stringify(dict)};let _s=${JSON.stringify(packed)};for(let i=_d.length-1;i>=0;i--)_s=_s.split(String.fromCharCode(0xe000+i)).join(_d[i]);return _s.split(${JSON.stringify(rowSep)}).map(r=>r.split(${JSON.stringify(colSep)}));})()`;
+  if (Buffer.byteLength(replacement, 'utf8') >= Buffer.byteLength(code.slice(arrStart, arrEnd), 'utf8')) return code;
+  return code.slice(0, arrStart) + replacement + code.slice(arrEnd);
+}
+
 function compactCorePart(part) {
   let code = compactCoreSource(part.code);
   if (part.file === 'styles.js') {
@@ -697,6 +807,8 @@ function compactCorePart(part) {
     });
   } else if (part.file === 'theme-studio.js') {
     code = minifyThemeCssTemplates(code);
+  } else if (part.file === 'host-i18n-packs.js') {
+    code = packHostI18nExactRows(code);
   }
   return code;
 }
@@ -791,6 +903,6 @@ export function buildInjectExpression(config = null, opts = {}) {
     ...(bootCfg ? { config: bootCfg } : {}),
   });
   if (api) api.__agSgHash = targetHash;
-  return { ok: Boolean(api), yielded: Boolean(api?.yielded), codeHash: targetHash, brand: 'agy-Sag', version: api?.version || '1.3.0' };
+  return { ok: Boolean(api), yielded: Boolean(api?.yielded), codeHash: targetHash, brand: 'agy-Sag', version: api?.version || '1.4.0' };
 })()`;
 }

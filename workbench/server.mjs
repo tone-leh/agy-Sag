@@ -915,6 +915,27 @@ ${coreScript}
       if (type === 'sag:translate_text') {
         return { ok: true, reqId, data: { translated: '[译] ' + String(payload.text || '').slice(0, 240), engine: payload.engine || 'mt', cached: false } };
       }
+      if (type === 'sag:search_sessions') {
+        const q = String(payload?.query || '').trim().toLowerCase();
+        const hits = [];
+        if (q) {
+          for (const [cid, s] of Object.entries(SIM_SESSIONS)) {
+            const matches = [];
+            (s.turns || []).forEach((t, idx) => {
+              const txt = String(t.u || '') + ' ' + String(t.a || '');
+              if (txt.toLowerCase().includes(q)) {
+                matches.push({ index: idx + 1, role: 'turn', timestamp: null, snippet: txt.slice(0, 140) });
+              }
+            });
+            if (matches.length) hits.push({ sessionId: cid, mtimeMs: Date.now(), matchCount: matches.length, matches });
+          }
+        }
+        return {
+          ok: true,
+          reqId,
+          data: { ok: true, query: q, scannedSessions: Object.keys(SIM_SESSIONS).length, totalMatches: hits.length, results: hits },
+        };
+      }
       if (type === 'sag:nov_feed') {
         return {
           ok: true,
